@@ -1,0 +1,31 @@
+#!/bin/sh
+# Installed by kornode (UpstreamService). openconnect calls this script on
+# every upstream tunnel event. ALL egress via the tunnel is controlled by
+# kornode's own fwmark policy routing and nftables rules (routing.mode is
+# always full or split), so whatever the upstream server pushes (default
+# route, split routes, DNS) must NOT be applied to this namespace's routing
+# table or resolv.conf -- with network_mode: host that would hijack the host
+# itself. This script only configures the tunnel interface, then hands the
+# event to `korctl upstream hook`, which merely stores the pushed routes and
+# split-DNS domains (CISCO_SPLIT_INC_*, CISCO_SPLIT_DNS) for profiles with
+# accept_server_routes -- kornode applies them through its own nftables
+# sets, never through this namespace's main routing table.
+
+case "${reason:-}" in
+  connect | reconnect)
+    ip link set "$TUNDEV" up mtu "${INTERNAL_IP4_MTU:-1400}"
+    if [ -n "${INTERNAL_IP4_ADDRESS:-}" ]; then
+      ip addr replace "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"
+    fi
+    if [ -n "${INTERNAL_IP6_ADDRESS:-}" ]; then
+      ip -6 addr replace "$INTERNAL_IP6_ADDRESS/128" dev "$TUNDEV" || true
+    fi
+    ;;
+  disconnect)
+    ip link set "$TUNDEV" down 2>/dev/null || true
+    ;;
+esac
+
+korctl_bin="$(command -v korctl || echo /usr/local/bin/korctl)"
+"$korctl_bin" upstream hook "${reason:-unknown}" >/dev/null 2>&1 || true
+exit 0

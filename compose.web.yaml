@@ -1,0 +1,8 @@
+services:
+  kornode:
+    environment:
+      KORNODE_WEB__ENABLED: "true"
+      KORNODE_WEB__LISTEN: 127.0.0.1
+      KORNODE_WEB__PORT: "8443"
+      KORNODE_WEB__TLS: "true"
+      KORNODE_WEB__ADMIN_PASSWORD: ${KORNODE_ADMIN_PASSWORD:-change-me}

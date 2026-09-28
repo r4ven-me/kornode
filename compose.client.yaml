@@ -1,0 +1,10 @@
+services:
+  kornode:
+    volumes:
+      # routing.host_dns: resolv_conf (see examples/config.client.yaml)
+      # rewrites this file in place and restores it on shutdown.
+      - /etc/resolv.conf:/host/etc/resolv.conf
+      # For routing.host_dns: resolved instead, comment out the mount above
+      # and use this one -- then run `systemctl restart systemd-resolved` on
+      # the host once, since resolved only reads new drop-ins on (re)start.
+      # - /etc/systemd/resolved.conf.d:/host/resolved.conf.d

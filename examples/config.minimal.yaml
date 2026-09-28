@@ -1,0 +1,51 @@
+system:
+  timezone: Europe/Moscow
+  data_dir: /var/lib/kornode
+  log_dir: /var/log/kornode
+  log_level: info
+
+server:
+  enabled: true
+  listen: 0.0.0.0
+  port: 443
+  udp_enabled: true
+  device: vpns
+  cn: vpn.example.com
+  ipv4_network: 10.10.10.0/24
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
+  camouflage:
+    enabled: false
+
+certificates:
+  mode: auto
+  ca_name: Korvus Node CA
+  server_cert: null
+  server_key: null
+  ca_cert: null
+
+auth:
+  password:
+    enabled: true
+  certificate:
+    enabled: false
+  otp:
+    enabled: false
+    ocserv_oath_auth: false
+
+routing:
+  main_interface: auto
+
+upstream:
+  enabled: false
+
+web:
+  enabled: false
+  listen: 127.0.0.1
+  port: 8443
+  tls: true
+  allow_insecure_http: false
+
+cli:
+  enabled: true

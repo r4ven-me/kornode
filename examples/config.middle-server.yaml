@@ -1,0 +1,113 @@
+system:
+  timezone: Europe/Moscow
+  data_dir: /var/lib/kornode
+  log_dir: /var/log/kornode
+  generated_dir: /var/lib/kornode/generated
+  secrets_dir: /var/lib/kornode/secrets
+  log_level: info
+  project_name: kornode
+
+server:
+  enabled: true
+  listen: 0.0.0.0
+  port: 443
+  udp_enabled: true
+  device: vpns
+  cn: vpn.example.com
+  realm: Korvus Node
+  ipv4_network: 10.10.10.0/24
+  dns:
+    - 10.10.10.1
+    - 1.1.1.1
+  search_domains:
+    - corp.example.com
+  max_clients: 128
+  max_same_clients: 2
+  keepalive: 32400
+  compression: false
+  cisco_client_compat: true
+  camouflage:
+    enabled: true
+    secret: secretWord
+    realm: Hidden service
+
+certificates:
+  mode: auto
+  ca_name: Korvus Node CA
+  server_cert: null
+  server_key: null
+  ca_cert: null
+
+auth:
+  password:
+    enabled: true
+  certificate:
+    enabled: true
+  otp:
+    enabled: true
+    ocserv_oath_auth: false
+    issuer: Korvus Node
+
+upstream:
+  enabled: true
+  interface: oc-middle0
+  active_profile: private-main
+  check_interval: 5
+  check_threshold: 3
+  check_settle_seconds: 15
+  failover: true
+  profiles:
+    - name: private-main
+      server: private.example.com
+      port: "443"
+      # Only if the upstream ocserv itself has camouflage enabled; appended
+      # as "/?secret" after host:port, same as server.camouflage.secret on
+      # this server's own side. Optional -- omit for a plain upstream.
+      camouflage_secret: "${SECRET:PRIVATE_MAIN_CAMOUFLAGE_SECRET}"
+      auth_type: password
+      username: middle-user
+      password: "${SECRET:PRIVATE_MAIN_PASSWORD}"
+      trusted_cert: false
+      server_cert_pin: ""
+      check_host: 10.11.11.1
+
+routing:
+  mode: split
+  # The middle server's own traffic also follows the split routes/domain
+  # masks (marked in the nftables output hook), so the host reaches the
+  # private networks without connecting to its own ocserv as a client.
+  # host_mode is independent of the client-facing mode above.
+  host_traffic: true
+  host_mode: split
+  main_interface: auto
+  fwmark: "0x0c01"
+  table_id: 1201
+  nft_prefix: kornode
+  split:
+    tunnel_dns: true
+    routes_file: /var/lib/kornode/routes.txt
+    domains_file: /var/lib/kornode/domains.txt
+    routes:
+      - 192.168.25.0/24
+      - 10.20.0.0/16
+    domains:
+      - corp.example.com
+
+internal_dns:
+  listen: 10.10.10.1
+  port: 53
+
+web:
+  enabled: false
+  listen: 127.0.0.1
+  port: 8443
+  tls: true
+  allow_insecure_http: false
+  admin_user: admin
+  admin_password: null
+
+cli:
+  enabled: true
+
+advanced:
+  raw_ocserv_options: []

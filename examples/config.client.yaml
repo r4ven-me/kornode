@@ -1,0 +1,65 @@
+system:
+  timezone: Europe/Moscow
+  data_dir: /var/lib/kornode
+  log_dir: /var/log/kornode
+  generated_dir: /var/lib/kornode/generated
+  secrets_dir: /var/lib/kornode/secrets
+  log_level: info
+  project_name: kornode
+
+# No VPN server on this box -- kornode only dials out. No `auth:`/
+# `certificates:` section either: nothing to authenticate against or issue
+# certificates for without ocserv running.
+server:
+  enabled: false
+
+upstream:
+  enabled: true
+  interface: oc-office0
+  active_profile: office
+  check_interval: 5
+  check_threshold: 3
+  check_settle_seconds: 15
+  failover: false
+  profiles:
+    - name: office
+      server: vpn.example.com
+      port: "443"
+      auth_type: password
+      username: office-client
+      password: "${SECRET:OFFICE_PASSWORD}"
+      check_host: 10.11.11.1
+      # Route THIS host's own traffic (not VPN clients -- there aren't any)
+      # through the tunnel for these routes/domains, independent of the
+      # global routing.host_traffic/host_mode below.
+      route_host_enabled: true
+      host_routes:
+        - 10.60.0.0/16
+      host_domains:
+        - internal.example.com
+      # Add whatever the upstream pushes at connect time (route=/split-dns=)
+      # on top of host_routes/host_domains above. Pushed domains resolve
+      # through the upstream's own DNS, not the host's normal resolvers.
+      accept_server_routes: true
+      # Refresh the pushed lists on the live tunnel without reconnecting by
+      # polling the upstream panel's own GET /api/client/routing. Point this
+      # at the upstream reachable *through the tunnel*, e.g. its VPN address.
+      sync_url: https://10.10.10.1:8443
+      sync_interval: 60
+      # The upstream panel usually runs on its own private-CA certificate;
+      # verification is opt-in since the request already travels inside
+      # this profile's authenticated tunnel.
+      sync_verify_tls: false
+
+routing:
+  # Point this host's own resolver at the built-in dnsmasq, so
+  # host_domains/the server-pushed split-DNS domains above actually apply to
+  # lookups this host makes -- not just the container's own. Needs the extra
+  # bind mount in compose.client.yaml. See "Host DNS" in README.md.
+  host_dns: resolv_conf
+
+cli:
+  enabled: true
+
+advanced:
+  raw_ocserv_options: []

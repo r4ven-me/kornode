@@ -1,0 +1,214 @@
+system:
+  timezone: Europe/Moscow
+  data_dir: /var/lib/kornode
+  log_dir: /var/log/kornode
+  generated_dir: /var/lib/kornode/generated
+  secrets_dir: /var/lib/kornode/secrets
+  log_level: info
+  project_name: kornode
+  # Rotate files under log_dir by size and/or age (0 disables a trigger).
+  log_rotation:
+    enabled: false
+    max_size_mb: 50
+    max_age: 0
+    max_age_unit: days # hours | days | weeks | months
+    keep_files: 5
+
+server:
+  enabled: true
+  listen: 0.0.0.0
+  port: 443
+  udp_enabled: true
+  device: vpns
+  cn: vpn.example.com
+  realm: Korvus Node
+  ipv4_network: 10.10.10.0/24
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
+  search_domains:
+    - corp.example.com
+  routes: []
+  no_routes: []
+  max_clients: 128
+  max_same_clients: 2
+  keepalive: 32400
+  dpd: 90
+  mobile_dpd: 1800
+  compression: false
+  cisco_client_compat: true
+  isolate_workers: true
+  try_mtu_discovery: true
+  predictable_ips: true
+  deny_roaming: false
+  ping_leases: false
+  dtls_legacy: true
+  client_bypass_protocol: false
+  rate_limit_ms: 200
+  server_stats_reset_time: 604800
+  switch_to_tcp_timeout: 25
+  auth_timeout: 240
+  cookie_timeout: 600
+  ban_time: 300
+  max_ban_score: 80
+  ban_reset_time: 1200
+  rekey_time: 172800
+  rekey_method: ssl # ssl | new-tunnel
+  # Which certificate field ocserv reads the client username from when
+  # auth.certificate is enabled. Changing this requires re-issuing user
+  # certificates that carry the new field (user certs are generated with
+  # cn = <username>, i.e. OID 2.5.4.3, by default).
+  cert_user_oid: 2.5.4.3
+  # GnuTLS priority string overriding ocserv's compiled-in TLS defaults, e.g.
+  # NORMAL:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1
+  tls_priorities: null
+  # Maps to ocserv's "log-level" directive: 0-1 log basic errors only, 2 adds
+  # per-user connect/disconnect/auth events to ocserv.log, 3+ gets noisier
+  # (debug info, then low-level TLS handshake internals).
+  debug_level: 2
+  camouflage:
+    enabled: false
+
+certificates:
+  mode: auto
+  ca_name: Korvus Node CA
+  server_cert: null
+  server_key: null
+  ca_cert: null
+  letsencrypt:
+    enabled: false
+    email: null
+    domains: []
+    renew_reload: true
+    auto_renew_enabled: true
+    auto_renew_interval: 7
+    auto_renew_interval_unit: days # hours | days | weeks | months
+    # Address/port certbot binds to for the HTTP-01 challenge. Leave http01_address
+    # null to follow server.listen automatically; http01_port defaults to 80.
+    http01_address: null
+    http01_port: 80
+
+auth:
+  password:
+    enabled: true
+  certificate:
+    enabled: false
+  otp:
+    enabled: false
+    ocserv_oath_auth: false
+    issuer: Korvus Node
+    send_by_email: false
+    send_by_telegram: false
+    smtp_host: null
+    smtp_port: 587
+    smtp_username: null
+    smtp_password: null
+    smtp_from: null
+    smtp_starttls: true
+    smtp_test_recipient: null
+    telegram_bot_token: null
+    telegram_chat_id: null
+  oidc:
+    enabled: false
+    connector: pam
+    pam:
+      service: ocserv
+      gid_min: 1000
+    radius:
+      config_file: /etc/radiusclient/radiusclient.conf
+      groupconfig: true
+      nas_identifier: null
+      group_separator: semicolon
+
+identity:
+  config_per_group_dir: /var/lib/kornode/generated/config-per-group
+  config_per_user_dir: /var/lib/kornode/generated/config-per-user
+  default_group_config: null
+  select_group_by_url: false
+  default_select_group: null
+  oidc_providers: []
+  group_policies: []
+
+upstream:
+  enabled: false
+  interface: oc-middle0
+  active_profile: null
+  check_interval: 5
+  check_threshold: 3
+  check_settle_seconds: 15
+  failover: false
+  profiles: []
+
+routing:
+  mode: full
+  # Route the server host's own traffic through Upstream too, independent
+  # of the client-facing mode above (full: all host traffic; split: only
+  # the routes/domains below).
+  host_traffic: false
+  host_mode: full
+  main_interface: auto
+  fwmark: "0x0c01"
+  table_id: 1201
+  nft_prefix: kornode
+  split:
+    tunnel_dns: false
+    routes_file: /var/lib/kornode/routes.txt
+    domains_file: /var/lib/kornode/domains.txt
+    routes: []
+    domains: []
+
+# Internal DNS features use the project-owned dnsmasq instance at listen:port.
+# Any enabled feature makes dnsmasq active and causes VPN clients to use it;
+# upstream resolvers are taken from server.dns.
+internal_dns:
+  resolver_enabled: false
+  listen: 10.10.10.1
+  port: 53
+  blocklist_enabled: false
+  local_records_enabled: false
+  # Optional forwarding for selected domain zones. Clients still use this
+  # resolver; the shared upstream list applies to every domain below.
+  public_upstreams: []
+  public_domains: []
+  # Example:
+  # public_upstreams: [1.1.1.1, 8.8.8.8]
+  # public_domains: [github.com]
+  # Inline list of blocked domains.
+  blocklist_domains: []
+  # Local text files with blocked domains (hosts or plain-domain format).
+  blocklist_files: []
+  # HTTP(S) URLs of blocklists (e.g. StevenBlack hosts, HaGeZi).
+  # Downloads are validated and cached per URL; refresh with
+  # `korctl internal-dns refresh --url <url>`.
+  blocklist_urls: []
+  cache_size: 150
+  log_queries: false
+  # Entries use "hostname IP" format and are applied only when
+  # local_records_enabled is true.
+  local_records: []
+
+web:
+  enabled: false
+  listen: 127.0.0.1
+  port: 8443
+  tls: true
+  tls_cert: null
+  tls_key: null
+  allow_insecure_http: false
+  trusted_proxies: []
+  admin_user: admin
+  admin_password: null
+  admin_password_hash: null
+  terminal_enabled: false
+  terminal_idle_timeout: 900
+  terminal_max_sessions: 2
+  session_lifetime: 43200
+  session_cookie_secure: true
+  admin_totp_enabled: false
+  admin_totp_secret: null
+
+cli:
+  enabled: true
+
+advanced:
+  raw_ocserv_options: []

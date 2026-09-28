@@ -1,0 +1,248 @@
+system:
+  timezone: Europe/Moscow
+  data_dir: /var/lib/kornode
+  log_dir: /var/log/kornode
+  generated_dir: /var/lib/kornode/generated
+  secrets_dir: /var/lib/kornode/secrets
+  log_level: info # debug | info | warning | error
+  project_name: kornode
+  log_rotation:
+    enabled: false
+    max_size_mb: 50
+    max_age: 0
+    max_age_unit: days # hours | days | weeks | months
+    keep_files: 5
+
+server:
+  enabled: true
+  listen: 0.0.0.0
+  port: 443
+  udp_enabled: true
+  device: vpns
+  cn: vpn.example.com
+  realm: Korvus Node
+  ipv4_network: 10.10.10.0/24
+  dns:
+    - 10.10.10.1
+    - 1.1.1.1
+  search_domains:
+    - corp.example.com
+  routes:
+    - 192.168.25.0/24
+  no_routes: []
+  max_clients: 128
+  max_same_clients: 2
+  keepalive: 32400
+  dpd: 90
+  mobile_dpd: 1800
+  compression: false
+  cisco_client_compat: true
+  isolate_workers: true
+  try_mtu_discovery: true
+  predictable_ips: true
+  deny_roaming: false
+  ping_leases: false
+  dtls_legacy: true
+  client_bypass_protocol: false
+  rate_limit_ms: 200
+  server_stats_reset_time: 604800
+  switch_to_tcp_timeout: 25
+  auth_timeout: 240
+  cookie_timeout: 600
+  ban_time: 300
+  max_ban_score: 80
+  ban_reset_time: 1200
+  rekey_time: 172800
+  rekey_method: ssl
+  cert_user_oid: 2.5.4.3
+  tls_priorities: null
+  debug_level: 2
+  connect_script: null
+  disconnect_script: null
+  camouflage:
+    enabled: true
+    secret: secretWord
+    realm: Hidden service
+
+certificates:
+  mode: auto # auto | external
+  ca_name: Example Internal CA
+  server_cert: null
+  server_key: null
+  ca_cert: null
+  letsencrypt:
+    enabled: false
+    email: admin@example.com
+    domains:
+      - vpn.example.com
+    renew_reload: true
+    auto_renew_enabled: true
+    auto_renew_interval: 7
+    auto_renew_interval_unit: days # hours | days | weeks | months
+    http01_address: null
+    http01_port: 80
+
+auth:
+  password:
+    enabled: true
+  certificate:
+    enabled: true
+  otp:
+    enabled: true
+    ocserv_oath_auth: false
+    issuer: Korvus Node
+    send_by_email: false
+    send_by_telegram: false
+  # Experimental: the OIDC/PAM-RADIUS auth bridge hasn't been verified against
+  # a real IdP in production. See README's "OIDC / Identity" before relying on it.
+  oidc:
+    enabled: true
+    connector: pam # pam | radius
+    pam:
+      service: ocserv-oidc
+      gid_min: 1000
+    radius:
+      config_file: /etc/radiusclient/radiusclient.conf
+      groupconfig: true
+      nas_identifier: kornode
+      group_separator: semicolon # semicolon | comma
+
+identity:
+  config_per_group_dir: /var/lib/kornode/generated/config-per-group
+  config_per_user_dir: null
+  default_group_config: null
+  select_group_by_url: true
+  default_select_group: devops
+  # Same experimental status as auth.oidc above.
+  oidc_providers:
+    - name: keycloak
+      issuer_url: https://sso.example.com/realms/vpn
+      client_id: kornode-vpn
+      client_secret: "${SECRET:OIDC_CLIENT_SECRET}"
+      scopes:
+        - openid
+        - profile
+        - email
+      username_claim: preferred_username
+      groups_claim: groups
+      allowed_groups:
+        - devops
+        - finance
+  group_policies:
+    - name: devops
+      display_name: DevOps
+      routes:
+        - 10.20.0.0/16
+      dns:
+        - 10.10.10.1
+      split_dns:
+        - corp.example.com
+      max_same_clients: 4
+    - name: finance
+      display_name: Finance
+      routes:
+        - 10.30.0.0/16
+      no_routes:
+        - 10.20.99.0/24
+      session_timeout: 28800
+
+upstream:
+  enabled: true
+  interface: oc-middle0
+  check_interval: 5
+  check_threshold: 3
+  check_settle_seconds: 15
+  failover: true
+  profiles:
+    - name: private-main
+      server: private.example.com
+      port: "443"
+      # Only if the upstream ocserv itself has camouflage enabled; appended
+      # as "/?secret" after host:port, same as server.camouflage.secret on
+      # this server's own side. Optional -- omit for a plain upstream.
+      camouflage_secret: "${SECRET:PRIVATE_MAIN_CAMOUFLAGE_SECRET}"
+      auth_type: p12 # password | cert | p12
+      # The upstream's certificate isn't CA-signed (another Korvus Node with
+      # its own CA), so pin it -- see "Trusting the upstream certificate".
+      server_cert_pin: "pin-sha256:<pin shown by the upstream>"
+      cert_file: /var/lib/kornode/secrets/private-main.p12
+      # Alternative to cert_file/key_file: paste the file itself, Base64-encoded,
+      # so it never has to exist on disk outside kornode's own secrets_dir:
+      # cert_file_base64: "${SECRET:PRIVATE_MAIN_P12_BASE64}"
+      cert_pass: "${SECRET:PRIVATE_MAIN_P12_PASSWORD}"
+      check_host: 10.11.11.1
+    - name: private-backup
+      server: backup.example.com
+      port: "443"
+      auth_type: password
+      username: middle-user
+      password: "${SECRET:PRIVATE_BACKUP_PASSWORD}"
+      trusted_cert: false
+      server_cert_pin: ""
+      check_host: 10.12.12.1
+
+routing:
+  mode: split # full | split
+  host_traffic: false
+  host_mode: full # full | split -- independent of the client-facing mode above
+  main_interface: auto
+  fwmark: "0x0c01"
+  table_id: 1201
+  nft_prefix: kornode
+  split:
+    tunnel_dns: true
+    routes_file: /var/lib/kornode/routes.txt
+    domains_file: /var/lib/kornode/domains.txt
+    routes:
+      - 192.168.25.0/24
+      - 10.20.0.0/16
+    domains:
+      - example.com
+      - corp.example.com
+
+internal_dns:
+  resolver_enabled: true
+  listen: 10.10.10.1
+  port: 53
+  blocklist_enabled: true
+  local_records_enabled: true
+  blocklist_domains:
+    - ads.example.com
+    - tracker.example.net
+  blocklist_files:
+    - /var/lib/kornode/blocklist.txt
+  blocklist_urls:
+    - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+    - https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt
+  cache_size: 150
+  log_queries: false
+  local_records:
+    - "nas.corp.local 10.11.11.5"
+
+web:
+  enabled: false
+  listen: 127.0.0.1
+  port: 8443
+  tls: true
+  tls_cert: null
+  tls_key: null
+  allow_insecure_http: false
+  trusted_proxies: []
+  admin_user: admin
+  admin_password: null
+  admin_password_hash: "${SECRET:KORNODE_ADMIN_PASSWORD_HASH}"
+  static_dir: /usr/share/kornode/frontend # container-internal, rarely changed
+  terminal_enabled: false
+  terminal_idle_timeout: 900
+  terminal_max_sessions: 2
+  session_lifetime: 43200
+  session_cookie_secure: true
+  admin_totp_enabled: false
+  admin_totp_secret: null
+
+cli:
+  enabled: true
+
+advanced:
+  raw_ocserv_options:
+    auth-timeout: 240

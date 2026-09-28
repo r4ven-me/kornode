@@ -1,0 +1,26 @@
+name: kornode
+
+services:
+  kornode:
+    build:
+      context: .
+    image: kornode:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      KORNODE_CONFIG: /etc/kornode/config.yaml
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: host
+    devices:
+      - /dev/net/tun:/dev/net/tun
+      # Optional accelerated TUN path for openconnect. Docker refuses to start
+      # the container if a listed device is missing on the host, so enable it
+      # only when /dev/vhost-net exists (`modprobe vhost_net`).
+      # - /dev/vhost-net:/dev/vhost-net
+    volumes:
+      - ./config:/etc/kornode
+      - ./data:/var/lib/kornode
+      - ./logs:/var/log/kornode
