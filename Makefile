@@ -5,10 +5,11 @@ NPM ?= npm
 DOCKER ?= docker
 GIT ?= git
 VERSION ?= $(shell $(PYTHON) -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+TAG ?= v$(VERSION)
 IMAGE ?= kornode
 REMOTE_IMAGE ?= r4venme/kornode
 GHCR_IMAGE ?= ghcr.io/r4ven-me/kornode
-MSG ?= Release v$(VERSION)
+MSG ?= Release $(TAG)
 
 help:
 	@printf '%s\n' 'Targets: install test lint typecheck check render docker-build git-tag docker-tag docker-push docker-release docker-test docker-cli-check frontend-install frontend-build frontend-test frontend-e2e frontend-audit release'
@@ -35,28 +36,28 @@ docker-build:
 	$(DOCKER) build -t $(IMAGE):latest .
 
 git-tag:
-	@if $(GIT) rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
-		echo "Tag v$(VERSION) already exists locally, recreating it"; \
-		$(GIT) tag -d "v$(VERSION)"; \
+	@if $(GIT) rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+		echo "Tag $(TAG) already exists locally, recreating it"; \
+		$(GIT) tag -d "$(TAG)"; \
 	fi
-	@if $(GIT) ls-remote --exit-code --tags origin "refs/tags/v$(VERSION)" >/dev/null 2>&1; then \
-		echo "Tag v$(VERSION) already exists on origin, deleting it there too"; \
-		$(GIT) push origin ":refs/tags/v$(VERSION)"; \
+	@if $(GIT) ls-remote --exit-code --tags origin "refs/tags/$(TAG)" >/dev/null 2>&1; then \
+		echo "Tag $(TAG) already exists on origin, deleting it there too"; \
+		$(GIT) push origin ":refs/tags/$(TAG)"; \
 	fi
-	$(GIT) tag "v$(VERSION)"
-	$(GIT) push origin "v$(VERSION)"
+	$(GIT) tag "$(TAG)"
+	$(GIT) push origin "$(TAG)"
 
 docker-tag:
 	$(DOCKER) tag $(IMAGE):latest $(REMOTE_IMAGE):latest
-	$(DOCKER) tag $(IMAGE):latest $(REMOTE_IMAGE):v$(VERSION)
+	$(DOCKER) tag $(IMAGE):latest $(REMOTE_IMAGE):$(TAG)
 	$(DOCKER) tag $(IMAGE):latest $(GHCR_IMAGE):latest
-	$(DOCKER) tag $(IMAGE):latest $(GHCR_IMAGE):v$(VERSION)
+	$(DOCKER) tag $(IMAGE):latest $(GHCR_IMAGE):$(TAG)
 
 docker-push:
 	$(DOCKER) push $(REMOTE_IMAGE):latest
-	$(DOCKER) push $(REMOTE_IMAGE):v$(VERSION)
+	$(DOCKER) push $(REMOTE_IMAGE):$(TAG)
 	$(DOCKER) push $(GHCR_IMAGE):latest
-	$(DOCKER) push $(GHCR_IMAGE):v$(VERSION)
+	$(DOCKER) push $(GHCR_IMAGE):$(TAG)
 
 docker-release: docker-build docker-tag docker-push
 
