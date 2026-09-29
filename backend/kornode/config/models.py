@@ -818,8 +818,8 @@ class InternalDnsConfig(StrictModel):
     cache_size: int = Field(default=150, ge=0, le=10000)
     log_queries: bool = False
     local_records: list[str] = Field(default_factory=list)
-    public_upstreams: list[str] = Field(default_factory=list)
-    public_domains: list[str] = Field(default_factory=list)
+    forward_upstreams: list[str] = Field(default_factory=list)
+    forward_domains: list[str] = Field(default_factory=list)
 
     @field_validator("listen")
     @classmethod
@@ -846,21 +846,21 @@ class InternalDnsConfig(StrictModel):
     def validate_local_records(cls, value: list[str]) -> list[str]:
         return [_validate_local_record(item) for item in value]
 
-    @field_validator("public_upstreams")
+    @field_validator("forward_upstreams")
     @classmethod
-    def validate_public_upstreams(cls, value: list[str]) -> list[str]:
+    def validate_forward_upstreams(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(_validate_ip(resolver) for resolver in value))
 
-    @field_validator("public_domains")
+    @field_validator("forward_domains")
     @classmethod
-    def validate_public_domains(cls, value: list[str]) -> list[str]:
+    def validate_forward_domains(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(_validate_domain(domain).lower() for domain in value))
 
     @model_validator(mode="after")
-    def validate_public_forwarding(self) -> InternalDnsConfig:
-        if bool(self.public_upstreams) != bool(self.public_domains):
+    def validate_forward_pairing(self) -> InternalDnsConfig:
+        if bool(self.forward_upstreams) != bool(self.forward_domains):
             raise ValueError(
-                "internal_dns.public_upstreams and internal_dns.public_domains "
+                "internal_dns.forward_upstreams and internal_dns.forward_domains "
                 "must either both be configured or both be empty"
             )
         return self

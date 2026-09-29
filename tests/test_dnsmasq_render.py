@@ -87,8 +87,8 @@ def test_dnsmasq_render_domain_upstream_overrides_split_dns_server(tmp_path: Pat
                 "split": {"tunnel_dns": True, "domains": ["github.com"]},
             },
             "internal_dns": {
-                "public_upstreams": ["1.1.1.1", "8.8.8.8"],
-                "public_domains": ["GitHub.COM."],
+                "forward_upstreams": ["1.1.1.1", "8.8.8.8"],
+                "forward_domains": ["GitHub.COM."],
             },
         },
         environ={},

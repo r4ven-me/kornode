@@ -139,8 +139,8 @@ test("DNS Save persists one atomic draft and applies it", async ({ page }) => {
     blocklist_enabled: true,
     local_records_enabled: true,
     server_dns: ["9.9.9.9", "1.1.1.1"],
-    public_upstreams: ["1.1.1.1", "8.8.8.8"],
-    public_domains: ["example.com", "example.net"]
+    forward_upstreams: ["1.1.1.1", "8.8.8.8"],
+    forward_domains: ["example.com", "example.net"]
   });
   await expect.poll(() => mutations.some((entry) => entry.path === "/api/internal-dns/apply"))
     .toBe(false);

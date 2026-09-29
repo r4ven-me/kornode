@@ -36,8 +36,8 @@ class DnsmasqConfigRenderer(TemplateRenderer):
             if config.internal_dns.local_records_enabled
             else []
         )
-        public_upstreams = config.internal_dns.public_upstreams
-        public_domains = config.internal_dns.public_domains
+        forward_upstreams = config.internal_dns.forward_upstreams
+        forward_domains = config.internal_dns.forward_domains
         routing_service = RoutingService(config)
         # Named per-profile targets: resolved via the normal upstream DNS
         # (no server=/domain/... override, unlike split_dns_active below --
@@ -72,9 +72,9 @@ class DnsmasqConfigRenderer(TemplateRenderer):
             "split_v6_set": "split_v6_dynamic",
             "split_dns_active": split_dns_active,
             "split_domains": routing_service.list_domains() if split_dns_active else [],
-            "public_upstreams": public_upstreams,
-            "public_domains": public_domains,
-            "public_domain_names": set(public_domains),
+            "forward_upstreams": forward_upstreams,
+            "forward_domains": forward_domains,
+            "forward_domain_names": set(forward_domains),
             "named_targets_with_domains": named_targets_with_domains,
             "named_targets_with_host_domains": named_targets_with_host_domains,
             "host_split_domains": (

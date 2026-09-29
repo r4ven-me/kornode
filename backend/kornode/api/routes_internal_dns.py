@@ -29,8 +29,8 @@ class InternalDnsSettingsRequest(BaseModel):
     cache_size: int = Field(default=150, ge=0, le=10000)
     log_queries: bool = False
     local_records: list[str] = Field(default_factory=list)
-    public_upstreams: list[str] = Field(default_factory=list)
-    public_domains: list[str] = Field(default_factory=list)
+    forward_upstreams: list[str] = Field(default_factory=list)
+    forward_domains: list[str] = Field(default_factory=list)
 
 
 class BlocklistRefreshRequest(BaseModel):
@@ -80,8 +80,8 @@ def save_internal_dns_settings(
             "cache_size": payload.cache_size,
             "log_queries": payload.log_queries,
             "local_records": payload.local_records,
-            "public_upstreams": payload.public_upstreams,
-            "public_domains": payload.public_domains,
+            "forward_upstreams": payload.forward_upstreams,
+            "forward_domains": payload.forward_domains,
         },
     }
     loaded_config, written = apply_config_patch(request, patch)

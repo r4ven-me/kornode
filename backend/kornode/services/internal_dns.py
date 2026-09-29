@@ -168,8 +168,8 @@ class InternalDnsService:
             "cache_size": settings.cache_size,
             "log_queries": settings.log_queries,
             "local_records": list(settings.local_records),
-            "public_upstreams": settings.public_upstreams,
-            "public_domains": settings.public_domains,
+            "forward_upstreams": settings.forward_upstreams,
+            "forward_domains": settings.forward_domains,
         }
 
     def refresh_url_blocklist(self, url: str, *, preview: bool = False) -> BlocklistFetchResult:

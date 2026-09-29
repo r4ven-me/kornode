@@ -168,11 +168,11 @@ internal_dns:
   local_records_enabled: false
   # Optional forwarding for selected domain zones. Clients still use this
   # resolver; the shared upstream list applies to every domain below.
-  public_upstreams: []
-  public_domains: []
+  forward_upstreams: []
+  forward_domains: []
   # Example:
-  # public_upstreams: [1.1.1.1, 8.8.8.8]
-  # public_domains: [github.com]
+  # forward_upstreams: [1.1.1.1, 8.8.8.8]
+  # forward_domains: [github.com]
   # Inline list of blocked domains.
   blocklist_domains: []
   # Local text files with blocked domains (hosts or plain-domain format).

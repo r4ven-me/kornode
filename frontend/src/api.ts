@@ -993,8 +993,8 @@ export type InternalDnsStatus = {
   server_dns?: string[];
   search_domains?: string[];
   tunnel_dns?: boolean;
-  public_upstreams: string[];
-  public_domains: string[];
+  forward_upstreams: string[];
+  forward_domains: string[];
   blocklist_domains: string[];
   blocklist_files: InternalDnsBlocklistFileStatus[];
   blocklist_urls: InternalDnsBlocklistUrlStatus[];
@@ -1013,8 +1013,8 @@ export type InternalDnsSettingsRequest = {
   server_dns: string[];
   search_domains: string[];
   tunnel_dns: boolean;
-  public_upstreams: string[];
-  public_domains: string[];
+  forward_upstreams: string[];
+  forward_domains: string[];
   blocklist_domains: string[];
   blocklist_files: string[];
   blocklist_urls: string[];

@@ -12,8 +12,8 @@ export type InternalDnsDraft = {
   port: number;
   blocklistEnabled: boolean;
   localRecordsEnabled: boolean;
-  publicUpstreamsText: string;
-  publicDomainsText: string;
+  forwardUpstreamsText: string;
+  forwardDomainsText: string;
   domainsText: string;
   filesText: string;
   urlsText: string;
@@ -201,8 +201,8 @@ export function InternalDnsView({
           <summary>DNS forwarding</summary>
           <p className="muted-line">Forward only the listed domains to these DNS servers. Other queries use the default upstream tab.</p>
           <div className="settings-grid internal-dns-grid">
-            <label className="blocklist-domains"><span>DNS servers</span><textarea disabled={!resolverActive} rows={4} value={draft.publicUpstreamsText} onChange={(event) => onDraftChange({ ...draft, publicUpstreamsText: event.target.value })} /></label>
-            <label className="blocklist-domains"><span>Domains</span><textarea disabled={!resolverActive} rows={4} value={draft.publicDomainsText} onChange={(event) => onDraftChange({ ...draft, publicDomainsText: event.target.value })} /></label>
+            <label className="blocklist-domains"><span>DNS servers</span><textarea disabled={!resolverActive} rows={4} value={draft.forwardUpstreamsText} onChange={(event) => onDraftChange({ ...draft, forwardUpstreamsText: event.target.value })} /></label>
+            <label className="blocklist-domains"><span>Domains</span><textarea disabled={!resolverActive} rows={4} value={draft.forwardDomainsText} onChange={(event) => onDraftChange({ ...draft, forwardDomainsText: event.target.value })} /></label>
           </div>
         </details>
 
