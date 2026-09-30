@@ -15,13 +15,17 @@ from kornode.services.users import UserService
 # clients (korclient sync). Callers are identified by their VPN session: the
 # request must originate from an address inside server.ipv4_network that
 # occtl reports as an active session, so it is only reachable through the
-# established tunnel.
+# established tunnel. Because of that missing admin auth, the endpoint also
+# needs its own explicit opt-in (web.client_sync_enabled, default off) on top
+# of web.enabled -- see the field's docstring in config/models.py.
 router = APIRouter()
 
 
 @router.get("/routing")
 def client_routing(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
+    if not config.web.client_sync_enabled:
+        raise HTTPException(status_code=403, detail="client routing sync is disabled")
     username = _authenticate_vpn_client(request, config)
     routes, split_dns = _effective_routing(config, username)
     payload = {"routes": routes, "split_dns": split_dns}

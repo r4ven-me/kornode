@@ -577,6 +577,7 @@ export function saveWebSettings(
     terminal_enabled: boolean;
     terminal_idle_timeout: number;
     terminal_max_sessions: number;
+    client_sync_enabled: boolean;
     session_lifetime: number;
     session_cookie_secure: boolean;
   }

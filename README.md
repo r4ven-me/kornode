@@ -1279,7 +1279,10 @@ Korvus Node, its admin can add or remove routes/split-DNS domains from its own p
 any time - `sync_url` refreshes this profile's pushed lists on the already-open tunnel
 without reconnecting, by polling the upstream panel's own `GET /api/client/routing`
 (the same endpoint Korvus Client polls, see "Client routing sync" in
-`docs/architecture.md`) every `sync_interval` seconds:
+`docs/architecture.md`) every `sync_interval` seconds. That endpoint has no admin
+auth (VPN clients authenticate by their session source IP), so **the upstream**
+must also turn on `web.client_sync_enabled: true` - a separate, default-off toggle
+from `web.enabled` for exactly that reason (Web API and GUI - Client routing sync):
 
 ```yaml
 upstream:
@@ -1409,6 +1412,10 @@ web:
   session_lifetime: 3600
   session_cookie_secure: true
   terminal_enabled: false
+  # Off by default even with web.enabled: true -- only turn this on if an
+  # upstream profile's sync_url (this server as a middle-server upstream)
+  # actually needs to reach it. See "Mid-session sync".
+  client_sync_enabled: false
 ```
 
 `.env`:

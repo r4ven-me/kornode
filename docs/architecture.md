@@ -347,7 +347,10 @@ ensure-listen [--dry-run]` runs the same step manually.
 ## Client routing sync
 
 `GET /api/client/routing` is the only endpoint without admin authentication:
-it serves connected VPN clients (the korclient sync loop). The caller is
+it serves connected VPN clients (the korclient sync loop). Because of that,
+it needs its own explicit opt-in — `web.client_sync_enabled` (default
+`false`) — on top of `web.enabled`: turning on the admin panel alone must
+never also quietly expose an unauthenticated endpoint. The caller is
 identified by its VPN session — the request must originate from an address
 inside `server.ipv4_network` that occtl reports as an active session — and
 receives only its own effective routing (server `routes`/`search_domains`,

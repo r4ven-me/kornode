@@ -333,6 +333,16 @@ export function ConfigView({
                 </fieldset>
               </div>
             </details>
+
+            <details className="settings-details">
+              <summary>Client routing sync</summary>
+              <div className="settings-details-body">
+                <label className="switch" title="Serves GET /api/client/routing -- polled by upstream profiles' sync_url (kornode-as-client or Korvus Client) for mid-session route/split-DNS refresh. No admin auth (VPN clients authenticate by session source IP); off by default so enabling the admin panel alone never exposes it.">
+                  <input checked={webSettingsDraft.clientSyncEnabled} onChange={(event) => onWebSettingsDraftChange({ ...webSettingsDraft, clientSyncEnabled: event.target.checked })} type="checkbox" />
+                  <span>Serve client routing sync</span>
+                </label>
+              </div>
+            </details>
           </SettingsTabs>
         )}
 

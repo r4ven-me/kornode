@@ -26,6 +26,7 @@ identity:
   config_per_user_dir: {tmp_path}/generated/config-per-user
 web:
   enabled: true
+  client_sync_enabled: true
   admin_password: secret
 auth:
   password:
@@ -118,3 +119,56 @@ def test_client_routing_needs_no_admin_credentials(
 
     assert response.status_code == 200
     assert response.json()["username"] == "bob"
+
+
+def _client_without_sync(config_path: Path, tmp_path: Path) -> TestClient:
+    # Same as _client(), but without the client_sync_enabled override -- the
+    # point of these tests is to exercise its default (off).
+    config_path.write_text(
+        f"""
+system:
+  data_dir: {tmp_path}/data
+  log_dir: {tmp_path}/logs
+  generated_dir: {tmp_path}/generated
+  secrets_dir: {tmp_path}/secrets
+web:
+  enabled: true
+  admin_password: secret
+auth:
+  password:
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    return TestClient(create_app(config_path=config_path))
+
+
+def test_client_routing_is_disabled_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression test: web.enabled: true alone used to be enough to serve
+    # this unauthenticated endpoint -- web.client_sync_enabled is a separate,
+    # default-off gate on top of it.
+    client = _client_without_sync(tmp_path / "config.yaml", tmp_path)
+    _fake_sessions(monkeypatch, [SessionRecord(username="alice", vpn_ip="10.10.10.5")])
+
+    vpn_client = TestClient(client.app, client=("10.10.10.5", 50000))
+    response = vpn_client.get("/api/client/routing")
+
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"]
+
+
+def test_client_routing_disabled_check_runs_before_the_vpn_source_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The disabled-feature 403 must fire on its own, specific detail message
+    # -- not get silently absorbed into the generic "not in VPN subnet" 403 a
+    # request from outside the tunnel would also trigger.
+    client = _client_without_sync(tmp_path / "config.yaml", tmp_path)
+    _fake_sessions(monkeypatch, [])
+
+    response = client.get("/api/client/routing")
+
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"]

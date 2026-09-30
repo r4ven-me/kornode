@@ -999,6 +999,15 @@ class WebConfig(StrictModel):
     terminal_enabled: bool = False
     terminal_idle_timeout: int = Field(default=900, ge=60, le=86400)
     terminal_max_sessions: int = Field(default=2, ge=1, le=10)
+    # Serves GET /api/client/routing (api/routes_client_sync.py), polled by
+    # upstream profiles' sync_url -- either this kornode acting as a client,
+    # or a Korvus Client -- for mid-session route/split-DNS refresh. That
+    # endpoint has no admin auth by design (VPN clients authenticate by
+    # their session source IP instead), so unlike most other web.* surfaces
+    # it needs its own default-off gate distinct from `enabled`: turning on
+    # the admin panel must never also quietly expose this unauthenticated
+    # endpoint.
+    client_sync_enabled: bool = False
     session_lifetime: int = Field(default=43200, ge=300, le=86400)
     session_cookie_secure: bool = True
     admin_totp_enabled: bool = False

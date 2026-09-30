@@ -241,6 +241,7 @@ export type WebSettingsDraft = {
   terminalEnabled: boolean;
   terminalIdleTimeout: number;
   terminalMaxSessions: number;
+  clientSyncEnabled: boolean;
   sessionLifetime: number;
   sessionCookieSecure: boolean;
 };
@@ -258,6 +259,7 @@ export function readWebSettingsDraft(config: Record<string, unknown>): WebSettin
     terminalEnabled: readBoolean(web.terminal_enabled, false),
     terminalIdleTimeout: readNumber(web.terminal_idle_timeout, 900),
     terminalMaxSessions: readNumber(web.terminal_max_sessions, 2),
+    clientSyncEnabled: readBoolean(web.client_sync_enabled, false),
     sessionLifetime: readNumber(web.session_lifetime, 43200),
     sessionCookieSecure: readBoolean(web.session_cookie_secure, true)
   };

@@ -20,6 +20,7 @@ class WebSettingsRequest(BaseModel):
     terminal_enabled: bool = False
     terminal_idle_timeout: int = Field(default=900, ge=60, le=86400)
     terminal_max_sessions: int = Field(default=2, ge=1, le=10)
+    client_sync_enabled: bool = False
     session_lifetime: int = Field(default=43200, ge=300, le=86400)
     session_cookie_secure: bool = True
 

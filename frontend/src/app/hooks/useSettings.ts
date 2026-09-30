@@ -147,6 +147,7 @@ export function useSettings(core: PanelCore) {
         terminal_enabled: webSettingsDraft.terminalEnabled,
         terminal_idle_timeout: webSettingsDraft.terminalIdleTimeout,
         terminal_max_sessions: webSettingsDraft.terminalMaxSessions,
+        client_sync_enabled: webSettingsDraft.clientSyncEnabled,
         session_lifetime: webSettingsDraft.sessionLifetime,
         session_cookie_secure: webSettingsDraft.sessionCookieSecure
       })
