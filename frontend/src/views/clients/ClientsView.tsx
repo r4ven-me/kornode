@@ -115,7 +115,11 @@ export function ClientsView({
                   {isDefault && <Pill kind="ok">Default</Pill>}
                 </div>
               </td>
-              <td>{`${profile.server}:${profile.port}`}</td>
+              <td>
+                {profile.kind === "external_interface"
+                  ? "externally managed"
+                  : `${profile.server}:${profile.port}`}
+              </td>
               <td>{connection?.interface ?? profile.interface ?? "auto"}</td>
               <td>
                 <div className="upstream-status-cell">
@@ -158,14 +162,22 @@ export function ClientsView({
                 <div className="toolbar">
                   {profileConnected ? (
                     <IconButton
-                      label="Disconnect"
-                      icon={Unplug}
+                      label={
+                        profile.kind === "external_interface"
+                          ? "Tear down routing (interface stays untouched)"
+                          : "Disconnect"
+                      }
+                      icon={profile.kind === "external_interface" ? RadioTower : Unplug}
                       busy={busy === `upstream-profile-disconnect-${profile.name}`}
                       onClick={() => onDisconnectProfile(profile.name)}
                     />
                   ) : (
                     <IconButton
-                      label="Connect"
+                      label={
+                        profile.kind === "external_interface"
+                          ? "Apply routing (interface stays untouched)"
+                          : "Connect"
+                      }
                       icon={RadioTower}
                       disabled={!profile.enabled}
                       busy={busy === `upstream-profile-connect-${profile.name}`}

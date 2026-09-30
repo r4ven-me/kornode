@@ -67,6 +67,7 @@ describe("browser API authentication", () => {
 
 const upstreamProfileDraft: UpstreamProfileDraft = {
   name: "finance",
+  kind: "openconnect",
   server: "finance.example.com",
   port: "443",
   interface: "oc-finance",

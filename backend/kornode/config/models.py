@@ -354,7 +354,16 @@ class AuthConfig(StrictModel):
 
 class UpstreamProfileConfig(StrictModel):
     name: str
-    server: str
+    # "openconnect" (default): kornode dials out itself and owns the whole
+    # connect/disconnect/reconnect lifecycle, as every profile has always
+    # worked. "external_interface": this profile only points at a device
+    # that already exists on the host (e.g. a WireGuard interface the admin
+    # brought up outside kornode entirely) -- kornode never creates, brings
+    # up, tears down, or redials it, it only applies the same routing/
+    # nftables/split-DNS automation on top of it. See
+    # UpstreamService._profile_connected/connect/disconnect.
+    kind: Literal["openconnect", "external_interface"] = "openconnect"
+    server: str | None = None
     port: str = "443"
     # Whether the watchdog should keep this profile dialed at all. A
     # disabled profile is never connected (and gets disconnected if it
@@ -511,21 +520,44 @@ class UpstreamProfileConfig(StrictModel):
         return cleaned
 
     @model_validator(mode="after")
-    def validate_auth_fields(self) -> UpstreamProfileConfig:
-        if self.auth_type == "password" and not self.username:
-            raise ValueError(f"upstream profile {self.name!r} requires username")
-        if self.auth_type in {"cert", "p12"} and not (self.cert_file or self.cert_file_base64):
-            raise ValueError(
-                f"upstream profile {self.name!r} requires cert_file or cert_file_base64"
-            )
-        if self.cert_file and self.cert_file_base64:
-            raise ValueError(
-                f"upstream profile {self.name!r}: set cert_file or cert_file_base64, not both"
-            )
-        if self.key_file and self.key_file_base64:
-            raise ValueError(
-                f"upstream profile {self.name!r}: set key_file or key_file_base64, not both"
-            )
+    def validate_kind_fields(self) -> UpstreamProfileConfig:
+        if self.kind == "openconnect":
+            if not self.server:
+                raise ValueError(f"upstream profile {self.name!r} requires server")
+            if self.auth_type == "password" and not self.username:
+                raise ValueError(f"upstream profile {self.name!r} requires username")
+            if self.auth_type in {"cert", "p12"} and not (
+                self.cert_file or self.cert_file_base64
+            ):
+                raise ValueError(
+                    f"upstream profile {self.name!r} requires cert_file or cert_file_base64"
+                )
+            if self.cert_file and self.cert_file_base64:
+                raise ValueError(
+                    f"upstream profile {self.name!r}: set cert_file or cert_file_base64, not both"
+                )
+            if self.key_file and self.key_file_base64:
+                raise ValueError(
+                    f"upstream profile {self.name!r}: set key_file or key_file_base64, not both"
+                )
+        else:
+            # external_interface: kornode can't invent a device name for an
+            # interface it doesn't own, so unlike the openconnect case
+            # (UpstreamConfig.profile_interface() derives oc-middle0/
+            # oc-up<N> when unset) this must be given explicitly.
+            if not self.interface:
+                raise ValueError(
+                    f"upstream profile {self.name!r}: kind='external_interface' requires "
+                    "'interface' (the pre-existing device kornode should route through)"
+                )
+            # No vpnc-script handshake and no kornode panel on the other end
+            # of a plain externally-managed interface, so there's nothing
+            # for these to poll/parse.
+            if self.accept_server_routes or self.sync_url:
+                raise ValueError(
+                    f"upstream profile {self.name!r}: accept_server_routes/sync_url require "
+                    "kind='openconnect'"
+                )
         return self
 
 

@@ -844,3 +844,96 @@ def test_upstream_profile_sync_requires_sync_url(tmp_path: Path) -> None:
 
     assert response.status_code == 400
     assert missing.status_code == 404
+
+
+def test_save_external_interface_profile_requires_interface_field(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+
+    response = client.post(
+        "/api/upstream/profiles",
+        auth=("admin", "secret"),
+        json={"name": "wg", "kind": "external_interface"},
+    )
+
+    # UpstreamProfileConfig.model_validate raises a pydantic ValidationError
+    # (a ValueError subclass), caught by the app's generic ValueError
+    # handler and surfaced as 400.
+    assert response.status_code == 400
+
+
+def test_save_external_interface_profile_omits_server_and_auth_requirements(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+
+    response = client.post(
+        "/api/upstream/profiles",
+        auth=("admin", "secret"),
+        json={"name": "wg", "kind": "external_interface", "interface": "wg0"},
+    )
+
+    assert response.status_code == 200
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    profile = saved["upstream"]["profiles"][0]
+    assert profile["kind"] == "external_interface"
+    assert profile["interface"] == "wg0"
+    assert profile.get("server") is None
+
+
+def test_upstream_profile_connect_endpoint_external_interface_is_a_noop_success(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+    client.post(
+        "/api/upstream/profiles",
+        auth=("admin", "secret"),
+        json={"name": "wg", "kind": "external_interface", "interface": "wg0"},
+    )
+
+    response = client.post(
+        "/api/upstream/profiles/wg/connect",
+        auth=("admin", "secret"),
+        json={"dry_run": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["dry_run"] is True
+
+
+def test_upstream_profile_sync_rejects_external_interface_profile(tmp_path: Path) -> None:
+    # sync_url is validator-forbidden for external_interface, so it's
+    # always empty for this kind -- the existing generic "no sync_url" 400
+    # already covers it with zero extra branching.
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+    client.post(
+        "/api/upstream/profiles",
+        auth=("admin", "secret"),
+        json={"name": "wg", "kind": "external_interface", "interface": "wg0"},
+    )
+
+    response = client.post("/api/upstream/profiles/wg/sync", auth=("admin", "secret"))
+
+    assert response.status_code == 400
+
+
+def test_upstream_profile_response_includes_kind_field(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+    client.post(
+        "/api/upstream/profiles",
+        auth=("admin", "secret"),
+        json={
+            "name": "finance",
+            "server": "vpn.example.com",
+            "auth_type": "password",
+            "username": "user",
+        },
+    )
+
+    profiles = client.get("/api/upstream", auth=("admin", "secret")).json()
+
+    assert profiles[0]["kind"] == "openconnect"

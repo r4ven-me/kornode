@@ -48,28 +48,56 @@ export function ClientProfileDialog({
             />
           </label>
           <label>
-            <span>Server</span>
-            <input
-              value={draft.server}
-              onChange={(event) => onDraftChange({ ...draft, server: event.target.value })}
-              placeholder="vpn.example.com"
-              required
-            />
+            <span>Kind</span>
+            <select
+              disabled={isEdit}
+              title={isEdit ? "Delete and recreate the client to change its kind" : undefined}
+              value={draft.kind}
+              onChange={(event) =>
+                onDraftChange({
+                  ...draft,
+                  kind: event.target.value as UpstreamProfileDraft["kind"]
+                })
+              }
+            >
+              <option value="openconnect">OpenConnect (kornode dials out)</option>
+              <option value="external_interface">Existing interface (externally managed)</option>
+            </select>
           </label>
-          <label>
-            <span>Port</span>
-            <input
-              value={draft.port}
-              onChange={(event) => onDraftChange({ ...draft, port: event.target.value })}
-              required
-            />
-          </label>
-          <label title="Tunnel device for this client's own connection; each client needs its own so several can stay connected at once. Leave empty for an auto-assigned name.">
+          {draft.kind === "openconnect" && (
+            <>
+              <label>
+                <span>Server</span>
+                <input
+                  value={draft.server}
+                  onChange={(event) => onDraftChange({ ...draft, server: event.target.value })}
+                  placeholder="vpn.example.com"
+                  required
+                />
+              </label>
+              <label>
+                <span>Port</span>
+                <input
+                  value={draft.port}
+                  onChange={(event) => onDraftChange({ ...draft, port: event.target.value })}
+                  required
+                />
+              </label>
+            </>
+          )}
+          <label
+            title={
+              draft.kind === "external_interface"
+                ? "Device already brought up outside kornode (e.g. an externally-managed WireGuard interface). kornode never creates, brings up, or tears this down -- only applies routing on top of it."
+                : "Tunnel device for this client's own connection; each client needs its own so several can stay connected at once. Leave empty for an auto-assigned name."
+            }
+          >
             <span>Interface</span>
             <input
               value={draft.interface}
               onChange={(event) => onDraftChange({ ...draft, interface: event.target.value })}
-              placeholder="auto"
+              placeholder={draft.kind === "external_interface" ? "wg0" : "auto"}
+              required={draft.kind === "external_interface"}
             />
           </label>
           <label title="fwmark/table id offset for this client's own host/relay routes, added to the routing fwmark/table id. Leave empty to derive it from the client's position in the list; each client needs a distinct value.">
@@ -83,6 +111,8 @@ export function ClientProfileDialog({
               placeholder="auto"
             />
           </label>
+          {draft.kind === "openconnect" && (
+          <>
           <label>
             <span>Auth</span>
             <select
@@ -246,6 +276,8 @@ export function ClientProfileDialog({
               placeholder={isEdit ? "leave blank to keep existing" : "optional"}
             />
           </label>
+          </>
+          )}
           <div className="profile-routing-group">
             <label
               className="switch"
@@ -284,7 +316,7 @@ export function ClientProfileDialog({
                 </label>
               </div>
             )}
-            {draft.route_host_enabled && (
+            {draft.route_host_enabled && draft.kind === "openconnect" && (
               <label
                 className="switch"
                 title="Also route whatever the server pushes to this account: its route = lines (CISCO_SPLIT_INC) and split-dns = domains (CISCO_SPLIT_DNS), set per user/group in that server's panel. Pushed domains resolve through the server's own DNS, so point this host's resolver at the built-in dnsmasq (Clients settings → Host traffic → Host DNS)."
@@ -299,7 +331,7 @@ export function ClientProfileDialog({
                 <span>Use routes and domains pushed by the server</span>
               </label>
             )}
-            {draft.route_host_enabled && draft.accept_server_routes && (
+            {draft.route_host_enabled && draft.kind === "openconnect" && draft.accept_server_routes && (
               <div className="settings-grid">
                 <label title="Optional: that server's Korvus panel address reachable through this tunnel, e.g. https://10.10.10.1:8443. Server-side changes then apply without reconnecting. Empty: lists are refreshed on (re)connect only.">
                   <span>Sync URL</span>
@@ -339,6 +371,7 @@ export function ClientProfileDialog({
             )}
           </div>
           <div className="profile-status-switches">
+          {draft.kind === "openconnect" && (
           <label
             className="switch"
             title="Automatic mode: accept whatever certificate the server presents at each connect, so a changed upstream certificate never breaks the connection (a key change is logged). No protection against a man-in-the-middle. Ignored when Server cert pin is set."
@@ -350,6 +383,7 @@ export function ClientProfileDialog({
             />
             <span>No cert check</span>
           </label>
+          )}
           <label
             className="switch"
             title="Turns on the whole Clients feature (upstream.enabled) when you save -- affects every client, not just this one. Leave off while you're still setting things up. Independent of 'This client enabled' below, which only concerns this one client."

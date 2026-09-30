@@ -77,7 +77,12 @@ export type SessionRecord = {
 
 export type UpstreamProfile = {
   name: string;
-  server: string;
+  // "openconnect" (default): kornode dials out itself. "external_interface":
+  // this profile only points at a device that already exists on the host
+  // (e.g. an externally-managed WireGuard interface) -- kornode never
+  // creates/brings up/tears it down, only applies routing on top of it.
+  kind: "openconnect" | "external_interface";
+  server?: string | null;
   port: string;
   interface?: string | null;
   auth_type: "password" | "cert" | "p12";
@@ -103,6 +108,7 @@ export type UpstreamProfile = {
 
 export type UpstreamProfileDraft = {
   name: string;
+  kind: "openconnect" | "external_interface";
   server: string;
   port: string;
   interface: string;

@@ -677,13 +677,19 @@ def upstream_watch(
         config = get_config()
         service = UpstreamService(config)
         if config.upstream.enabled:
-            if service.selected_profile() is not None:
+            selected = service.selected_profile()
+            if selected is not None:
                 if service.is_healthy():
                     consecutive_failures = 0
                     ever_connected = True
                     # The kernel drops the fwmark table's route whenever the
                     # tunnel device bounces; heal it while the tunnel is up.
                     service.ensure_policy_routing()
+                elif selected.kind == "external_interface":
+                    # No dial/redial possible for an externally-managed
+                    # interface -- status()/the GUI already surfaces the
+                    # down link; never attempt recover() for it.
+                    consecutive_failures = 0
                 elif not config.upstream.connect_on_boot and not ever_connected:
                     consecutive_failures = 0
                 elif time.monotonic() < settled_until:

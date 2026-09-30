@@ -1136,6 +1136,33 @@ differs from the last accepted one, a warning is written to the upstream log. Th
 trade-off is no protection against a man-in-the-middle on the path to the upstream. An
 explicit `server_cert_pin` always wins over this mode.
 
+### Routing through an existing interface instead of dialing out
+
+A profile can also point at a network interface that already exists on the host --
+for example a WireGuard interface brought up outside kornode entirely (`wg-quick`,
+systemd-networkd, etc.) -- instead of dialing an OpenConnect server:
+
+```yaml
+upstream:
+  profiles:
+    - name: site-b-wireguard
+      kind: external_interface
+      interface: wg0
+      route_host_enabled: true
+      host_routes:
+        - 10.30.0.0/16
+```
+
+Set `kind: external_interface` and give `interface` explicitly (there's nothing for
+kornode to derive a name for, since it doesn't own the device). kornode never creates,
+brings up, tears down, or redials this interface -- it only applies the same
+routing/nftables/split-DNS automation on top of it that an `openconnect` profile's own
+tunnel gets. `server`, `auth_type` and the other dial-specific fields don't apply, and
+`accept_server_routes`/`sync_url` are rejected (there's no vpnc-script handshake or
+panel behind a plain externally-managed link to poll). The watchdog only observes this
+kind of profile's link state (up/down) to decide whether to (re)apply or tear down its
+routing -- it never attempts to reconnect it.
+
 Check the profiles:
 
 ```bash

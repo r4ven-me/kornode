@@ -180,6 +180,22 @@ upstream:
       trusted_cert: false
       server_cert_pin: ""
       check_host: 10.12.12.1
+    # kind: external_interface -- points at a device that already exists on
+    # this host (e.g. a WireGuard interface brought up outside kornode
+    # entirely, via wg-quick or systemd-networkd). kornode never creates,
+    # brings up, tears down, or redials this interface -- it only applies
+    # the same routing/nftables/split-DNS automation on top of it that it
+    # applies to an openconnect profile's own tunnel. `interface` is
+    # required here (kornode can't invent a name for a device it doesn't
+    # own), and server/auth_type/accept_server_routes/sync_url don't apply.
+    - name: site-b-wireguard
+      kind: external_interface
+      interface: wg0
+      route_host_enabled: true
+      host_routes:
+        - 10.30.0.0/16
+      host_domains:
+        - site-b.example.com
 
 routing:
   mode: split # full | split

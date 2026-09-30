@@ -252,8 +252,34 @@ class UpstreamService:
         return b"openconnect" in cmdline
 
     def _profile_connected(self, profile: UpstreamProfileConfig) -> bool:
+        if profile.kind == "external_interface":
+            return self._interface_link_up(self.profile_interface(profile))
         pid = self._read_pid(profile)
         return pid is not None and self._is_running(pid)
+
+    def _interface_link_up(self, interface: str) -> bool:
+        """Whether a pre-existing interface (kind='external_interface')
+        currently exists and reports link-up, via `ip -j link show`.
+
+        This is read-only observation -- kornode never brings this
+        interface up/down itself -- the external_interface analogue of
+        _profile_connected()'s pid-liveness check above.
+        """
+        result = self.runner.run(
+            ["ip", "-j", "link", "show", "dev", interface],
+            timeout=5,
+            check=False,
+        )
+        if not result.ok:
+            return False
+        try:
+            entries = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return False
+        for entry in entries if isinstance(entries, list) else []:
+            if entry.get("operstate") == "UP" or "LOWER_UP" in entry.get("flags", []):
+                return True
+        return False
 
     def _connection_age(self, profile: UpstreamProfileConfig) -> tuple[str | None, int | None]:
         """Return the current OpenConnect process start time and age.
@@ -261,8 +287,11 @@ class UpstreamService:
         A reconnect that replaces the OpenConnect process resets both values,
         making reconnects visible in the panel without maintaining separate
         mutable state. Runtime environments without readable procfs simply
-        report no timing information.
+        report no timing information. Meaningless for an external_interface
+        profile -- there's no kornode-owned process to time.
         """
+        if profile.kind == "external_interface":
+            return None, None
         pid = self._read_pid(profile)
         if pid is None or not self._is_running(pid):
             return None, None
@@ -434,6 +463,11 @@ class UpstreamService:
             return None
         if dry_run:
             return "pin-sha256:<fetched-from-server-at-connect>"
+        # Only ever called for kind="openconnect" (connect() branches into
+        # _activate_external_interface() before reaching this), where
+        # `server` is validator-required (UpstreamProfileConfig.
+        # validate_kind_fields) -- narrows the type for mypy.
+        assert profile.server is not None
         try:
             pin = fetch_server_pin(profile.server, int(profile.port)).pin
         except (OSError, ValueError) as exc:
@@ -540,6 +574,8 @@ class UpstreamService:
         profile = self._profile_by_name(name) if name else self.selected_profile()
         if profile is None:
             raise ValueError("no upstream profile configured")
+        if profile.kind == "external_interface":
+            return self._activate_external_interface(profile, dry_run=dry_run)
         with self._locked():
             if not dry_run and self._profile_connected(profile):
                 # Idempotent, mirroring disconnect's "not connected" no-op:
@@ -630,8 +666,65 @@ class UpstreamService:
             )
         )
 
+    def _activate_external_interface(
+        self, profile: UpstreamProfileConfig, *, dry_run: bool
+    ) -> CommandResult:
+        """'Connect' for an externally-managed interface (kind=
+        'external_interface'): apply the same nftables/policy-routing
+        kornode applies to a dialed profile, without ever touching the
+        interface itself -- there's nothing to dial, kornode doesn't own
+        its lifecycle.
+        """
+        interface = self.profile_interface(profile)
+        argv = ("ip", "link", "show", "dev", interface)
+        if dry_run:
+            return CommandResult(argv=argv, returncode=0, stdout="", stderr="", dry_run=True)
+        with self._locked():
+            selected = self.selected_profile()
+            is_active = selected is not None and selected.name == profile.name
+            self.nftables.apply(outbound_interface=self.active_interface())
+            if is_active and self._interface_link_up(interface):
+                self.policy_routing.apply(interface)
+            for target_profile, routing in self._named_target_routing():
+                if target_profile.name == profile.name and self._interface_link_up(interface):
+                    routing.apply(interface)
+            return CommandResult(
+                argv=argv,
+                returncode=0,
+                stdout=(
+                    f"profile '{profile.name}' uses externally-managed interface "
+                    f"'{interface}'; routing applied, no connection dialed"
+                ),
+                stderr="",
+            )
+
     def connect_active(self, *, dry_run: bool = False) -> CommandResult:
         return self.connect(dry_run=dry_run)
+
+    def _deactivate_external_interface(
+        self, profile: UpstreamProfileConfig, *, dry_run: bool
+    ) -> CommandResult:
+        """'Disconnect' for an externally-managed interface: undo whatever
+        routing was applied, without any process signaling -- kornode never
+        owns this interface's lifecycle.
+        """
+        interface = self.profile_interface(profile)
+        argv = ("ip", "link", "show", "dev", interface)
+        if dry_run:
+            return CommandResult(argv=argv, returncode=0, stdout="", stderr="", dry_run=True)
+        with self._locked():
+            selected = self.selected_profile()
+            if selected is not None and selected.name == profile.name:
+                self.policy_routing.cleanup()
+            for target_profile, routing in self._named_target_routing():
+                if target_profile.name == profile.name:
+                    routing.cleanup()
+            return CommandResult(
+                argv=argv,
+                returncode=0,
+                stdout="routing deactivated (interface untouched)",
+                stderr="",
+            )
 
     def disconnect(self, name: str | None = None, *, dry_run: bool = False) -> CommandResult:
         """Tear down one profile's backgrounded openconnect (active when
@@ -646,6 +739,8 @@ class UpstreamService:
         repairs on the next connect.
         """
         profile = self._profile_by_name(name) if name else self.selected_profile()
+        if profile is not None and profile.kind == "external_interface":
+            return self._deactivate_external_interface(profile, dry_run=dry_run)
         with self._locked():
             pid = self._read_pid(profile) if profile is not None else None
             if profile is None or pid is None or not self._is_running(pid):
@@ -769,11 +864,23 @@ class UpstreamService:
             for profile in self.config.upstream.profiles:
                 connected = self._profile_connected(profile)
                 if not profile.enabled:
-                    if connected:
+                    # An external_interface profile's "connected" reading is
+                    # link state, not "routing applied" -- link-down doesn't
+                    # mean routing was already torn down, so disconnect()
+                    # (idempotent) always runs for this kind regardless.
+                    if connected or profile.kind == "external_interface":
                         results.append(self.disconnect(profile.name))
                     continue
-                if profile.name == active_name or connected:
+                if profile.name == active_name:
                     continue
+                if profile.kind == "openconnect" and connected:
+                    continue
+                # external_interface profiles fall through here every tick
+                # regardless of `connected` (link state): connect() ->
+                # _activate_external_interface() only (re)applies routing,
+                # cheap and idempotent, and is the only way routing gets
+                # (re)applied after e.g. a kornode restart where the link
+                # was already up before kornode started observing it.
                 try:
                     results.append(self.connect(profile.name))
                 except (ValueError, CommandError):
@@ -825,6 +932,12 @@ class UpstreamService:
 
             for name in order:
                 profile = self._profile_by_name(name)
+                if profile.kind == "external_interface":
+                    # Nothing to redial for an externally-managed interface
+                    # -- it can only ever be a failover SOURCE (the watchdog
+                    # never calls recover() while one is selected and
+                    # healthy-or-not, see upstream_watch()), never a target.
+                    continue
                 is_current_and_active = name == current_name and already_active
                 if is_current_and_active:
                     # The active connection is the one that failed its

@@ -69,6 +69,7 @@ export const emptyUserConfig: UserConfig = {
 
 export const emptyUpstreamProfileDraft: UpstreamProfileDraft = {
   name: "",
+  kind: "openconnect",
   server: "",
   port: "443",
   interface: "",
@@ -105,7 +106,8 @@ export function upstreamProfileToDraft(
 ): UpstreamProfileDraft {
   return {
     name: profile.name,
-    server: profile.server,
+    kind: profile.kind,
+    server: profile.server ?? "",
     port: profile.port,
     interface: profile.interface ?? "",
     auth_type: profile.auth_type,

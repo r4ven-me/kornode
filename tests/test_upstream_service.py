@@ -1782,3 +1782,280 @@ def test_certificate_profile_without_password_does_not_read_stdin(tmp_path: Path
 
     assert "--passwd-on-stdin" not in argv
     assert "--user" not in argv
+
+
+# --- kind="external_interface" (pre-existing device, e.g. WireGuard) ------
+
+
+def test_upstream_profile_kind_defaults_to_openconnect(tmp_path: Path) -> None:
+    # Back-compat: a config predating the `kind` field parses unchanged.
+    config = AppConfig.model_validate(
+        _upstream_config(
+            tmp_path,
+            profiles=[
+                {
+                    "name": "finance",
+                    "server": "vpn.example.com",
+                    "auth_type": "password",
+                    "username": "user",
+                }
+            ],
+        )
+    )
+    assert config.upstream.profiles[0].kind == "openconnect"
+
+
+def test_external_interface_profile_requires_interface(tmp_path: Path) -> None:
+    # kornode can't invent a device name for an interface it doesn't own --
+    # unlike an openconnect profile, there's no oc-up<N> fallback here.
+    with pytest.raises(ValidationError, match="requires 'interface'"):
+        AppConfig.model_validate(
+            _upstream_config(
+                tmp_path,
+                profiles=[{"name": "wg", "kind": "external_interface"}],
+            )
+        )
+
+
+def test_external_interface_profile_does_not_require_server_or_auth(tmp_path: Path) -> None:
+    config = AppConfig.model_validate(
+        _upstream_config(
+            tmp_path,
+            profiles=[{"name": "wg", "kind": "external_interface", "interface": "wg0"}],
+        )
+    )
+    profile = config.upstream.profiles[0]
+    assert profile.server is None
+    assert profile.interface == "wg0"
+
+
+def test_external_interface_profile_forbids_accept_server_routes(tmp_path: Path) -> None:
+    # No vpnc-script handshake exists for a plain externally-managed
+    # interface, so there's nothing to receive pushed routes/domains from.
+    with pytest.raises(ValidationError, match="require kind='openconnect'"):
+        AppConfig.model_validate(
+            _upstream_config(
+                tmp_path,
+                profiles=[
+                    {
+                        "name": "wg",
+                        "kind": "external_interface",
+                        "interface": "wg0",
+                        "route_host_enabled": True,
+                        "accept_server_routes": True,
+                    }
+                ],
+            )
+        )
+
+
+def test_external_interface_profile_forbids_sync_url(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="require kind='openconnect'"):
+        AppConfig.model_validate(
+            _upstream_config(
+                tmp_path,
+                profiles=[
+                    {
+                        "name": "wg",
+                        "kind": "external_interface",
+                        "interface": "wg0",
+                        "sync_url": "https://10.10.10.1:8443",
+                    }
+                ],
+            )
+        )
+
+
+def test_openconnect_profile_still_requires_server(tmp_path: Path) -> None:
+    # Regression guard: gating validate_kind_fields's existing body behind
+    # `kind == "openconnect"` must not have loosened it.
+    with pytest.raises(ValidationError, match="requires server"):
+        AppConfig.model_validate(
+            _upstream_config(
+                tmp_path,
+                profiles=[{"name": "finance", "auth_type": "password", "username": "user"}],
+            )
+        )
+
+
+class LinkStateRunner:
+    """Fakes `ip -j link show dev <interface>`'s report of an externally-
+    managed interface's link state. Everything else (nftables/ip rule/ip
+    route calls) succeeds like FakeRunner, and no openconnect process is
+    ever spawned -- kornode never dials one for this kind."""
+
+    def __init__(self, link_up: dict[str, bool]) -> None:
+        self.link_up = link_up
+        self.calls: list[list[str]] = []
+
+    def run(self, argv: list[str], **kwargs: Any) -> CommandResult:
+        del kwargs
+        self.calls.append(list(argv))
+        if argv[:3] == ["ip", "-j", "link"]:
+            interface = argv[-1]
+            up = self.link_up.get(interface, False)
+            payload = f'[{{"operstate": "{"UP" if up else "DOWN"}", "flags": []}}]'
+            return CommandResult(argv=tuple(argv), returncode=0, stdout=payload, stderr="")
+        if tuple(argv[:5]) == ("nft", "list", "chain", "ip", "filter"):
+            return CommandResult(
+                argv=tuple(argv), returncode=1, stdout="", stderr="No such file or directory"
+            )
+        return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
+
+
+def _external_profile(
+    name: str = "wg", interface: str = "wg0", **overrides: object
+) -> UpstreamProfileConfig:
+    return UpstreamProfileConfig(
+        name=name, kind="external_interface", interface=interface, **overrides
+    )
+
+
+def test_external_interface_profile_connected_reflects_link_up(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_external_profile())
+    config.upstream.active_profile = "wg"
+    service = UpstreamService(config, runner=LinkStateRunner({"wg0": True}))
+
+    assert service.status().connected is True
+    assert service.status().connections[0]["connected"] is True
+
+
+def test_external_interface_profile_not_connected_when_link_down(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_external_profile())
+    config.upstream.active_profile = "wg"
+    service = UpstreamService(config, runner=LinkStateRunner({"wg0": False}))
+
+    assert service.status().connected is False
+
+
+def test_connection_age_and_remote_address_are_none_for_external_interface(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_external_profile())
+    config.upstream.active_profile = "wg"
+    service = UpstreamService(config, runner=LinkStateRunner({"wg0": True}))
+
+    status = service.status()
+    assert status.connections[0]["connected_since"] is None
+    assert status.connections[0]["connected_for_seconds"] is None
+    assert status.remote is None
+
+
+def test_connect_on_external_interface_applies_routing_without_dialing(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_external_profile())
+    config.upstream.active_profile = "wg"
+    runner = LinkStateRunner({"wg0": True})
+    service = UpstreamService(config, runner=runner)
+
+    result = service.connect_active()
+
+    assert result.returncode == 0
+    assert "no connection dialed" in result.stdout
+    assert all(call[0] != "openconnect" for call in runner.calls)
+    ip_calls = [call for call in runner.calls if call[0] == "ip" and call[1] != "-j"]
+    assert ["ip", "route", "replace", "default", "dev", "wg0", "table", "1201"] in ip_calls
+
+
+def test_connect_on_external_interface_skips_routing_when_link_down(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_external_profile())
+    config.upstream.active_profile = "wg"
+    runner = LinkStateRunner({"wg0": False})
+    service = UpstreamService(config, runner=runner)
+
+    service.connect_active()
+
+    ip_calls = [call for call in runner.calls if call[0] == "ip" and call[1] != "-j"]
+    assert not any(call[:3] == ["ip", "route", "replace"] for call in ip_calls)
+
+
+def test_disconnect_on_external_interface_does_not_signal_any_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_external_profile())
+    config.upstream.active_profile = "wg"
+    runner = LinkStateRunner({"wg0": True})
+    service = UpstreamService(config, runner=runner)
+
+    killed = []
+    monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    result = service.disconnect()
+
+    assert result.returncode == 0
+    assert killed == []
+    ip_calls = [call for call in runner.calls if call[0] == "ip" and call[1] != "-j"]
+    assert ["ip", "route", "flush", "table", "1201"] in ip_calls
+
+
+def test_enforce_profile_enablement_reapplies_routing_for_enabled_external_interface(
+    tmp_path: Path,
+) -> None:
+    # Unlike an openconnect standby (skipped once its pid is alive),
+    # `connected` for external_interface means link-up, not "routing
+    # applied" -- this must keep (idempotently) re-applying every tick
+    # regardless of link state, since enforce_profile_enablement() never
+    # touches the currently-active profile either way.
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile("primary"))
+    config.upstream.profiles.append(_external_profile("wg", interface="wg0"))
+    config.upstream.active_profile = "primary"
+    runner = LinkStateRunner({"wg0": True})
+    service = UpstreamService(config, runner=runner)
+
+    results = service.enforce_profile_enablement()
+
+    assert len(results) == 1
+    assert all(call[0] != "openconnect" for call in runner.calls)
+
+
+def test_enforce_profile_enablement_tears_down_disabled_external_interface(
+    tmp_path: Path,
+) -> None:
+    # A standby (never-active) disabled external_interface profile has no
+    # top-level policy route to clean up (same as an openconnect standby,
+    # see disconnect()'s "only the active profile's tunnel carries the
+    # policy route" comment) -- the point here is that disconnect() is
+    # still (idempotently) invoked every tick regardless of link state,
+    # unlike an openconnect standby which is only torn down when its pid
+    # is observed alive.
+    config = _config(tmp_path)
+    profile = _external_profile()
+    profile.enabled = False
+    config.upstream.profiles.append(profile)
+    runner = LinkStateRunner({"wg0": True})
+    service = UpstreamService(config, runner=runner)
+
+    results = service.enforce_profile_enablement()
+
+    assert len(results) == 1
+    assert results[0].stdout == "routing deactivated (interface untouched)"
+
+
+def test_recover_never_selects_external_interface_as_a_failover_target(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.upstream.failover = True
+    config.upstream.profiles.append(_external_profile("wg", interface="wg0"))
+    config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
+    config.upstream.active_profile = "wg"
+    runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
+    service = UpstreamService(config, runner=runner)
+
+    try:
+        assert service.recover() is True
+    finally:
+        runner.close()
+
+    assert service.selected_profile() is not None
+    assert service.selected_profile().name == "backup"

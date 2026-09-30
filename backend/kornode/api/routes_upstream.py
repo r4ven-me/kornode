@@ -54,7 +54,8 @@ class FetchPinRequest(BaseModel):
 
 class UpstreamProfileRequest(BaseModel):
     name: str
-    server: str
+    kind: Literal["openconnect", "external_interface"] = "openconnect"
+    server: str | None = None
     port: str = "443"
     interface: str | None = None
     auth_type: Literal["password", "cert", "p12"] = "password"
