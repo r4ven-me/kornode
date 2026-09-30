@@ -1320,7 +1320,11 @@ routing:
 - `resolved` - installs a `systemd-resolved` drop-in instead. After the first time this
   is enabled, run `systemctl restart systemd-resolved` on the host once - resolved only
   reads new drop-ins on (re)start, and the container cannot restart a host service
-  itself.
+  itself. The drop-in file itself is removed automatically (same as `resolv_conf`'s
+  restore) when `host_dns` is turned off or the container stops, but that removal still
+  needs the same manual restart to actually take effect - if you want that automated
+  too, watch the drop-in's directory with a host-side systemd path unit (or similar)
+  that restarts `systemd-resolved` on change.
 
 Only takes effect while dnsmasq is actually running (i.e. something else above already
 needs it - `accept_server_routes`, `host_domains`, or split-DNS), so `host_dns` never

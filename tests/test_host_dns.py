@@ -131,6 +131,52 @@ def test_resolved_mode_leaves_a_foreign_dropin_alone(tmp_path: Path) -> None:
     assert (dropin_dir / "kornode.conf").exists()
 
 
+def test_restore_also_removes_a_resolved_dropin(tmp_path: Path) -> None:
+    # Regression test: restore() (called by host-dns-guard on SIGTERM, i.e.
+    # container shutdown) used to only restore resolv.conf, leaving a
+    # systemd-resolved drop-in behind forever in "resolved" mode -- the host
+    # would keep being told to send DNS to a dnsmasq that just stopped.
+    dropin_dir = tmp_path / "host" / "resolved.conf.d"
+    dropin_dir.mkdir(parents=True)
+    service = _service(tmp_path, _config(tmp_path, "resolved", port=5353))
+    service.apply()
+    assert (dropin_dir / "kornode.conf").exists()
+
+    result = service.restore()
+
+    assert result.changed
+    assert "drop-in removed" in result.detail
+    assert not (dropin_dir / "kornode.conf").exists()
+    assert service.restore().changed is False
+
+
+def test_restore_reports_both_when_resolv_conf_and_dropin_are_both_present(
+    tmp_path: Path,
+) -> None:
+    # An admin could in principle have leftovers from both modes (e.g. after
+    # switching routing.host_dns back and forth, or restore() itself having
+    # skipped the drop-in on a previous kornode version); restore() must
+    # clean up both in one pass and say so.
+    resolv = _mount_resolv(tmp_path)
+    dropin_dir = tmp_path / "host" / "resolved.conf.d"
+    dropin_dir.mkdir(parents=True)
+    service = _service(tmp_path, _config(tmp_path, "resolv_conf"))
+    service.apply()
+    # Written directly rather than via a second apply(): apply() itself
+    # undoes the OTHER mode's leftovers as part of switching (see its own
+    # docstring), which would defeat the point of this test -- restore()
+    # must not depend on that ever having run.
+    (dropin_dir / "kornode.conf").write_text(f"{MARK}: leftover\n[Resolve]\nDNS=10.10.10.1\n")
+
+    result = service.restore()
+
+    assert result.changed
+    assert "resolv.conf restored" in result.detail
+    assert "drop-in removed" in result.detail
+    assert resolv.read_text() == ORIGINAL
+    assert not (dropin_dir / "kornode.conf").exists()
+
+
 def test_status_reports_mounts(tmp_path: Path) -> None:
     _mount_resolv(tmp_path)
     service = _service(tmp_path, _config(tmp_path, "resolv_conf"))

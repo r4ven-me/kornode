@@ -18,7 +18,11 @@ bind mount:
 - resolved: /etc/systemd/resolved.conf.d -> /host/resolved.conf.d. A drop-in
   sends all host lookups to dnsmasq; systemd-resolved only reads it after
   `systemctl restart systemd-resolved` on the host, which the container
-  cannot do itself.
+  cannot do itself. `host-dns-guard` still removes the drop-in file itself
+  when routing.host_dns is turned off or the container stops -- the host
+  must never be left pointing at a resolver that's about to disappear even
+  if picking that up still needs a restart the container can't trigger (an
+  external watcher, e.g. a systemd path unit on the host, can).
 """
 
 from __future__ import annotations
@@ -94,13 +98,30 @@ class HostDnsService:
         return HostDnsResult(self.mode, changed or result.changed, result.detail)
 
     def restore(self) -> HostDnsResult:
-        """Undo everything (container shutdown via host-dns-guard)."""
-        changed = self._restore_resolv_conf()
-        return HostDnsResult(
-            self.mode,
-            changed,
-            "host resolv.conf restored" if changed else "nothing to restore",
-        )
+        """Undo everything (container shutdown via host-dns-guard).
+
+        Restores resolv.conf AND removes the systemd-resolved drop-in
+        unconditionally, regardless of which mode was actually active --
+        the host must never be left pointing at a resolver that's about to
+        stop running, in either mode. Removing the drop-in still needs
+        `systemctl restart systemd-resolved` on the host to actually take
+        effect (the container can't trigger that itself, see
+        _write_dropin), but leaving the stale file behind is strictly
+        worse than leaving nothing for an external watcher to react to.
+        """
+        resolv_restored = self._restore_resolv_conf()
+        dropin_removed = self._remove_dropin()
+        changed = resolv_restored or dropin_removed
+        if not changed:
+            detail = "nothing to restore"
+        else:
+            parts = []
+            if resolv_restored:
+                parts.append("resolv.conf restored")
+            if dropin_removed:
+                parts.append("systemd-resolved drop-in removed")
+            detail = "host " + ", ".join(parts)
+        return HostDnsResult(self.mode, changed, detail)
 
     def status(self) -> dict[str, object]:
         resolv_mounted = self.resolv_conf.exists()
