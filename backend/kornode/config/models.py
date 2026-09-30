@@ -1074,22 +1074,32 @@ class AppConfig(StrictModel):
             self.identity.config_per_group_dir = self.system.generated_dir / "config-per-group"
         if self.certificates.letsencrypt.http01_address is None:
             self.certificates.letsencrypt.http01_address = self.server.listen
+        # server.ipv4_network is the address pool ocserv hands out to ITS
+        # OWN VPN clients -- a real, meaningful constraint only while
+        # server.enabled: true. In client-only deployments (server.enabled:
+        # false, e.g. examples/config.client.yaml) there are no VPN clients
+        # at all, so server.ipv4_network is just an inert default -- every
+        # "must/must not overlap the VPN client subnet" check below only
+        # makes sense, and so only applies, while the server actually runs.
         vpn_network = ipaddress.ip_network(self.server.ipv4_network, strict=False)
-        for route in self.routing.split.routes:
-            if ipaddress.ip_network(route, strict=False) == vpn_network:
-                raise ValueError(
-                    "routing.split.routes must not contain the VPN client subnet itself"
-                )
+        if self.server.enabled:
+            for route in self.routing.split.routes:
+                if ipaddress.ip_network(route, strict=False) == vpn_network:
+                    raise ValueError(
+                        "routing.split.routes must not contain the VPN client subnet itself"
+                    )
         if self.upstream.enabled:
             profile = self.upstream.selected_profile()
-            if profile and profile.check_host:
+            if self.server.enabled and profile and profile.check_host:
                 check_ip = ipaddress.ip_address(profile.check_host)
                 if check_ip in vpn_network:
                     raise ValueError("upstream.check_host must not be inside the VPN client subnet")
             # Each profile's own named routing target (RoutingService.
             # list_targets()) uses routing.table_id + its offset -- reject
             # any derived table landing on a kernel-reserved ID, the same
-            # check routing.table_id itself already gets.
+            # check routing.table_id itself already gets. Independent of
+            # server.enabled: a client-only deployment still derives real
+            # policy-routing tables for its profiles.
             for target_profile in self.upstream.profiles:
                 derived_table_id = self.routing.table_id + self.upstream.profile_routing_offset(
                     target_profile
@@ -1098,7 +1108,15 @@ class AppConfig(StrictModel):
                     derived_table_id,
                     field_name=f"upstream.profiles[{target_profile.name!r}]'s derived table_id",
                 )
-        if self.dns_tunnel_active():
+        # client_dns_reasons() (not the broader dns_tunnel_active()) is the
+        # precise signal here: dnsmasq can be active for host-only reasons
+        # (host_split_domains, profile_host_domains, profile_server_routes)
+        # that never get pushed to a VPN client at all -- client_dns_servers()
+        # itself only returns internal_dns.listen when client_dns_reasons()
+        # is non-empty, falling back to server.dns otherwise (renderers/
+        # ocserv.py). Gating on server.enabled too covers the same
+        # client-only case as above.
+        if self.server.enabled and self.client_dns_reasons():
             listen_ip = ipaddress.ip_address(self.internal_dns.listen)
             if listen_ip not in vpn_network:
                 raise ValueError(
