@@ -43,7 +43,7 @@ export function UpstreamRelayDialog({
             <span>Relay VPN users&rsquo; traffic through this client</span>
           </label>
           {draft.route_clients_enabled && (
-            <>
+            <div className="settings-grid field-full-width">
               <label>
                 <span>Relay routes</span>
                 <textarea
@@ -62,7 +62,7 @@ export function UpstreamRelayDialog({
                   rows={4}
                 />
               </label>
-            </>
+            </div>
           )}
           <div className="modal-actions">
             <button className="primary-button" disabled={busy === "upstream-relay"} type="submit">

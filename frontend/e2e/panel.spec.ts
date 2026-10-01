@@ -397,14 +397,13 @@ test("a new client starts with every toggle off", async ({ page }) => {
   await page.getByRole("button", { name: "Create client", exact: true }).click();
   const dialog = page.getByRole("dialog");
 
-  for (const label of [
-    "Turn on Clients (all clients)",
-    "This client enabled",
-    "Route this host’s traffic through this client",
-    "No cert check"
-  ]) {
+  for (const label of ["Turn on Clients (all clients)", "This client enabled", "No cert check"]) {
     await expect(dialog.getByLabel(label, { exact: true })).not.toBeChecked();
   }
+  await dialog.getByRole("tab", { name: "Host traffic & sync" }).click();
+  await expect(
+    dialog.getByLabel("Route this host’s traffic through this client", { exact: true })
+  ).not.toBeChecked();
 });
 
 test("editing an existing client keeps the actual Clients-enabled state, not a hardcoded default", async ({
@@ -456,6 +455,7 @@ test("creating a client can route host traffic, including server-pushed lists", 
   await page.getByLabel("Server", { exact: true }).fill("finance.example.com");
   await page.getByLabel("Username", { exact: true }).fill("finance-user");
   await page.getByLabel("Password", { exact: true }).fill("finance-pass");
+  await page.getByRole("tab", { name: "Host traffic & sync" }).click();
   await page.getByLabel("Route this host’s traffic through this client", { exact: true }).check();
   await page.getByLabel("Host routes", { exact: true }).fill("10.90.0.0/16");
   await page.getByLabel("Host domains", { exact: true }).fill("finance-internal.corp");
@@ -738,6 +738,7 @@ test("host split routing saves to its own dedicated routes endpoint, not the cli
     .filter({ hasText: "Host mode" })
     .locator("select")
     .selectOption("split");
+  await dialog.getByRole("tab", { name: "Host routes" }).click();
 
   const hostRoutesPanel = dialog
     .getByRole("heading", { name: "Host routes", exact: true })
@@ -788,6 +789,7 @@ test("host split domains save to their own dedicated endpoint, not the client's"
     .filter({ hasText: "Host mode" })
     .locator("select")
     .selectOption("split");
+  await dialog.getByRole("tab", { name: "Host routes" }).click();
 
   const hostDomainsPanel = dialog
     .getByRole("heading", { name: "Host domains", exact: true })

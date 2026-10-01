@@ -411,6 +411,11 @@ export function App() {
             draft={upstream.upstreamDraft}
             isEdit={upstream.editingProfile}
             busy={busy}
+            serverRouting={
+              state.upstream?.connections.find(
+                (connection) => connection.profile === upstream.upstreamDraft.name
+              )?.server_routing
+            }
             onDraftChange={upstream.setUpstreamDraft}
             onClose={upstream.closeProfileDialog}
             onSave={upstream.saveProfile}
