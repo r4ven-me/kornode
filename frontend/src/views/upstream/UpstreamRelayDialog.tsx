@@ -1,7 +1,8 @@
 import { Save, X } from "lucide-react";
 import type { FormEvent } from "react";
 import { IconButton } from "../../components/ui";
-import type { UpstreamProfileDraft } from "../../api";
+import type { RoutingListStatus, UpstreamProfileDraft } from "../../api";
+import { RoutingListSourcesPanel } from "./RoutingListSourcesPanel";
 
 // One client's own relay lists: VPN users' destinations that always go
 // through this specific client (UpstreamProfileConfig.route_clients_enabled/
@@ -11,15 +12,27 @@ import type { UpstreamProfileDraft } from "../../api";
 export function UpstreamRelayDialog({
   draft,
   busy,
+  routesStatus,
+  domainsStatus,
   onDraftChange,
   onClose,
-  onSave
+  onSave,
+  onPreviewRoutesUrl,
+  onRefreshRoutesUrl,
+  onPreviewDomainsUrl,
+  onRefreshDomainsUrl
 }: {
   draft: UpstreamProfileDraft;
   busy: string | null;
+  routesStatus: RoutingListStatus | null;
+  domainsStatus: RoutingListStatus | null;
   onDraftChange: (value: UpstreamProfileDraft) => void;
   onClose: () => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
+  onPreviewRoutesUrl: (url: string) => void;
+  onRefreshRoutesUrl: (url: string) => void;
+  onPreviewDomainsUrl: (url: string) => void;
+  onRefreshDomainsUrl: (url: string) => void;
 }) {
   return (
     <div className="modal-backdrop" role="presentation">
@@ -62,6 +75,46 @@ export function UpstreamRelayDialog({
                   rows={4}
                 />
               </label>
+              <div className="field-full-width">
+                <RoutingListSourcesPanel
+                  title="Relay route sources"
+                  filesLabel="Route files"
+                  filesPlaceholder={"/etc/kornode/relay-routes.txt"}
+                  urlsLabel="Route URLs"
+                  urlsPlaceholder={"https://example.com/relay-routes.txt"}
+                  disabled={!draft.route_clients_enabled}
+                  disabledHint="Inert until relaying VPN users' traffic through this client is on"
+                  filesText={draft.routesFilesText}
+                  urlsText={draft.routesUrlsText}
+                  status={routesStatus}
+                  busy={busy}
+                  busyKeyPrefix="relay-routes"
+                  onFilesTextChange={(value) => onDraftChange({ ...draft, routesFilesText: value })}
+                  onUrlsTextChange={(value) => onDraftChange({ ...draft, routesUrlsText: value })}
+                  onPreviewUrl={onPreviewRoutesUrl}
+                  onRefreshUrl={onRefreshRoutesUrl}
+                />
+              </div>
+              <div className="field-full-width">
+                <RoutingListSourcesPanel
+                  title="Relay domain sources"
+                  filesLabel="Domain files"
+                  filesPlaceholder={"/etc/kornode/relay-domains.txt"}
+                  urlsLabel="Domain URLs"
+                  urlsPlaceholder={"https://example.com/relay-domains.txt"}
+                  disabled={!draft.route_clients_enabled}
+                  disabledHint="Inert until relaying VPN users' traffic through this client is on"
+                  filesText={draft.domainsFilesText}
+                  urlsText={draft.domainsUrlsText}
+                  status={domainsStatus}
+                  busy={busy}
+                  busyKeyPrefix="relay-domains"
+                  onFilesTextChange={(value) => onDraftChange({ ...draft, domainsFilesText: value })}
+                  onUrlsTextChange={(value) => onDraftChange({ ...draft, domainsUrlsText: value })}
+                  onPreviewUrl={onPreviewDomainsUrl}
+                  onRefreshUrl={onRefreshDomainsUrl}
+                />
+              </div>
             </div>
           )}
           <div className="modal-actions">

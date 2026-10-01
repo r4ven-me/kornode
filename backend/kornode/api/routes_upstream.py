@@ -7,8 +7,12 @@ from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
 from kornode.api.routes_config import apply_config_patch
+from kornode.api.routes_routing import ListUrlRefreshRequest
 from kornode.config.models import AppConfig, UpstreamProfileConfig
 from kornode.services.cert_pin import fetch_server_pin
+from kornode.services.config import ConfigService
+from kornode.services.external_lists import ExternalListFetchResult
+from kornode.services.routing import RoutingService
 from kornode.services.secrets import is_secret_key
 from kornode.services.upstream import UpstreamService
 
@@ -76,6 +80,10 @@ class UpstreamProfileRequest(BaseModel):
     route_clients_enabled: bool = True
     routes: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
+    routes_files: list[str] = Field(default_factory=list)
+    routes_urls: list[str] = Field(default_factory=list)
+    domains_files: list[str] = Field(default_factory=list)
+    domains_urls: list[str] = Field(default_factory=list)
     route_host_enabled: bool = False
     host_routes: list[str] = Field(default_factory=list)
     host_domains: list[str] = Field(default_factory=list)
@@ -100,10 +108,7 @@ class UpstreamProfileRequest(BaseModel):
 @router.get("")
 def list_profiles(request: Request) -> list[dict[str, object]]:
     config: AppConfig = request.app.state.config
-    return [
-        _safe_profile_dump(profile)
-        for profile in UpstreamService(config).list_profiles()
-    ]
+    return [_safe_profile_dump(profile) for profile in UpstreamService(config).list_profiles()]
 
 
 @router.get("/status")
@@ -185,9 +190,7 @@ def save_profile(
     payload: UpstreamProfileRequest,
 ) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    existing = next(
-        (item for item in config.upstream.profiles if item.name == payload.name), None
-    )
+    existing = next((item for item in config.upstream.profiles if item.name == payload.name), None)
     data = payload.model_dump(exclude={"enable"}, exclude_none=True)
     if existing:
         _preserve_unset_secret(data, existing, "password")
@@ -203,9 +206,7 @@ def save_profile(
     # are derived from its position in upstream.profiles (see
     # UpstreamConfig.profile_interface()/profile_routing_offset()), so moving
     # an edited profile to the end would silently renumber live tunnels.
-    profiles = [
-        profile if item.name == profile.name else item for item in config.upstream.profiles
-    ]
+    profiles = [profile if item.name == profile.name else item for item in config.upstream.profiles]
     if existing is None:
         profiles.append(profile)
     patch: dict[str, object] = {
@@ -223,11 +224,92 @@ def save_profile(
     return {
         "status": "saved",
         "written": written,
-        "profiles": [
-            _safe_profile_dump(item)
-            for item in loaded_config.upstream.profiles
-        ],
+        "profiles": [_safe_profile_dump(item) for item in loaded_config.upstream.profiles],
     }
+
+
+def _profile_or_404(config: AppConfig, name: str) -> UpstreamProfileConfig:
+    profile = next((item for item in config.upstream.profiles if item.name == name), None)
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"unknown upstream profile: {name}")
+    return profile
+
+
+@router.get("/profiles/{name}/routes-sources/status")
+def profile_routes_sources_status(request: Request, name: str) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    profile = _profile_or_404(config, name)
+    service = RoutingService(config)
+    return {
+        "files": service.profile_routes_files_status(profile),
+        "urls": service.profile_routes_urls_status(profile),
+    }
+
+
+@router.get("/profiles/{name}/domains-sources/status")
+def profile_domains_sources_status(request: Request, name: str) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    profile = _profile_or_404(config, name)
+    service = RoutingService(config)
+    return {
+        "files": service.profile_domains_files_status(profile),
+        "urls": service.profile_domains_urls_status(profile),
+    }
+
+
+def _profile_refresh_response(
+    result: ExternalListFetchResult, *, preview: bool, written: list[str]
+) -> dict[str, object]:
+    return {
+        "status": "previewed" if preview else "refreshed",
+        "url": result.url,
+        "total_lines": result.total_lines,
+        "valid": result.valid,
+        "skipped": result.skipped,
+        "sample": result.sample,
+        "saved": result.saved,
+        "written": written,
+    }
+
+
+@router.post("/profiles/{name}/routes-sources/refresh")
+def refresh_profile_routes_url(
+    request: Request, name: str, payload: ListUrlRefreshRequest
+) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    profile = _profile_or_404(config, name)
+    if payload.url not in profile.routes_urls:
+        raise HTTPException(
+            status_code=400,
+            detail="url is not one of the saved profile routes_urls; save it first",
+        )
+    result = RoutingService(config).refresh_profile_route_url(
+        profile, payload.url, preview=payload.preview
+    )
+    written = (
+        [str(path) for path in ConfigService().write_rendered_files(config)] if result.saved else []
+    )
+    return _profile_refresh_response(result, preview=payload.preview, written=written)
+
+
+@router.post("/profiles/{name}/domains-sources/refresh")
+def refresh_profile_domains_url(
+    request: Request, name: str, payload: ListUrlRefreshRequest
+) -> dict[str, object]:
+    config: AppConfig = request.app.state.config
+    profile = _profile_or_404(config, name)
+    if payload.url not in profile.domains_urls:
+        raise HTTPException(
+            status_code=400,
+            detail="url is not one of the saved profile domains_urls; save it first",
+        )
+    result = RoutingService(config).refresh_profile_domain_url(
+        profile, payload.url, preview=payload.preview
+    )
+    written = (
+        [str(path) for path in ConfigService().write_rendered_files(config)] if result.saved else []
+    )
+    return _profile_refresh_response(result, preview=payload.preview, written=written)
 
 
 @router.post("/profiles/{name}/sync")
@@ -303,10 +385,7 @@ def delete_profile(request: Request, name: str) -> dict[str, object]:
     return {
         "status": "deleted",
         "written": written,
-        "profiles": [
-            _safe_profile_dump(item)
-            for item in loaded_config.upstream.profiles
-        ],
+        "profiles": [_safe_profile_dump(item) for item in loaded_config.upstream.profiles],
     }
 
 
@@ -368,9 +447,7 @@ def connect_active(
     payload: DryRunRequest | None = None,
 ) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    result = UpstreamService(config).connect_active(
-        dry_run=payload.dry_run if payload else False
-    )
+    result = UpstreamService(config).connect_active(dry_run=payload.dry_run if payload else False)
     return {
         "argv": ["korctl", "upstream", "connect"],
         "returncode": result.returncode,
@@ -386,9 +463,7 @@ def disconnect_active(
     payload: DryRunRequest | None = None,
 ) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    result = UpstreamService(config).disconnect(
-        dry_run=payload.dry_run if payload else False
-    )
+    result = UpstreamService(config).disconnect(dry_run=payload.dry_run if payload else False)
     return {
         "argv": ["korctl", "upstream", "disconnect"],
         "returncode": result.returncode,
@@ -405,9 +480,7 @@ def connect_profile(
     payload: DryRunRequest | None = None,
 ) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    result = UpstreamService(config).connect(
-        name, dry_run=payload.dry_run if payload else False
-    )
+    result = UpstreamService(config).connect(name, dry_run=payload.dry_run if payload else False)
     return {
         "argv": ["korctl", "upstream", "connect", name],
         "returncode": result.returncode,
@@ -424,9 +497,7 @@ def disconnect_profile(
     payload: DryRunRequest | None = None,
 ) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    result = UpstreamService(config).disconnect(
-        name, dry_run=payload.dry_run if payload else False
-    )
+    result = UpstreamService(config).disconnect(name, dry_run=payload.dry_run if payload else False)
     return {
         "argv": ["korctl", "upstream", "disconnect", name],
         "returncode": result.returncode,

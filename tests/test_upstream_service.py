@@ -219,6 +219,49 @@ def test_upstream_profile_route_clients_enabled_defaults_true(tmp_path: Path) ->
     assert config.upstream.profiles[0].route_host_enabled is False
 
 
+def test_upstream_profile_relay_source_fields_are_validated_and_deduplicated(
+    tmp_path: Path,
+) -> None:
+    profile = AppConfig.model_validate(
+        _upstream_config(
+            tmp_path,
+            profiles=[
+                {
+                    "name": "finance",
+                    "server": "vpn.example.com",
+                    "auth_type": "password",
+                    "username": "user",
+                    "routes_files": ["/lists/routes.txt", "/lists/routes.txt"],
+                    "domains_files": ["/lists/domains.txt", "/lists/domains.txt"],
+                    "routes_urls": ["https://lists.example.com/routes.txt"],
+                    "domains_urls": ["http://lists.example.com/domains.txt"],
+                }
+            ],
+        )
+    ).upstream.profiles[0]
+
+    assert profile.routes_files == [Path("/lists/routes.txt")]
+    assert profile.domains_files == [Path("/lists/domains.txt")]
+    assert profile.routes_urls == ["https://lists.example.com/routes.txt"]
+    assert profile.domains_urls == ["http://lists.example.com/domains.txt"]
+
+    with pytest.raises(ValidationError, match="HTTP"):
+        AppConfig.model_validate(
+            _upstream_config(
+                tmp_path,
+                profiles=[
+                    {
+                        "name": "finance",
+                        "server": "vpn.example.com",
+                        "auth_type": "password",
+                        "username": "user",
+                        "routes_urls": ["file:///lists/routes.txt"],
+                    }
+                ],
+            )
+        )
+
+
 def test_upstream_profiles_with_colliding_safe_names_are_rejected(tmp_path: Path) -> None:
     # "My-VPN" and "my_vpn" both normalize to the same nftables set name
     # (RoutingService.list_targets()'s profile_safe_name()), which would
@@ -572,9 +615,7 @@ def test_cert_file_base64_accepts_standard_multiline_wrapping(tmp_path: Path) ->
 
 
 def _profile(name: str = "primary", server: str = "vpn.example.com") -> UpstreamProfileConfig:
-    return UpstreamProfileConfig(
-        name=name, server=server, auth_type="password", username="user"
-    )
+    return UpstreamProfileConfig(name=name, server=server, auth_type="password", username="user")
 
 
 def test_connect_active_repairs_stale_resolv_conf_and_uses_graceful_timeout(
@@ -1213,9 +1254,7 @@ def test_recover_never_dials_a_disabled_fallback_profile(tmp_path: Path) -> None
 
     assert service.selected_profile() is not None
     assert service.selected_profile().name == "backup"
-    dialed_hosts = {
-        call[-1].split(":")[0] for call in runner.calls if call[0] == "openconnect"
-    }
+    dialed_hosts = {call[-1].split(":")[0] for call in runner.calls if call[0] == "openconnect"}
     assert "vpn.example.com" not in dialed_hosts
 
 
@@ -1442,9 +1481,7 @@ def test_connect_standby_profile_does_not_touch_policy_routing(tmp_path: Path) -
 
     openconnect_call = runner.call_for("openconnect")
     assert "oc-up1" in openconnect_call["argv"]
-    assert not any(
-        call["argv"][:3] == ["ip", "route", "replace"] for call in runner.calls
-    )
+    assert not any(call["argv"][:3] == ["ip", "route", "replace"] for call in runner.calls)
 
 
 def test_switch_profile_repoints_rules_without_reconnecting(tmp_path: Path) -> None:
@@ -1474,7 +1511,14 @@ def test_switch_profile_repoints_rules_without_reconnecting(tmp_path: Path) -> N
     assert any(call["argv"][0] == "nft" for call in runner.calls)
     ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
     assert [
-        "ip", "route", "replace", "default", "dev", "oc-backup0", "table", "1201",
+        "ip",
+        "route",
+        "replace",
+        "default",
+        "dev",
+        "oc-backup0",
+        "table",
+        "1201",
     ] in ip_calls
     assert service.selected_profile() is not None
     assert service.selected_profile().name == "backup"
@@ -1619,9 +1663,7 @@ def test_watchdog_respects_connect_on_boot_until_first_connection(
     # has existed since this watchdog process started).
     healthy_sequence = iter([False, False, True, False])
     recover_calls: list[None] = []
-    monkeypatch.setattr(
-        UpstreamService, "is_healthy", lambda self: next(healthy_sequence)
-    )
+    monkeypatch.setattr(UpstreamService, "is_healthy", lambda self: next(healthy_sequence))
     monkeypatch.setattr(
         UpstreamService,
         "recover",
@@ -1704,9 +1746,7 @@ def test_accepted_pin_is_not_fetched_without_trusted_cert_or_with_a_pin(
     service = _service(tmp_path)
 
     assert service._accepted_server_pin(_profile(), dry_run=False) is None
-    pinned = _profile().model_copy(
-        update={"trusted_cert": True, "server_cert_pin": "pin-sha256:X"}
-    )
+    pinned = _profile().model_copy(update={"trusted_cert": True, "server_cert_pin": "pin-sha256:X"})
     assert service._accepted_server_pin(pinned, dry_run=False) is None
     trusted = _profile().model_copy(update={"trusted_cert": True})
     assert service._accepted_server_pin(trusted, dry_run=True) is not None

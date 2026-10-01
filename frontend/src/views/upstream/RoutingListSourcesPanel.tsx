@@ -30,6 +30,7 @@ export function RoutingListSourcesPanel({
   urlsLabel,
   urlsPlaceholder,
   disabled,
+  disabledHint = "Inert until Upstream is enabled and Mode is Split above",
   filesText,
   urlsText,
   status,
@@ -46,6 +47,7 @@ export function RoutingListSourcesPanel({
   urlsLabel: string;
   urlsPlaceholder: string;
   disabled: boolean;
+  disabledHint?: string;
   filesText: string;
   urlsText: string;
   status: RoutingListStatus | null;
@@ -63,7 +65,7 @@ export function RoutingListSourcesPanel({
         {status && <Pill kind="muted">{status.urls.length + status.files.length} sources</Pill>}
       </div>
       <div className="settings-grid internal-dns-grid">
-        <label className="blocklist-domains" title={disabled ? "Inert until Upstream is enabled and Mode is Split above" : undefined}>
+        <label className="blocklist-domains" title={disabled ? disabledHint : undefined}>
           <span>{filesLabel}</span>
           <textarea
             rows={3}
@@ -73,7 +75,7 @@ export function RoutingListSourcesPanel({
             onChange={(event) => onFilesTextChange(event.target.value)}
           />
         </label>
-        <label className="blocklist-domains" title={disabled ? "Inert until Upstream is enabled and Mode is Split above" : undefined}>
+        <label className="blocklist-domains" title={disabled ? disabledHint : undefined}>
           <span>{urlsLabel}</span>
           <textarea
             rows={3}

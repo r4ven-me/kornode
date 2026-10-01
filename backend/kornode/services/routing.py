@@ -137,8 +137,44 @@ class RoutingService:
     def list_host_domains(self) -> list[str]:
         return self._list_domains(self.config.routing.host_split, self.host_domain_urls)
 
+    def _profile_route_url_cache(self, profile: UpstreamProfileConfig) -> ExternalListCache:
+        return ExternalListCache(
+            self.config.system.data_dir
+            / "routing"
+            / "profile-route-urls"
+            / profile_safe_name(profile.name),
+            self.files,
+            user_agent=_FETCH_USER_AGENT,
+        )
+
+    def _profile_domain_url_cache(self, profile: UpstreamProfileConfig) -> ExternalListCache:
+        return ExternalListCache(
+            self.config.system.data_dir
+            / "routing"
+            / "profile-domain-urls"
+            / profile_safe_name(profile.name),
+            self.files,
+            user_agent=_FETCH_USER_AGENT,
+        )
+
+    def list_profile_routes(self, profile: UpstreamProfileConfig) -> list[str]:
+        return self._merge_unique(
+            profile.routes,
+            self._all_file_routes(profile),
+            self._all_url_cache_routes(profile, self._profile_route_url_cache(profile)),
+        )
+
+    def list_profile_domains(self, profile: UpstreamProfileConfig) -> list[str]:
+        return self._merge_unique(
+            profile.domains,
+            self._all_file_domains(profile),
+            self._all_url_cache_domains(profile, self._profile_domain_url_cache(profile)),
+        )
+
     def _list_routes(
-        self, split: RoutingSplitConfig | HostSplitConfig, url_cache: ExternalListCache
+        self,
+        split: RoutingSplitConfig | HostSplitConfig,
+        url_cache: ExternalListCache,
     ) -> list[str]:
         return self._merge_unique(
             split.routes,
@@ -148,7 +184,9 @@ class RoutingService:
         )
 
     def _list_domains(
-        self, split: RoutingSplitConfig | HostSplitConfig, url_cache: ExternalListCache
+        self,
+        split: RoutingSplitConfig | HostSplitConfig,
+        url_cache: ExternalListCache,
     ) -> list[str]:
         return self._merge_unique(
             split.domains,
@@ -166,7 +204,9 @@ class RoutingService:
         text = "\n".join(self.files.read_lines(path))
         return parse_list_text(text, normalize=self._normalize_route).items
 
-    def _all_file_routes(self, split: RoutingSplitConfig | HostSplitConfig) -> list[str]:
+    def _all_file_routes(
+        self, split: RoutingSplitConfig | HostSplitConfig | UpstreamProfileConfig
+    ) -> list[str]:
         merged: list[str] = []
         for path in split.routes_files:
             merged.extend(self.file_routes(path))
@@ -182,7 +222,9 @@ class RoutingService:
         text = "\n".join(self.files.read_lines(path))
         return parse_list_text(text, normalize=self._normalize_domain).items
 
-    def _all_file_domains(self, split: RoutingSplitConfig | HostSplitConfig) -> list[str]:
+    def _all_file_domains(
+        self, split: RoutingSplitConfig | HostSplitConfig | UpstreamProfileConfig
+    ) -> list[str]:
         merged: list[str] = []
         for path in split.domains_files:
             merged.extend(self.file_domains(path))
@@ -201,7 +243,9 @@ class RoutingService:
         return self.host_route_urls.cached_items(url, normalize=self._normalize_route)
 
     def _all_url_cache_routes(
-        self, split: RoutingSplitConfig | HostSplitConfig, url_cache: ExternalListCache
+        self,
+        split: RoutingSplitConfig | HostSplitConfig | UpstreamProfileConfig,
+        url_cache: ExternalListCache,
     ) -> list[str]:
         merged: list[str] = []
         for url in split.routes_urls:
@@ -221,7 +265,9 @@ class RoutingService:
         return self.host_domain_urls.cached_items(url, normalize=self._normalize_domain)
 
     def _all_url_cache_domains(
-        self, split: RoutingSplitConfig | HostSplitConfig, url_cache: ExternalListCache
+        self,
+        split: RoutingSplitConfig | HostSplitConfig | UpstreamProfileConfig,
+        url_cache: ExternalListCache,
     ) -> list[str]:
         merged: list[str] = []
         for url in split.domains_urls:
@@ -238,17 +284,23 @@ class RoutingService:
         return self._files_status(self.config.routing.split.routes_files, self.file_routes)
 
     def host_routes_files_status(self) -> list[dict[str, object]]:
-        return self._files_status(
-            self.config.routing.host_split.routes_files, self.file_routes
-        )
+        return self._files_status(self.config.routing.host_split.routes_files, self.file_routes)
 
     def domains_files_status(self) -> list[dict[str, object]]:
         return self._files_status(self.config.routing.split.domains_files, self.file_domains)
 
     def host_domains_files_status(self) -> list[dict[str, object]]:
-        return self._files_status(
-            self.config.routing.host_split.domains_files, self.file_domains
-        )
+        return self._files_status(self.config.routing.host_split.domains_files, self.file_domains)
+
+    def profile_routes_files_status(
+        self, profile: UpstreamProfileConfig
+    ) -> list[dict[str, object]]:
+        return self._files_status(profile.routes_files, self.file_routes)
+
+    def profile_domains_files_status(
+        self, profile: UpstreamProfileConfig
+    ) -> list[dict[str, object]]:
+        return self._files_status(profile.domains_files, self.file_domains)
 
     def _files_status(
         self, paths: list[Path], reader: Callable[[Path], list[str]]
@@ -282,6 +334,24 @@ class RoutingService:
             self.url_cache_host_domains,
         )
 
+    def profile_routes_urls_status(self, profile: UpstreamProfileConfig) -> list[dict[str, object]]:
+        cache = self._profile_route_url_cache(profile)
+        return self._urls_status(
+            profile.routes_urls,
+            cache,
+            lambda url: cache.cached_items(url, normalize=self._normalize_route),
+        )
+
+    def profile_domains_urls_status(
+        self, profile: UpstreamProfileConfig
+    ) -> list[dict[str, object]]:
+        cache = self._profile_domain_url_cache(profile)
+        return self._urls_status(
+            profile.domains_urls,
+            cache,
+            lambda url: cache.cached_items(url, normalize=self._normalize_domain),
+        )
+
     def _urls_status(
         self,
         urls: list[str],
@@ -289,8 +359,7 @@ class RoutingService:
         counter: Callable[[str], list[str]],
     ) -> list[dict[str, object]]:
         return [
-            {"url": url, "count": len(counter(url)), "meta": url_cache.meta(url)}
-            for url in urls
+            {"url": url, "count": len(counter(url)), "meta": url_cache.meta(url)} for url in urls
         ]
 
     def refresh_route_url(self, url: str, *, preview: bool = False) -> ExternalListFetchResult:
@@ -298,14 +367,10 @@ class RoutingService:
             raise ValueError(f"routing.split.routes_urls does not contain: {url}")
         return self.route_urls.refresh(url, normalize=self._normalize_route, preview=preview)
 
-    def refresh_host_route_url(
-        self, url: str, *, preview: bool = False
-    ) -> ExternalListFetchResult:
+    def refresh_host_route_url(self, url: str, *, preview: bool = False) -> ExternalListFetchResult:
         if url not in self.config.routing.host_split.routes_urls:
             raise ValueError(f"routing.host_split.routes_urls does not contain: {url}")
-        return self.host_route_urls.refresh(
-            url, normalize=self._normalize_route, preview=preview
-        )
+        return self.host_route_urls.refresh(url, normalize=self._normalize_route, preview=preview)
 
     def refresh_domain_url(self, url: str, *, preview: bool = False) -> ExternalListFetchResult:
         if url not in self.config.routing.split.domains_urls:
@@ -317,7 +382,27 @@ class RoutingService:
     ) -> ExternalListFetchResult:
         if url not in self.config.routing.host_split.domains_urls:
             raise ValueError(f"routing.host_split.domains_urls does not contain: {url}")
-        return self.host_domain_urls.refresh(
+        return self.host_domain_urls.refresh(url, normalize=self._normalize_domain, preview=preview)
+
+    def refresh_profile_route_url(
+        self, profile: UpstreamProfileConfig, url: str, *, preview: bool = False
+    ) -> ExternalListFetchResult:
+        if url not in profile.routes_urls:
+            raise ValueError(
+                f"upstream profile {profile.name!r} routes_urls does not contain: {url}"
+            )
+        return self._profile_route_url_cache(profile).refresh(
+            url, normalize=self._normalize_route, preview=preview
+        )
+
+    def refresh_profile_domain_url(
+        self, profile: UpstreamProfileConfig, url: str, *, preview: bool = False
+    ) -> ExternalListFetchResult:
+        if url not in profile.domains_urls:
+            raise ValueError(
+                f"upstream profile {profile.name!r} domains_urls does not contain: {url}"
+            )
+        return self._profile_domain_url_cache(profile).refresh(
             url, normalize=self._normalize_domain, preview=preview
         )
 
@@ -391,8 +476,10 @@ class RoutingService:
             fwmark_width = len(config.routing.fwmark) - 2
             pushed_store = PushedRoutingStore(config, self.files)
             for profile in config.upstream.profiles:
-                client_active = profile.route_clients_enabled and (
-                    profile.routes or profile.domains
+                profile_routes = self.list_profile_routes(profile)
+                profile_domains = self.list_profile_domains(profile)
+                client_active = profile.route_clients_enabled and bool(
+                    profile_routes or profile_domains
                 )
                 # Admin-configured host lists plus, with accept_server_routes,
                 # whatever the upstream server pushed/synced for this
@@ -430,8 +517,8 @@ class RoutingService:
                         set_v6_static=f"split_v6_{safe_name}_static",
                         set_v6_dynamic=f"split_v6_{safe_name}_dynamic",
                         mode="split",
-                        routes=profile.routes if profile.route_clients_enabled else [],
-                        domains=profile.domains if profile.route_clients_enabled else [],
+                        routes=profile_routes if profile.route_clients_enabled else [],
+                        domains=profile_domains if profile.route_clients_enabled else [],
                         killswitch=True,
                         profile=profile,
                         host_routes=host_routes_v4 if host_active else [],
@@ -489,9 +576,7 @@ class RoutingService:
     def set_host_domains(self, items: list[str]) -> None:
         normalized = [self._normalize_domain(item) for item in items]
         with _ROUTING_FILE_REWRITE_LOCK:
-            self.files.write_unique_lines(
-                self.config.routing.host_split.domains_file, normalized
-            )
+            self.files.write_unique_lines(self.config.routing.host_split.domains_file, normalized)
 
     def _merge_unique(self, *sources: list[str]) -> list[str]:
         result: list[str] = []

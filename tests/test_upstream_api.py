@@ -507,9 +507,7 @@ def test_upstream_profile_disconnect_endpoint_noop(tmp_path: Path) -> None:
         },
     )
 
-    response = client.post(
-        "/api/upstream/profiles/backup/disconnect", auth=("admin", "secret")
-    )
+    response = client.post("/api/upstream/profiles/backup/disconnect", auth=("admin", "secret"))
 
     assert response.status_code == 200
     assert response.json()["stdout"] == "not connected"
@@ -551,13 +549,91 @@ def test_upstream_profile_saves_routes_and_domains(tmp_path: Path) -> None:
             "username": "user",
             "routes": ["10.50.0.0/16"],
             "domains": ["finance-internal.corp"],
+            "routes_files": ["/lists/finance-routes.txt"],
+            "routes_urls": ["https://lists.example.com/finance-routes.txt"],
+            "domains_files": ["/lists/finance-domains.txt"],
+            "domains_urls": ["https://lists.example.com/finance-domains.txt"],
         },
     )
 
     assert response.status_code == 200
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["upstream"]["profiles"][0]["routes"] == ["10.50.0.0/16"]
-    assert saved["upstream"]["profiles"][0]["domains"] == ["finance-internal.corp"]
+    profile = saved["upstream"]["profiles"][0]
+    assert profile["routes"] == ["10.50.0.0/16"]
+    assert profile["domains"] == ["finance-internal.corp"]
+    assert profile["routes_files"] == ["/lists/finance-routes.txt"]
+    assert profile["routes_urls"] == ["https://lists.example.com/finance-routes.txt"]
+    assert profile["domains_files"] == ["/lists/finance-domains.txt"]
+    assert profile["domains_urls"] == ["https://lists.example.com/finance-domains.txt"]
+
+
+def test_profile_relay_source_status_and_refresh_endpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    route_file = tmp_path / "route-list.txt"
+    route_file.write_text("10.60.0.0/16\n", encoding="utf-8")
+    route_url = "https://lists.example.com/routes.txt"
+    domain_url = "https://lists.example.com/domains.txt"
+    client = _client(config_path, tmp_path)
+    saved = client.post(
+        "/api/upstream/profiles",
+        auth=("admin", "secret"),
+        json={
+            "name": "finance",
+            "server": "finance.example.com",
+            "username": "user",
+            "routes_files": [str(route_file)],
+            "routes_urls": [route_url],
+            "domains_urls": [domain_url],
+        },
+    )
+    assert saved.status_code == 200
+
+    status = client.get(
+        "/api/upstream/profiles/finance/routes-sources/status",
+        auth=("admin", "secret"),
+    )
+    assert status.status_code == 200
+    assert status.json()["files"] == [{"path": str(route_file), "exists": True, "count": 1}]
+    assert status.json()["urls"][0]["url"] == route_url
+
+    unknown = client.get(
+        "/api/upstream/profiles/missing/routes-sources/status",
+        auth=("admin", "secret"),
+    )
+    assert unknown.status_code == 404
+    unsaved = client.post(
+        "/api/upstream/profiles/finance/routes-sources/refresh",
+        auth=("admin", "secret"),
+        json={"url": "https://lists.example.com/other.txt", "preview": True},
+    )
+    assert unsaved.status_code == 400
+
+    monkeypatch.setattr(
+        "kornode.services.external_lists.fetch_url_text",
+        lambda url, **kwargs: (
+            "10.70.0.0/16\ninvalid\n" if url == route_url else "corp.example.com\ninvalid_domain!\n"
+        ),
+    )
+    route_refresh = client.post(
+        "/api/upstream/profiles/finance/routes-sources/refresh",
+        auth=("admin", "secret"),
+        json={"url": route_url, "preview": True},
+    )
+    domain_refresh = client.post(
+        "/api/upstream/profiles/finance/domains-sources/refresh",
+        auth=("admin", "secret"),
+        json={"url": domain_url, "preview": True},
+    )
+
+    assert route_refresh.status_code == 200
+    assert route_refresh.json()["status"] == "previewed"
+    assert route_refresh.json()["valid"] == 1
+    assert route_refresh.json()["skipped"] == 1
+    assert route_refresh.json()["saved"] is False
+    assert domain_refresh.status_code == 200
+    assert domain_refresh.json()["valid"] == 1
 
 
 def test_editing_an_existing_profile_does_not_change_the_active_one(tmp_path: Path) -> None:

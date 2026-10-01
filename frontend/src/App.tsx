@@ -400,9 +400,15 @@ export function App() {
           <UpstreamRelayDialog
             draft={upstream.relayDraft}
             busy={busy}
+            routesStatus={upstream.relayRoutesStatus}
+            domainsStatus={upstream.relayDomainsStatus}
             onDraftChange={upstream.setRelayDraft}
             onClose={upstream.closeRelay}
             onSave={(event) => void upstream.saveRelay(event)}
+            onPreviewRoutesUrl={upstream.previewRelayRoutesUrl}
+            onRefreshRoutesUrl={upstream.refreshRelayRoutesUrl}
+            onPreviewDomainsUrl={upstream.previewRelayDomainsUrl}
+            onRefreshDomainsUrl={upstream.refreshRelayDomainsUrl}
           />
         )}
         {upstream.profileModalOpen && (

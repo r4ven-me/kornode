@@ -99,9 +99,7 @@ def _validate_http_url_list(value: list[str], *, field_name: str) -> list[str]:
 def _validate_interface_name(value: str) -> str:
     # IFNAMSIZ is 16 including the NUL terminator, so 15 usable characters.
     if not re.match(r"^[A-Za-z0-9_.-]{1,15}$", value):
-        raise ValueError(
-            f"invalid network interface name (1-15 chars, alphanumeric/._-): {value}"
-        )
+        raise ValueError(f"invalid network interface name (1-15 chars, alphanumeric/._-): {value}")
     return value
 
 
@@ -405,6 +403,10 @@ class UpstreamProfileConfig(StrictModel):
     route_clients_enabled: bool = True
     routes: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
+    routes_files: list[Path] = Field(default_factory=list)
+    routes_urls: list[str] = Field(default_factory=list)
+    domains_files: list[Path] = Field(default_factory=list)
+    domains_urls: list[str] = Field(default_factory=list)
     # Same idea as routes/domains above, but for the HOST's own traffic
     # routed through this specific profile -- independent toggle and lists,
     # since an admin may want a profile to carry client traffic, host
@@ -466,6 +468,21 @@ class UpstreamProfileConfig(StrictModel):
     def validate_domains(cls, value: list[str]) -> list[str]:
         return [_validate_domain(item) for item in value]
 
+    @field_validator("routes_files", "domains_files")
+    @classmethod
+    def validate_list_files(cls, value: list[Path]) -> list[Path]:
+        return _dedup_paths(value)
+
+    @field_validator("routes_urls")
+    @classmethod
+    def validate_routes_urls(cls, value: list[str]) -> list[str]:
+        return _validate_http_url_list(value, field_name="upstream.profiles[].routes_urls")
+
+    @field_validator("domains_urls")
+    @classmethod
+    def validate_domains_urls(cls, value: list[str]) -> list[str]:
+        return _validate_http_url_list(value, field_name="upstream.profiles[].domains_urls")
+
     @field_validator("host_routes")
     @classmethod
     def validate_host_routes(cls, value: list[str]) -> list[str]:
@@ -526,9 +543,7 @@ class UpstreamProfileConfig(StrictModel):
                 raise ValueError(f"upstream profile {self.name!r} requires server")
             if self.auth_type == "password" and not self.username:
                 raise ValueError(f"upstream profile {self.name!r} requires username")
-            if self.auth_type in {"cert", "p12"} and not (
-                self.cert_file or self.cert_file_base64
-            ):
+            if self.auth_type in {"cert", "p12"} and not (self.cert_file or self.cert_file_base64):
                 raise ValueError(
                     f"upstream profile {self.name!r} requires cert_file or cert_file_base64"
                 )
@@ -697,7 +712,6 @@ class RoutingSplitConfig(StrictModel):
     routes_urls: list[str] = Field(default_factory=list)
     domains_files: list[Path] = Field(default_factory=list)
     domains_urls: list[str] = Field(default_factory=list)
-
 
     @field_validator("routes")
     @classmethod
@@ -1029,8 +1043,7 @@ class WebConfig(StrictModel):
     def validate_public_bind(self) -> WebConfig:
         if self.enabled and not (self.admin_password or self.admin_password_hash):
             raise ValueError(
-                "web.admin_password or web.admin_password_hash is required "
-                "when web.enabled is true"
+                "web.admin_password or web.admin_password_hash is required when web.enabled is true"
             )
         if (self.tls_cert is None) != (self.tls_key is None):
             raise ValueError("web.tls_cert and web.tls_key must be configured together")

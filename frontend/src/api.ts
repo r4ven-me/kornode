@@ -95,6 +95,10 @@ export type UpstreamProfile = {
   route_clients_enabled?: boolean;
   routes?: string[];
   domains?: string[];
+  routes_files?: string[];
+  routes_urls?: string[];
+  domains_files?: string[];
+  domains_urls?: string[];
   route_host_enabled?: boolean;
   host_routes?: string[];
   host_domains?: string[];
@@ -130,6 +134,10 @@ export type UpstreamProfileDraft = {
   route_clients_enabled: boolean;
   routes: string;
   domains: string;
+  routesFilesText: string;
+  routesUrlsText: string;
+  domainsFilesText: string;
+  domainsUrlsText: string;
   // Same idea, for the HOST's own traffic through this specific profile --
   // independent toggle and lists.
   route_host_enabled: boolean;
@@ -916,6 +924,52 @@ export function refreshHostDomainsUrl(
   });
 }
 
+export function fetchProfileRoutesSourcesStatus(
+  token: string,
+  name: string
+): Promise<RoutingListStatus> {
+  return requestJson<RoutingListStatus>(
+    `/api/upstream/profiles/${encodeURIComponent(name)}/routes-sources/status`,
+    token
+  );
+}
+
+export function fetchProfileDomainsSourcesStatus(
+  token: string,
+  name: string
+): Promise<RoutingListStatus> {
+  return requestJson<RoutingListStatus>(
+    `/api/upstream/profiles/${encodeURIComponent(name)}/domains-sources/status`,
+    token
+  );
+}
+
+export function refreshProfileRoutesUrl(
+  token: string,
+  name: string,
+  url: string,
+  preview: boolean
+): Promise<RoutingListRefreshResult> {
+  return requestJson<RoutingListRefreshResult>(
+    `/api/upstream/profiles/${encodeURIComponent(name)}/routes-sources/refresh`,
+    token,
+    { method: "POST", body: body({ url, preview }) }
+  );
+}
+
+export function refreshProfileDomainsUrl(
+  token: string,
+  name: string,
+  url: string,
+  preview: boolean
+): Promise<RoutingListRefreshResult> {
+  return requestJson<RoutingListRefreshResult>(
+    `/api/upstream/profiles/${encodeURIComponent(name)}/domains-sources/refresh`,
+    token,
+    { method: "POST", body: body({ url, preview }) }
+  );
+}
+
 export function saveRoutingSettings(
   token: string,
   payload: {
@@ -1249,6 +1303,10 @@ export function saveUpstreamProfile(
       camouflage_secret: payload.camouflage_secret || null,
       routes: payload.routes.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       domains: payload.domains.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
+      routes_files: payload.routesFilesText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
+      routes_urls: payload.routesUrlsText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
+      domains_files: payload.domainsFilesText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
+      domains_urls: payload.domainsUrlsText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       host_routes: payload.host_routes.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       host_domains: payload.host_domains
         .split(/[\n,]+/)

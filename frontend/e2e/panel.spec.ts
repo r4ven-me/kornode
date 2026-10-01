@@ -367,6 +367,14 @@ test("a client's relay lists are edited in Upstream and sent as arrays", async (
   await page
     .getByLabel("Relay domains", { exact: true })
     .fill("internal.example.com\ncorp.example.com");
+  await page.getByLabel("Route files", { exact: true }).fill("/lists/routes.txt");
+  await page
+    .getByLabel("Route URLs", { exact: true })
+    .fill("https://lists.example.com/routes.txt");
+  await page.getByLabel("Domain files", { exact: true }).fill("/lists/domains.txt");
+  await page
+    .getByLabel("Domain URLs", { exact: true })
+    .fill("https://lists.example.com/domains.txt");
   await page.getByRole("button", { name: "Save relay lists", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: "Relay through finance" })).toHaveCount(0);
@@ -380,6 +388,10 @@ test("a client's relay lists are edited in Upstream and sent as arrays", async (
   expect(payload.route_clients_enabled).toBe(true);
   expect(payload.routes).toEqual(["10.50.0.0/16", "10.60.0.0/16"]);
   expect(payload.domains).toEqual(["internal.example.com", "corp.example.com"]);
+  expect(payload.routes_files).toEqual(["/lists/routes.txt"]);
+  expect(payload.routes_urls).toEqual(["https://lists.example.com/routes.txt"]);
+  expect(payload.domains_files).toEqual(["/lists/domains.txt"]);
+  expect(payload.domains_urls).toEqual(["https://lists.example.com/domains.txt"]);
   // Write-only secrets are never resent -- the server keeps the stored ones.
   expect(payload.password).toBeNull();
 });

@@ -217,3 +217,62 @@ def test_routes_files_and_urls_status_report_counts(
     assert urls_status[0]["url"] == url
     assert urls_status[0]["count"] == 1
     assert urls_status[0]["meta"]["valid"] == 1
+
+
+def test_profile_lists_merge_inline_file_and_url_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    routes_file = tmp_path / "profile-routes.txt"
+    domains_file = tmp_path / "profile-domains.txt"
+    routes_file.write_text("10.20.0.0/16\ninvalid\n", encoding="utf-8")
+    domains_file.write_text("file.example.com\ninvalid_domain!\n", encoding="utf-8")
+    route_url = "https://lists.example.com/profile-routes.txt"
+    domain_url = "https://lists.example.com/profile-domains.txt"
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "secrets_dir": tmp_path / "secrets",
+            },
+            "upstream": {
+                "profiles": [
+                    {
+                        "name": "finance",
+                        "server": "vpn.example.com",
+                        "username": "user",
+                        "routes": ["10.10.0.0/16"],
+                        "domains": ["inline.example.com"],
+                        "routes_files": [routes_file],
+                        "domains_files": [domains_file],
+                        "routes_urls": [route_url],
+                        "domains_urls": [domain_url],
+                    }
+                ]
+            },
+        }
+    )
+    service = RoutingService(config)
+    profile = config.upstream.profiles[0]
+
+    monkeypatch.setattr(
+        "kornode.services.external_lists.fetch_url_text",
+        lambda url, **kwargs: (
+            "10.30.0.0/16\n10.10.0.0/16\n"
+            if url == route_url
+            else "url.example.com\ninline.example.com\n"
+        ),
+    )
+    service.refresh_profile_route_url(profile, route_url)
+    service.refresh_profile_domain_url(profile, domain_url)
+
+    assert service.list_profile_routes(profile) == [
+        "10.10.0.0/16",
+        "10.20.0.0/16",
+        "10.30.0.0/16",
+    ]
+    assert service.list_profile_domains(profile) == [
+        "inline.example.com",
+        "file.example.com",
+        "url.example.com",
+    ]

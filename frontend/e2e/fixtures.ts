@@ -368,6 +368,13 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
       await route.fulfill({ json: commandResult });
       return;
     }
+    if (
+      method === "GET" &&
+      /^\/api\/upstream\/profiles\/[^/]+\/(routes|domains)-sources\/status$/.test(path)
+    ) {
+      await route.fulfill({ json: { files: [], urls: [] } });
+      return;
+    }
     await route.fulfill({ json: responses[path] ?? { status: "ok" } });
   });
 }
