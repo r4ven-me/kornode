@@ -33,9 +33,8 @@ import { ConfigView } from "./views/config/ConfigView";
 import { GroupMembersDialog } from "./views/groups/GroupMembersDialog";
 import { GroupsView } from "./views/groups/GroupsView";
 import { UserConfigDialog } from "./views/groups/UserConfigDialog";
-import { ClientProfileDialog } from "./views/clients/ClientProfileDialog";
-import { ClientsSettingsDialog } from "./views/clients/ClientsSettingsDialog";
-import { ClientsView } from "./views/clients/ClientsView";
+import { UpstreamProfileDialog } from "./views/upstream/UpstreamProfileDialog";
+import { UpstreamProfilesSettingsDialog } from "./views/upstream/UpstreamProfilesSettingsDialog";
 import { UpstreamRelayDialog } from "./views/upstream/UpstreamRelayDialog";
 import { UpstreamView } from "./views/upstream/UpstreamView";
 import { P12Base64Dialog } from "./views/users/P12Base64Dialog";
@@ -346,14 +345,14 @@ export function App() {
           />
         )}
 
-        {tab === "config" && configSection === "clients" && (
+        {tab === "config" && configSection === "upstream" && (
           <div className="view-stack">
-            <ClientsView
+            <UpstreamView
               status={state.upstream}
               profiles={state.upstreamProfiles}
-              busy={busy}
-              commandOutput={commandOutputs.upstream ?? null}
-              onClearCommand={() => clearCommand("upstream")}
+              profilesBusy={busy}
+              profilesCommandOutput={commandOutputs.upstream ?? null}
+              onClearProfilesCommand={() => clearCommand("upstream")}
               onSetEnabled={(enabled) => void upstream.saveSettings(enabled)}
               onSetProfileEnabled={(profile, enabled) =>
                 void upstream.setProfileEnabled(profile, enabled)
@@ -366,14 +365,6 @@ export function App() {
               onDisconnectProfile={upstream.disconnectProfile}
               onSyncProfile={(profile) => void upstream.syncProfile(profile)}
               onOpenSettings={upstream.openSettings}
-            />
-          </div>
-        )}
-        {tab === "config" && configSection === "upstream" && (
-          <div className="view-stack">
-            <UpstreamView
-              status={state.upstream}
-              profiles={state.upstreamProfiles}
               serverEnabled={readBoolean(readRecord(state.config?.server).enabled, true)}
               routingDraft={routing.routingDraft}
               routes={state.routes}
@@ -392,7 +383,6 @@ export function App() {
               onPreviewDomainsUrl={(url) => routing.refreshDomainsUrl(url, true)}
               onRefreshDomainsUrl={(url) => routing.refreshDomainsUrl(url, false)}
               onEditRelay={upstream.editRelay}
-              onOpenClients={() => setConfigSection("clients")}
             />
           </div>
         )}
@@ -412,7 +402,7 @@ export function App() {
           />
         )}
         {upstream.profileModalOpen && (
-          <ClientProfileDialog
+          <UpstreamProfileDialog
             key={upstream.profileDialogKey}
             draft={upstream.upstreamDraft}
             isEdit={upstream.editingProfile}
@@ -429,7 +419,7 @@ export function App() {
           />
         )}
         {upstream.settingsModalOpen && (
-          <ClientsSettingsDialog
+          <UpstreamProfilesSettingsDialog
             upstreamInterface={upstream.upstreamInterface}
             checkInterval={upstream.checkInterval}
             checkThreshold={upstream.checkThreshold}

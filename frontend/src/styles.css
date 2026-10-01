@@ -2130,8 +2130,8 @@ code {
 }
 
 /* Marks a field/section whose full behavior (real policy-routing, not just a
-   pushed value) needs a Korvus client: Config → Clients with "Use routes and
-   domains pushed by the server". */
+   pushed value) needs a Korvus client: Config → Upstream, Profiles tab, with
+   "Use routes and domains pushed by the server". */
 .korclient-hint {
   cursor: help;
   display: inline-flex;

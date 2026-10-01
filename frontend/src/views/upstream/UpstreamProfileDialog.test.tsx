@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { emptyUpstreamProfileDraft } from "../../app/state";
-import { ClientProfileDialog } from "./ClientProfileDialog";
+import { UpstreamProfileDialog } from "./UpstreamProfileDialog";
 
 // vitest's config doesn't set `globals: true`, so @testing-library/react's
 // automatic afterEach(cleanup) registration (which relies on detecting a
@@ -11,10 +11,10 @@ import { ClientProfileDialog } from "./ClientProfileDialog";
 // dialog stays mounted, and the next test's queries match duplicates.
 afterEach(cleanup);
 
-describe("ClientProfileDialog kind switch", () => {
+describe("UpstreamProfileDialog kind switch", () => {
   it("shows the OpenConnect server/auth fields by default", () => {
     render(
-      <ClientProfileDialog
+      <UpstreamProfileDialog
         draft={emptyUpstreamProfileDraft}
         isEdit={false}
         busy={null}
@@ -36,7 +36,7 @@ describe("ClientProfileDialog kind switch", () => {
       draft = next;
     });
     const { rerender } = render(
-      <ClientProfileDialog
+      <UpstreamProfileDialog
         draft={draft}
         isEdit={false}
         busy={null}
@@ -53,7 +53,7 @@ describe("ClientProfileDialog kind switch", () => {
     );
 
     rerender(
-      <ClientProfileDialog
+      <UpstreamProfileDialog
         draft={{ ...draft, kind: "external_interface" }}
         isEdit={false}
         busy={null}

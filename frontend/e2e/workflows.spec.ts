@@ -166,7 +166,9 @@ test("per-user and per-group config dialogs save through their own endpoints", a
   });
 });
 
-test("dashboard reload/restart and Clients settings use hydrated values", async ({ page }) => {
+test("dashboard reload/restart and Upstream profiles settings use hydrated values", async ({
+  page
+}) => {
   const mutations: Mutations = [];
   await mockApi(page, {
     mutations,
@@ -182,7 +184,7 @@ test("dashboard reload/restart and Clients settings use hydrated values", async 
     true
   );
 
-  await openConfigSection(page, "Clients");
+  await openConfigSection(page, "Upstream");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).last().click();
   expect(await mutationBody(mutations, "/api/upstream/settings")).toMatchObject({
@@ -208,7 +210,7 @@ test("certificates page shows the connection pin other servers use to trust this
   await expect(page.getByLabel("SHA-256 fingerprint")).toHaveValue("sha256:ab");
 });
 
-test("a client can fetch and pin the server certificate after confirmation", async ({
+test("a profile can fetch and pin the server certificate after confirmation", async ({
   page
 }) => {
   const mutations: Mutations = [];
@@ -220,8 +222,8 @@ test("a client can fetch and pin the server certificate after confirmation", asy
   });
   await signIn(page);
 
-  await openConfigSection(page, "Clients");
-  await page.getByRole("button", { name: "Create client", exact: true }).click();
+  await openConfigSection(page, "Upstream");
+  await page.getByRole("button", { name: "Add profile", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Name", { exact: true }).fill("remote");
   await dialog.getByLabel("Server", { exact: true }).fill("vpn.example.com");
@@ -238,7 +240,7 @@ test("a client can fetch and pin the server certificate after confirmation", asy
 
   await dialog.getByLabel("Username", { exact: true }).fill("user");
   await dialog.getByLabel("Password", { exact: true }).fill("secret");
-  await dialog.getByRole("button", { name: "Save client", exact: true }).click();
+  await dialog.getByRole("button", { name: "Save profile", exact: true }).click();
   expect(await mutationBody(mutations, "/api/upstream/profiles")).toMatchObject({
     name: "remote",
     server_cert_pin: "pin-sha256:UPSTREAMpin0000000000000000000000000000000="

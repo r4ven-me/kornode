@@ -3,10 +3,10 @@ import type { FormEvent } from "react";
 import { BulkListEditor } from "../../components/BulkListEditor";
 import { SettingsTabs } from "../../components/SettingsTabs";
 import { IconButton } from "../../components/ui";
-import { type RoutingDraft, RoutingListSourcesPanel } from "../upstream/RoutingListSourcesPanel";
+import { type RoutingDraft, RoutingListSourcesPanel } from "./RoutingListSourcesPanel";
 import type { RoutingListStatus } from "../../api";
 
-export function ClientsSettingsDialog({
+export function UpstreamProfilesSettingsDialog({
   upstreamInterface,
   checkInterval,
   checkThreshold,
@@ -75,11 +75,11 @@ export function ClientsSettingsDialog({
     <div className="modal-backdrop" role="presentation">
       <section className="modal-panel" role="dialog" aria-modal="true">
         <div className="panel-header">
-          <h2>Clients settings</h2>
+          <h2>Upstream profiles settings</h2>
           <IconButton label="Close" icon={X} onClick={onClose} />
         </div>
         <form className="upstream-settings-form" onSubmit={onSave}>
-          <SettingsTabs ariaLabel="Clients settings">
+          <SettingsTabs ariaLabel="Upstream profiles settings">
           <details className="settings-details upstream-settings-section">
             <summary>Connection &amp; health</summary>
             <div className="settings-grid settings-details-body">
@@ -90,7 +90,7 @@ export function ClientsSettingsDialog({
                   onChange={(event) => onInterfaceChange(event.target.value)}
                 />
               </label>
-              <label title="Health-check target for the default client, pinged through its tunnel">
+              <label title="Health-check target for the default profile, pinged through its tunnel">
                 <span>Check host</span>
                 <input
                   value={checkHost}
@@ -131,7 +131,7 @@ export function ClientsSettingsDialog({
               </label>
               <label
                 className="switch"
-                title="When health checks fail, try the other configured clients in turn (after reconnecting the default one first)"
+                title="When health checks fail, try the other configured profiles in turn (after reconnecting the default one first)"
               >
                 <input
                   checked={failover}
@@ -142,7 +142,7 @@ export function ClientsSettingsDialog({
               </label>
               <label
                 className="switch"
-                title="Whether the watchdog dials the default client on its own the first time it sees it down after the server/container starts. Off leaves it disconnected after a restart until an admin connects it manually -- once any connection succeeds, normal reconnect-on-failure resumes regardless of this flag."
+                title="Whether the watchdog dials the default profile on its own the first time it sees it down after the server/container starts. Off leaves it disconnected after a restart until an admin connects it manually -- once any connection succeeds, normal reconnect-on-failure resumes regardless of this flag."
               >
                 <input
                   checked={connectOnBoot}
@@ -177,9 +177,9 @@ export function ClientsSettingsDialog({
                 <div className="settings-details-body">
                   <p className="muted-line">
                     Does this host itself send its own outbound traffic through the default
-                    client? Each client can also carry its own host routes (and the lists its
-                    server pushes) -- see the client&rsquo;s edit dialog.
-                    {!upstreamEnabled && " Inert until Clients are enabled."}
+                    profile? Each profile can also carry its own host routes (and the lists its
+                    server pushes) -- see the profile&rsquo;s edit dialog.
+                    {!upstreamEnabled && " Inert until upstream profiles are enabled."}
                   </p>
                   <label className="switch">
                     <input
@@ -190,7 +190,7 @@ export function ClientsSettingsDialog({
                       }
                       type="checkbox"
                     />
-                    <span>Route this host&rsquo;s own traffic through the default client</span>
+                    <span>Route this host&rsquo;s own traffic through the default profile</span>
                   </label>
                   {routingDraft.hostTraffic && (
                     <label
@@ -222,8 +222,8 @@ export function ClientsSettingsDialog({
                   {routingDraft.hostTraffic && routingDraft.hostMode === "split" ? (
                     <div className="routing-substep">
                       <p className="muted-line">
-                        Own list, separate from the Upstream relay lists -- the host follows
-                        these routes/domains, not the VPN users&rsquo;.
+                        Own list, separate from the Routing tab&rsquo;s relay lists -- the host
+                        follows these routes/domains, not the VPN users&rsquo;.
                       </p>
                       <section className="split">
                         <BulkListEditor

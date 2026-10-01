@@ -5,7 +5,7 @@ import { SettingsTabs } from "../../components/SettingsTabs";
 import { ActionButton, IconButton, Pill } from "../../components/ui";
 import type { ServerRouting, UpstreamProfileDraft } from "../../api";
 
-export function ClientProfileDialog({
+export function UpstreamProfileDialog({
   draft,
   isEdit,
   busy,
@@ -39,7 +39,7 @@ export function ClientProfileDialog({
     <div className="modal-backdrop" role="presentation">
       <section className="modal-panel" role="dialog" aria-modal="true">
         <div className="panel-header">
-          <h2>{isEdit ? `${draft.name} client` : "New client"}</h2>
+          <h2>{isEdit ? `${draft.name} profile` : "New profile"}</h2>
           <IconButton label="Close" icon={X} onClick={onClose} />
         </div>
         <form className="settings-grid" onSubmit={onSave}>
@@ -48,7 +48,7 @@ export function ClientProfileDialog({
               <span>Name</span>
               <input
                 disabled={isEdit}
-                title={isEdit ? "Delete and recreate the client to rename it" : undefined}
+                title={isEdit ? "Delete and recreate the profile to rename it" : undefined}
                 value={draft.name}
                 onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
                 required
@@ -58,7 +58,7 @@ export function ClientProfileDialog({
               <span>Kind</span>
               <select
                 disabled={isEdit}
-                title={isEdit ? "Delete and recreate the client to change its kind" : undefined}
+                title={isEdit ? "Delete and recreate the profile to change its kind" : undefined}
                 value={draft.kind}
                 onChange={(event) =>
                   onDraftChange({
@@ -74,7 +74,7 @@ export function ClientProfileDialog({
           </div>
 
           <div className="field-full-width">
-          <SettingsTabs ariaLabel="Client settings">
+          <SettingsTabs ariaLabel="Profile settings">
             <details className="settings-details">
               <summary>Connection &amp; auth</summary>
               <div className="settings-grid settings-details-body">
@@ -103,7 +103,7 @@ export function ClientProfileDialog({
                   title={
                     draft.kind === "external_interface"
                       ? "Device already brought up outside kornode (e.g. an externally-managed WireGuard interface). kornode never creates, brings up, or tears this down -- only applies routing on top of it."
-                      : "Tunnel device for this client's own connection; each client needs its own so several can stay connected at once. Leave empty for an auto-assigned name."
+                      : "Tunnel device for this profile's own connection; each profile needs its own so several can stay connected at once. Leave empty for an auto-assigned name."
                   }
                 >
                   <span>Interface</span>
@@ -114,7 +114,7 @@ export function ClientProfileDialog({
                     required={draft.kind === "external_interface"}
                   />
                 </label>
-                <label title="fwmark/table id offset for this client's own host/relay routes, added to the routing fwmark/table id. Leave empty to derive it from the client's position in the list; each client needs a distinct value.">
+                <label title="fwmark/table id offset for this profile's own host/relay routes, added to the routing fwmark/table id. Leave empty to derive it from the profile's position in the list; each profile needs a distinct value.">
                   <span>Routing offset</span>
                   <input
                     type="number"
@@ -309,7 +309,7 @@ export function ClientProfileDialog({
               <div className="settings-details-body">
                 <label
                   className="switch"
-                  title="Route this host's own traffic (not VPN users) through this client, on its own subnet/domain lists -- independent of the relay lists in Upstream and of the default host routing in Clients settings."
+                  title="Route this host's own traffic (not VPN users) through this profile, on its own subnet/domain lists -- independent of the relay lists in the Routing tab and of the default host routing in Upstream profiles settings."
                 >
                   <input
                     checked={draft.route_host_enabled}
@@ -318,7 +318,7 @@ export function ClientProfileDialog({
                     }
                     type="checkbox"
                   />
-                  <span>Route this host&rsquo;s traffic through this client</span>
+                  <span>Route this host&rsquo;s traffic through this profile</span>
                 </label>
                 {draft.route_host_enabled && (
                   <div className="settings-grid">
@@ -347,7 +347,7 @@ export function ClientProfileDialog({
                 {draft.route_host_enabled && draft.kind === "openconnect" && (
                   <label
                     className="switch"
-                    title="Also route whatever the server pushes to this account: its route = lines (CISCO_SPLIT_INC) and split-dns = domains (CISCO_SPLIT_DNS), set per user/group in that server's panel. Pushed domains resolve through the server's own DNS, so point this host's resolver at the built-in dnsmasq (Clients settings → Host traffic → Host DNS)."
+                    title="Also route whatever the server pushes to this account: its route = lines (CISCO_SPLIT_INC) and split-dns = domains (CISCO_SPLIT_DNS), set per user/group in that server's panel. Pushed domains resolve through the server's own DNS, so point this host's resolver at the built-in dnsmasq (Upstream profiles settings → Host traffic → Host DNS)."
                   >
                     <input
                       checked={draft.accept_server_routes}
@@ -387,7 +387,7 @@ export function ClientProfileDialog({
                       </label>
                       <label
                         className="switch"
-                        title="Verify the panel's TLS certificate against the system CA store. Off by default: the request already travels inside this client's authenticated tunnel, and panels usually run on their own self-signed certificate."
+                        title="Verify the panel's TLS certificate against the system CA store. Off by default: the request already travels inside this profile's authenticated tunnel, and panels usually run on their own self-signed certificate."
                       >
                         <input
                           checked={draft.sync_verify_tls}
@@ -427,25 +427,25 @@ export function ClientProfileDialog({
             )}
             <label
               className="switch"
-              title="Turns on the whole Clients feature (upstream.enabled) when you save -- affects every client, not just this one. Leave off while you're still setting things up. Independent of 'This client enabled' below, which only concerns this one client."
+              title="Turns on the whole Upstream profiles feature (upstream.enabled) when you save -- affects every profile, not just this one. Leave off while you're still setting things up. Independent of 'This profile enabled' below, which only concerns this one profile."
             >
               <input
                 checked={draft.enable}
                 onChange={(event) => onDraftChange({ ...draft, enable: event.target.checked })}
                 type="checkbox"
               />
-              <span>Turn on Clients (all clients)</span>
+              <span>Turn on upstream profiles (all profiles)</span>
             </label>
             <label
               className="switch"
-              title="This client only -- not the whole Clients feature (see the toggle above for that). Whether the watchdog keeps THIS specific client dialed. Off disconnects it (if it's the default client, that also clears the default selection) and keeps the watchdog from redialing it -- independent of failover, which only controls automatic switching."
+              title="This profile only -- not the whole Upstream profiles feature (see the toggle above for that). Whether the watchdog keeps THIS specific profile dialed. Off disconnects it (if it's the default profile, that also clears the default selection) and keeps the watchdog from redialing it -- independent of failover, which only controls automatic switching."
             >
               <input
                 checked={draft.enabled}
                 onChange={(event) => onDraftChange({ ...draft, enabled: event.target.checked })}
                 type="checkbox"
               />
-              <span>This client enabled</span>
+              <span>This profile enabled</span>
             </label>
           </div>
           <div className="modal-actions">
@@ -455,7 +455,7 @@ export function ClientProfileDialog({
               type="submit"
             >
               <Save size={18} aria-hidden="true" />
-              <span>Save client</span>
+              <span>Save profile</span>
             </button>
           </div>
         </form>

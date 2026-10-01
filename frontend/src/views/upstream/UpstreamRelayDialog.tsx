@@ -4,11 +4,12 @@ import { IconButton } from "../../components/ui";
 import type { RoutingListStatus, UpstreamProfileDraft } from "../../api";
 import { RoutingListSourcesPanel } from "./RoutingListSourcesPanel";
 
-// One client's own relay lists: VPN users' destinations that always go
-// through this specific client (UpstreamProfileConfig.route_clients_enabled/
-// routes/domains), edited from the Upstream section. Saved through the same
-// profile endpoint as the Clients dialog; the draft carries the rest of the
-// client unchanged (secrets stay write-only and are kept server-side).
+// One profile's own relay lists: VPN users' destinations that always go
+// through this specific profile (UpstreamProfileConfig.route_clients_enabled/
+// routes/domains), edited from the Routing tab. Saved through the same
+// profile endpoint as the Profiles tab's edit dialog; the draft carries the
+// rest of the profile unchanged (secrets stay write-only and are kept
+// server-side).
 export function UpstreamRelayDialog({
   draft,
   busy,
@@ -44,7 +45,7 @@ export function UpstreamRelayDialog({
         <form className="settings-grid" onSubmit={onSave}>
           <label
             className="switch field-full-width"
-            title="Route these specific CIDRs/domains of VPN users through this client, regardless of which client is the default."
+            title="Route these specific CIDRs/domains of VPN users through this profile, regardless of which profile is the default."
           >
             <input
               checked={draft.route_clients_enabled}
@@ -53,7 +54,7 @@ export function UpstreamRelayDialog({
               }
               type="checkbox"
             />
-            <span>Relay VPN users&rsquo; traffic through this client</span>
+            <span>Relay VPN users&rsquo; traffic through this profile</span>
           </label>
           {draft.route_clients_enabled && (
             <div className="settings-grid field-full-width">
@@ -83,7 +84,7 @@ export function UpstreamRelayDialog({
                   urlsLabel="Route URLs"
                   urlsPlaceholder={"https://example.com/relay-routes.txt"}
                   disabled={!draft.route_clients_enabled}
-                  disabledHint="Inert until relaying VPN users' traffic through this client is on"
+                  disabledHint="Inert until relaying VPN users' traffic through this profile is on"
                   filesText={draft.routesFilesText}
                   urlsText={draft.routesUrlsText}
                   status={routesStatus}
@@ -103,7 +104,7 @@ export function UpstreamRelayDialog({
                   urlsLabel="Domain URLs"
                   urlsPlaceholder={"https://example.com/relay-domains.txt"}
                   disabled={!draft.route_clients_enabled}
-                  disabledHint="Inert until relaying VPN users' traffic through this client is on"
+                  disabledHint="Inert until relaying VPN users' traffic through this profile is on"
                   filesText={draft.domainsFilesText}
                   urlsText={draft.domainsUrlsText}
                   status={domainsStatus}

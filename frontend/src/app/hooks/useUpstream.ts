@@ -52,8 +52,8 @@ export function useUpstream(
   const [profileDialogKey, setProfileDialogKey] = useState(0);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
-  // Upstream section: one client's own relay lists (route_clients_enabled/
-  // routes/domains), edited separately from the Clients dialog.
+  // Routing tab: one profile's own relay lists (route_clients_enabled/
+  // routes/domains), edited separately from the Profiles tab's edit dialog.
   const [relayDraft, setRelayDraft] = useState<UpstreamProfileDraft | null>(null);
   const [relayRoutesStatus, setRelayRoutesStatus] = useState<RoutingListStatus | null>(null);
   const [relayDomainsStatus, setRelayDomainsStatus] = useState<RoutingListStatus | null>(null);
@@ -80,12 +80,7 @@ export function useUpstream(
   });
 
   useEffect(() => {
-    if (
-      tab !== "config" ||
-      (configSection !== "clients" && configSection !== "upstream") ||
-      !authToken ||
-      !authInfo
-    ) {
+    if (tab !== "config" || configSection !== "upstream" || !authToken || !authInfo) {
       return;
     }
     // The watchdog connects/reconnects in the background, so the
@@ -111,7 +106,7 @@ export function useUpstream(
   const saveSettings = async (enabled: boolean) => {
     const result = await runAction(
       "upstream-settings",
-      `Clients ${enabled ? "enabled" : "disabled"}`,
+      `Upstream profiles ${enabled ? "enabled" : "disabled"}`,
       (token) =>
         saveUpstreamSettings(token, {
           enabled,

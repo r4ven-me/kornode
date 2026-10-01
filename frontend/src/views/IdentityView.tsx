@@ -348,7 +348,7 @@ export function IdentityView({
           <div className="panel-header">
             <h2>
               Group policy
-              <KorclientHint text="Routes and Split DNS below reach any client over the standard AnyConnect handshake, and are also synced live to connected Korvus clients (Config → Clients on the other server: “Use routes and domains pushed by the server” with a sync URL) via GET /api/client/routing — changes apply without reconnecting." />
+              <KorclientHint text="Routes and Split DNS below reach any client over the standard AnyConnect handshake, and are also synced live to connected Korvus clients (Config → Upstream, Profiles tab, on the other server: “Use routes and domains pushed by the server” with a sync URL) via GET /api/client/routing — changes apply without reconnecting." />
             </h2>
           </div>
           <form onSubmit={onSaveGroup}>

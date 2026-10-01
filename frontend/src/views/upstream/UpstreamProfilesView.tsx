@@ -16,11 +16,11 @@ import { ActionButton, IconButton, Pill } from "../../components/ui";
 import { formatDuration } from "../../lib/format";
 import type { CommandResult, ServerRouting, UpstreamProfile, UpstreamStatus } from "../../api";
 
-// Config → Clients: the outbound OpenConnect connections themselves (what
-// used to be "upstream profiles", config key upstream.profiles) and the
-// host's own traffic through them. Relaying VPN users' traffic through a
-// client is the separate Upstream section.
-export function ClientsView({
+// Config → Upstream → Profiles: the outbound OpenConnect connections
+// themselves (config key upstream.profiles) and the host's own traffic
+// through them. Relaying VPN users' traffic through a profile is the
+// sibling Routing tab, see views/upstream/UpstreamView.tsx.
+export function UpstreamProfilesView({
   status,
   profiles,
   busy,
@@ -77,9 +77,9 @@ export function ClientsView({
   return (
     <section className="panel upstream-profiles-panel">
       <div className="panel-header">
-        <h2>Clients</h2>
+        <h2>Upstream profiles</h2>
         <div className="toolbar">
-          <Pill kind={enabled ? "ok" : "muted"}>{enabled ? "Clients enabled" : "Clients disabled"}</Pill>
+          <Pill kind={enabled ? "ok" : "muted"}>{enabled ? "Profiles enabled" : "Profiles disabled"}</Pill>
           <ActionButton label="Settings" icon={Settings} onClick={onOpenSettings} />
           <ActionButton
             label={enabled ? "Disable" : "Enable"}
@@ -90,18 +90,18 @@ export function ClientsView({
             busy={busy === "upstream-settings"}
             onClick={() => onSetEnabled(!enabled)}
           />
-          <ActionButton label="Create client" icon={Plus} onClick={onCreateProfile} />
+          <ActionButton label="Add profile" icon={Plus} onClick={onCreateProfile} />
         </div>
       </div>
       <p className="muted-line">
-        Outbound OpenConnect connections from this host to other VPN servers. A client can
+        Outbound OpenConnect connections from this host to other VPN servers. A profile can
         carry this host&rsquo;s own traffic (host routing, optionally with the routes and
-        split-DNS domains the server pushes) and serve as the Upstream for this
-        server&rsquo;s VPN users.
+        split-DNS domains the server pushes) and serve as the default target for the Routing
+        tab&rsquo;s relay.
       </p>
       <Table
         columns={["Name", "Server", "Interface", "Status", "Server lists", "Actions"]}
-        empty="No clients yet"
+        empty="No profiles yet"
       >
         {sortedProfiles.map((profile) => {
           const connection = connectionFor(profile.name);
@@ -185,7 +185,7 @@ export function ClientsView({
                     />
                   )}
                   <IconButton
-                    label={isDefault ? "Default client" : "Make default client"}
+                    label={isDefault ? "Default profile" : "Make default profile"}
                     icon={isDefault ? CheckCircle2 : Star}
                     disabled={isDefault || !profile.enabled}
                     busy={busy === `switch-${profile.name}`}
@@ -194,8 +194,8 @@ export function ClientsView({
                   <IconButton
                     label={
                       profile.enabled
-                        ? "Disable client (stop watchdog, disconnect)"
-                        : "Enable client (let watchdog dial it)"
+                        ? "Disable profile (stop watchdog, disconnect)"
+                        : "Enable profile (let watchdog dial it)"
                     }
                     icon={Power}
                     danger={profile.enabled}
@@ -203,12 +203,12 @@ export function ClientsView({
                     onClick={() => onSetProfileEnabled(profile.name, !profile.enabled)}
                   />
                   <IconButton
-                    label="Edit client"
+                    label="Edit profile"
                     icon={Pencil}
                     onClick={() => onEditProfile(profile)}
                   />
                   <IconButton
-                    label="Delete client"
+                    label="Delete profile"
                     icon={Trash2}
                     danger
                     busy={busy === `upstream-profile-delete-${profile.name}`}
@@ -221,7 +221,11 @@ export function ClientsView({
         })}
       </Table>
       {commandOutput && (
-        <LastCommandPanel title="Last clients command" result={commandOutput} onClose={onClearCommand} />
+        <LastCommandPanel
+          title="Last upstream profile command"
+          result={commandOutput}
+          onClose={onClearCommand}
+        />
       )}
     </section>
   );

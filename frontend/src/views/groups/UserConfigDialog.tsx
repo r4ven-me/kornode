@@ -73,7 +73,7 @@ export function UserConfigDialog({
           <section>
             <h3>
               DNS and routes
-              <KorclientHint text="Routes and Split DNS below reach any client over the standard AnyConnect handshake, and are also synced live to connected Korvus clients (Config → Clients on the other server: “Use routes and domains pushed by the server” with a sync URL) via GET /api/client/routing — changes apply without reconnecting." />
+              <KorclientHint text="Routes and Split DNS below reach any client over the standard AnyConnect handshake, and are also synced live to connected Korvus clients (Config → Upstream, Profiles tab, on the other server: “Use routes and domains pushed by the server” with a sync URL) via GET /api/client/routing — changes apply without reconnecting." />
             </h3>
             <div className="settings-grid">
               <ListField label="DNS" value={draft.dns} onChange={(value) => updateList("dns", value)} />
