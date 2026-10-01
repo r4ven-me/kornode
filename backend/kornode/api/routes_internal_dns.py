@@ -100,10 +100,13 @@ def save_internal_dns_settings(
     }
 
 
-def _client_dns_signature(config: AppConfig) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
+def _client_dns_signature(
+    config: AppConfig,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], bool]:
     return (
         tuple(config.client_dns_servers()),
         tuple(config.server.search_domains),
+        tuple(config.internal_dns.forward_domains),
         config.dns_tunnel_active(),
     )
 

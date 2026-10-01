@@ -75,7 +75,7 @@ dns = {{ dns }}
 {% if dns_tunnel_active %}
 tunnel-all-dns = true
 {% endif %}
-{% for domain in config.server.search_domains %}
+{% for domain in split_dns_domains %}
 split-dns = {{ domain }}
 {% endfor %}
 {% if config.server.search_domains %}

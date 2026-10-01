@@ -176,6 +176,34 @@ internal_dns:
     assert payload["internal_dns"]["local_records"] == ["nas.corp.local 10.11.11.5"]
 
 
+def test_forward_domains_change_reconnects_clients_and_feeds_split_dns(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+
+    response = client.post(
+        "/api/internal-dns/settings",
+        auth=("admin", "secret"),
+        json={
+            "forward_upstreams": ["127.207.207.1"],
+            "forward_domains": ["r4ven.lan"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reconnect_required"] is True
+    assert payload["internal_dns"]["effective_reasons"] == ["forward_domains"]
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["internal_dns"]["forward_upstreams"] == ["127.207.207.1"]
+    assert saved["internal_dns"]["forward_domains"] == ["r4ven.lan"]
+
+    ocserv_conf = (tmp_path / "generated" / "ocserv.conf").read_text(encoding="utf-8")
+    assert "split-dns = r4ven.lan" in ocserv_conf
+
+
 def test_internal_dns_settings_rejects_bad_url(tmp_path: Path) -> None:
     client = _client(tmp_path / "config.yaml", tmp_path)
 

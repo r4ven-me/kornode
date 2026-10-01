@@ -22,6 +22,11 @@ server:
     - 10.20.0.0/16
   search_domains:
     - corp.example.com
+internal_dns:
+  forward_upstreams:
+    - 10.10.10.1
+  forward_domains:
+    - r4ven.lan
 identity:
   config_per_user_dir: {tmp_path}/generated/config-per-user
 web:
@@ -91,7 +96,12 @@ def test_client_routing_merges_server_group_and_user_lists(
     payload = response.json()
     assert payload["username"] == "alice"
     assert payload["routes"] == ["10.20.0.0/16", "192.168.25.0/24", "203.0.113.0/24"]
-    assert payload["split_dns"] == ["corp.example.com", "devops.example.com", "kernel.org"]
+    assert payload["split_dns"] == [
+        "corp.example.com",
+        "r4ven.lan",
+        "devops.example.com",
+        "kernel.org",
+    ]
     assert len(payload["version"]) == 16
 
     repeat = vpn_client.get("/api/client/routing").json()

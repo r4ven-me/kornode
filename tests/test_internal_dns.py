@@ -263,6 +263,24 @@ def test_dns_tunnel_active_when_a_named_upstream_target_has_domains(tmp_path: Pa
     assert config.dns_tunnel_active()
 
 
+def test_dns_tunnel_active_when_forward_domains_configured_alone(tmp_path: Path) -> None:
+    # forward_upstreams/forward_domains must start dnsmasq on their own --
+    # otherwise the forwarding config they describe is silently dead, since
+    # there is no dnsmasq process to do the forwarding.
+    config = _config(
+        tmp_path,
+        {
+            "internal_dns": {
+                "forward_upstreams": ["127.207.207.1"],
+                "forward_domains": ["r4ven.lan"],
+            }
+        },
+    )
+
+    assert not config.internal_dns.resolver_enabled
+    assert config.dns_tunnel_active()
+
+
 def test_dnsmasq_render_includes_blocklist_and_upstreams(tmp_path: Path) -> None:
     config = _config(tmp_path, {"internal_dns": {"blocklist_enabled": True}})
     rendered = DnsmasqConfigRenderer().render(config)

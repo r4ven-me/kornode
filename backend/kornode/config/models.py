@@ -1158,6 +1158,8 @@ class AppConfig(StrictModel):
             reasons.append("blocklist_enabled")
         if settings.local_records_enabled:
             reasons.append("local_records_enabled")
+        if settings.forward_domains:
+            reasons.append("forward_domains")
         if (
             self.routing.client_traffic
             and self.routing.mode == "split"

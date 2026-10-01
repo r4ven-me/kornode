@@ -28,10 +28,16 @@ class OcservConfigRenderer(TemplateRenderer):
             server_key = config.cert_path("server.key")
             ca_cert = config.cert_path("ca.crt")
 
+        split_dns_domains: list[str] = []
+        for domain in [*config.server.search_domains, *config.internal_dns.forward_domains]:
+            if domain not in split_dns_domains:
+                split_dns_domains.append(domain)
+
         context: dict[str, Any] = {
             "config": config,
             "client_dns": config.client_dns_servers(),
             "dns_tunnel_active": config.dns_tunnel_active(),
+            "split_dns_domains": split_dns_domains,
             "auth_lines": auth_lines,
             "select_groups": _select_group_lines(config),
             "server_cert": server_cert,

@@ -309,3 +309,54 @@ def test_config_service_renders_group_policy_files(tmp_path: Path) -> None:
     assert (config.identity.config_per_group_dir / "admins").read_text(
         encoding="utf-8"
     ).count("route = 10.40.0.0/16") == 1
+
+
+def test_ocserv_render_includes_internal_dns_forward_domains_in_split_dns(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "data_dir": str(tmp_path / "data"),
+                "generated_dir": str(tmp_path / "generated"),
+                "secrets_dir": str(tmp_path / "secrets"),
+            },
+            "internal_dns": {
+                "forward_upstreams": ["127.207.207.1"],
+                "forward_domains": ["r4ven.lan"],
+            },
+        },
+        environ={},
+    )
+
+    rendered = OcservConfigRenderer().render(config)
+
+    assert "split-dns = r4ven.lan" in rendered
+    # default-domain stays tied to search_domains, not to forward zones.
+    assert "default-domain" not in rendered
+
+
+def test_ocserv_render_dedupes_split_dns_shared_between_search_and_forward(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "data_dir": str(tmp_path / "data"),
+                "generated_dir": str(tmp_path / "generated"),
+                "secrets_dir": str(tmp_path / "secrets"),
+            },
+            "server": {"search_domains": ["r4ven.lan"]},
+            "internal_dns": {
+                "forward_upstreams": ["127.207.207.1"],
+                "forward_domains": ["r4ven.lan"],
+            },
+        },
+        environ={},
+    )
+
+    rendered = OcservConfigRenderer().render(config)
+
+    assert rendered.count("split-dns = r4ven.lan") == 1

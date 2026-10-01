@@ -29,9 +29,7 @@ def client_routing(request: Request) -> dict[str, object]:
     username = _authenticate_vpn_client(request, config)
     routes, split_dns = _effective_routing(config, username)
     payload = {"routes": routes, "split_dns": split_dns}
-    version = hashlib.sha256(
-        json.dumps(payload, sort_keys=True).encode("utf-8")
-    ).hexdigest()[:16]
+    version = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return {"username": username, "version": version, **payload}
 
 
@@ -59,7 +57,10 @@ def _effective_routing(config: AppConfig, username: str) -> tuple[list[str], lis
     """Collect the routes/split-DNS the server would push to this user.
 
     Mirrors ocserv's merge order: global server config, then the user's
-    groups (config-per-group files), then the per-user config.
+    groups (config-per-group files), then the per-user config. Internal DNS
+    forward zones are also split-DNS zones for a connected client: its local
+    resolver must send those names to the DNS server reached through the
+    tunnel rather than to a public resolver.
     """
     routes: list[str] = []
     split_dns: list[str] = []
@@ -72,7 +73,10 @@ def _effective_routing(config: AppConfig, username: str) -> tuple[list[str], lis
             if item not in split_dns:
                 split_dns.append(item)
 
-    extend(config.server.routes, config.server.search_domains)
+    extend(
+        config.server.routes,
+        [*config.server.search_domains, *config.internal_dns.forward_domains],
+    )
 
     users = UserService(config)
     groups = GroupConfigService(config)
