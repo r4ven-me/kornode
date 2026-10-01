@@ -1618,15 +1618,21 @@ def test_upstream_lock_serializes_across_service_instances(tmp_path: Path) -> No
 def test_upstream_lock_is_reentrant_within_one_instance(tmp_path: Path) -> None:
     # Regression test: enforce_profile_enablement()/recover() call
     # self.connect()/self.disconnect()/self.switch_profile() internally --
-    # all of which also acquire the same lock. Re-locking the SAME fd must
-    # not deadlock (unlike two independently opened fds, see the test
-    # above).
+    # all of which also acquire the same lock. Nested calls must reuse the
+    # outer operation's fd rather than opening a second fd and deadlocking
+    # against themselves.
     config = _config(tmp_path)
     service = UpstreamService(config)
 
-    with service._locked(), service._locked():
-        pass
+    with service._locked():
+        outer_fd = service._lock_fd
+        assert outer_fd is not None
+        with service._locked():
+            assert service._lock_fd == outer_fd
     assert service._lock_depth == 0
+    assert service._lock_fd is None
+    with pytest.raises(OSError):
+        os.fstat(outer_fd)
 
 
 def test_watchdog_respects_connect_on_boot_until_first_connection(

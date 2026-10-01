@@ -91,12 +91,12 @@ class UpstreamService:
         misrouting marked traffic until the next tick.
 
         fcntl.flock on a fixed file serializes this across processes.
-        Reentrant *within one instance* via a depth counter and one
-        persistent fd, so a method that calls another locking method on
-        `self` (e.g. enforce_profile_enablement() calling self.connect())
-        doesn't self-deadlock -- re-flocking the SAME fd is a no-op, but two
-        independently-opened fds from the same process are treated as
-        unrelated locks by flock(2) and would deadlock against each other.
+        Reentrant *within one instance* via a depth counter and one fd for
+        the outermost operation, so a method that calls another locking
+        method on `self` (e.g. enforce_profile_enablement() calling
+        self.connect()) doesn't self-deadlock. The fd is closed when that
+        outermost operation finishes: the watchdog creates a fresh service
+        every tick, so keeping it open would leak one descriptor per tick.
         """
         if self._lock_depth == 0:
             if self._lock_fd is None:
@@ -109,7 +109,12 @@ class UpstreamService:
         finally:
             self._lock_depth -= 1
             if self._lock_depth == 0 and self._lock_fd is not None:
-                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                lock_fd = self._lock_fd
+                self._lock_fd = None
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock_fd)
 
     def list_profiles(self) -> list[UpstreamProfileConfig]:
         return self.config.upstream.profiles
@@ -450,9 +455,7 @@ class UpstreamService:
         self.files.atomic_write_text(path, f"key-password={profile.cert_pass}\n", mode=0o600)
         return path
 
-    def _accepted_server_pin(
-        self, profile: UpstreamProfileConfig, *, dry_run: bool
-    ) -> str | None:
+    def _accepted_server_pin(self, profile: UpstreamProfileConfig, *, dry_run: bool) -> str | None:
         """Pin for a trusted_cert ("no cert check") profile. RUNTIME: network.
 
         Accepts whatever certificate the server presents right now, which is
@@ -1026,9 +1029,7 @@ class UpstreamService:
         # 10.10.10.0/24) would be unreachable through the tunnel.
         own_network = ipaddress.ip_network(self.config.server.ipv4_network, strict=False)
         overlapping = [
-            item
-            for item in [*pushed.routes, *pushed.dns]
-            if _overlaps(item, own_network)
+            item for item in [*pushed.routes, *pushed.dns] if _overlaps(item, own_network)
         ]
         if overlapping:
             warnings.append(
