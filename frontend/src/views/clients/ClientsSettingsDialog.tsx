@@ -209,7 +209,7 @@ export function ClientsSettingsDialog({
                         }
                       >
                         <option value="full">Full (all host traffic)</option>
-                        <option value="split">Split (only the routes/domains below)</option>
+                        <option value="split">Split (routes/domains in the Host routes tab)</option>
                       </select>
                     </label>
                   )}

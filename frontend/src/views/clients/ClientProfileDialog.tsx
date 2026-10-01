@@ -1,4 +1,4 @@
-import { Fingerprint, Save, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Fingerprint, Save, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { CertSourceField, type CertSourceMode } from "../../components/CertSourceField";
 import { SettingsTabs } from "../../components/SettingsTabs";
@@ -43,33 +43,35 @@ export function ClientProfileDialog({
           <IconButton label="Close" icon={X} onClick={onClose} />
         </div>
         <form className="settings-grid" onSubmit={onSave}>
-          <label>
-            <span>Name</span>
-            <input
-              disabled={isEdit}
-              title={isEdit ? "Delete and recreate the client to rename it" : undefined}
-              value={draft.name}
-              onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
-              required
-            />
-          </label>
-          <label>
-            <span>Kind</span>
-            <select
-              disabled={isEdit}
-              title={isEdit ? "Delete and recreate the client to change its kind" : undefined}
-              value={draft.kind}
-              onChange={(event) =>
-                onDraftChange({
-                  ...draft,
-                  kind: event.target.value as UpstreamProfileDraft["kind"]
-                })
-              }
-            >
-              <option value="openconnect">OpenConnect (kornode dials out)</option>
-              <option value="external_interface">Existing interface (externally managed)</option>
-            </select>
-          </label>
+          <div className="settings-grid field-full-width">
+            <label>
+              <span>Name</span>
+              <input
+                disabled={isEdit}
+                title={isEdit ? "Delete and recreate the client to rename it" : undefined}
+                value={draft.name}
+                onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              <span>Kind</span>
+              <select
+                disabled={isEdit}
+                title={isEdit ? "Delete and recreate the client to change its kind" : undefined}
+                value={draft.kind}
+                onChange={(event) =>
+                  onDraftChange({
+                    ...draft,
+                    kind: event.target.value as UpstreamProfileDraft["kind"]
+                  })
+                }
+              >
+                <option value="openconnect">OpenConnect (kornode dials out)</option>
+                <option value="external_interface">Existing interface (externally managed)</option>
+              </select>
+            </label>
+          </div>
 
           <div className="field-full-width">
           <SettingsTabs ariaLabel="Client settings">
@@ -359,11 +361,6 @@ export function ClientProfileDialog({
                 )}
                 {draft.route_host_enabled &&
                   draft.kind === "openconnect" &&
-                  draft.accept_server_routes &&
-                  isEdit &&
-                  serverRouting && <PushedRoutingSummary routing={serverRouting} />}
-                {draft.route_host_enabled &&
-                  draft.kind === "openconnect" &&
                   draft.accept_server_routes && (
                     <div className="settings-grid">
                       <label title="Optional: that server's Korvus panel address reachable through this tunnel, e.g. https://10.10.10.1:8443. Server-side changes then apply without reconnecting. Empty: lists are refreshed on (re)connect only.">
@@ -404,6 +401,11 @@ export function ClientProfileDialog({
                       </label>
                     </div>
                   )}
+                {draft.route_host_enabled &&
+                  draft.kind === "openconnect" &&
+                  draft.accept_server_routes &&
+                  isEdit &&
+                  serverRouting && <PushedRoutingSummary routing={serverRouting} />}
               </div>
             </details>
           </SettingsTabs>
@@ -476,15 +478,9 @@ function PushedRoutingSummary({ routing }: { routing: ServerRouting }) {
           <Pill kind="muted">nothing received</Pill>
         )}
       </div>
-      {routing.routes.length > 0 && (
-        <p className="field-help">{`Routes: ${routing.routes.join(", ")}`}</p>
-      )}
-      {routing.domains.length > 0 && (
-        <p className="field-help">{`Domains: ${routing.domains.join(", ")}`}</p>
-      )}
-      {routing.dns.length > 0 && (
-        <p className="field-help">{`Split-DNS servers: ${routing.dns.join(", ")}`}</p>
-      )}
+      {routing.routes.length > 0 && <PushedList title="Routes" items={routing.routes} />}
+      {routing.domains.length > 0 && <PushedList title="Domains" items={routing.domains} />}
+      {routing.dns.length > 0 && <PushedList title="Split-DNS servers" items={routing.dns} />}
       {routing.sync_error && (
         <p className="muted-line" title={routing.sync_error}>{`Sync failed: ${routing.sync_error}`}</p>
       )}
@@ -495,6 +491,47 @@ function PushedRoutingSummary({ routing }: { routing: ServerRouting }) {
         <p className="muted-line">
           {`Last synced ${new Date(routing.synced_at * 1000).toLocaleString()}`}
         </p>
+      )}
+    </div>
+  );
+}
+
+// Initial preview before the admin asks for more; a hard ceiling on top of
+// that so even "Show all" can't ever try to mount hundreds of thousands of
+// list items at once (a pushed list this large is plausible -- a big
+// corporate domain blocklist/allowlist pushed as split-DNS, say).
+const PUSHED_LIST_PREVIEW_COUNT = 20;
+const PUSHED_LIST_HARD_CAP = 2000;
+
+function PushedList({ title, items }: { title: string; items: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? items.slice(0, PUSHED_LIST_HARD_CAP) : items.slice(0, PUSHED_LIST_PREVIEW_COUNT);
+  const hiddenByCap = items.length - visible.length;
+  return (
+    <div className="pushed-list-group">
+      <span className="muted-line">{`${title} (${items.length})`}</span>
+      <div className="pushed-list">
+        <ul>
+          {visible.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
+      {items.length > PUSHED_LIST_PREVIEW_COUNT && (
+        <ActionButton
+          label={
+            expanded
+              ? "Show less"
+              : `Show all ${items.length}${
+                  items.length > PUSHED_LIST_HARD_CAP ? ` (capped at ${PUSHED_LIST_HARD_CAP})` : ""
+                }`
+          }
+          icon={expanded ? ChevronUp : ChevronDown}
+          onClick={() => setExpanded((value) => !value)}
+        />
+      )}
+      {expanded && hiddenByCap > 0 && (
+        <span className="muted-line">{`${hiddenByCap} more not shown`}</span>
       )}
     </div>
   );

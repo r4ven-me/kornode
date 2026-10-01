@@ -456,7 +456,7 @@ label span,
 }
 
 .upstream-settings-section > .routing-substep,
-.upstream-settings-section > label:last-child,
+.upstream-settings-section > label,
 .upstream-settings-section > .muted-line:last-child {
   margin-bottom: 16px;
 }
@@ -2252,4 +2252,34 @@ label .icon-button span {
 .field-full-width .field-help {
   max-width: none;
   margin: 6px 0 0;
+}
+
+.pushed-list-group {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pushed-list {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px 10px;
+}
+
+.pushed-list ul {
+  columns: 2;
+  column-gap: 16px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pushed-list li {
+  break-inside: avoid;
+  color: var(--text);
+  font-size: 13px;
+  padding: 2px 0;
 }
