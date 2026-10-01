@@ -864,6 +864,12 @@ class InternalDnsConfig(StrictModel):
     cache_size: int = Field(default=150, ge=0, le=10000)
     log_queries: bool = False
     local_records: list[str] = Field(default_factory=list)
+    # What the built-in resolver forwards unmatched queries to. Falls back to
+    # server.dns when empty -- see DnsmasqConfigRenderer. Distinct from
+    # server.dns's other job (DNS pushed straight to VPN clients when the
+    # resolver isn't in play, AppConfig.client_dns_servers()), which stays
+    # tied to server.dns regardless of this field.
+    default_upstreams: list[str] = Field(default_factory=list)
     forward_upstreams: list[str] = Field(default_factory=list)
     forward_domains: list[str] = Field(default_factory=list)
 
@@ -891,6 +897,11 @@ class InternalDnsConfig(StrictModel):
     @classmethod
     def validate_local_records(cls, value: list[str]) -> list[str]:
         return [_validate_local_record(item) for item in value]
+
+    @field_validator("default_upstreams")
+    @classmethod
+    def validate_default_upstreams(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(_validate_ip(resolver) for resolver in value))
 
     @field_validator("forward_upstreams")
     @classmethod

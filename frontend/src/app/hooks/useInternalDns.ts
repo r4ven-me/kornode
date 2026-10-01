@@ -20,6 +20,7 @@ export function useInternalDns(
     port: 53,
     blocklistEnabled: false,
     localRecordsEnabled: false,
+    defaultUpstreamsText: "",
     forwardUpstreamsText: "",
     forwardDomainsText: "",
     domainsText: "",
@@ -45,6 +46,7 @@ export function useInternalDns(
           internalDns.blocklist_urls.length > 0),
       localRecordsEnabled:
         internalDns.local_records_enabled ?? internalDns.local_records.length > 0,
+      defaultUpstreamsText: internalDns.default_upstreams.join("\n"),
       forwardUpstreamsText: internalDns.forward_upstreams.join("\n"),
       forwardDomainsText: internalDns.forward_domains.join("\n"),
       domainsText: internalDns.blocklist_domains.join("\n"),
@@ -70,6 +72,7 @@ export function useInternalDns(
           server_dns: splitLines(serverSettingsDraft.dns),
           search_domains: splitLines(serverSettingsDraft.searchDomains),
           tunnel_dns: routingDraft.tunnelDns,
+          default_upstreams: splitLines(internalDnsDraft.defaultUpstreamsText),
           forward_upstreams: splitLines(internalDnsDraft.forwardUpstreamsText),
           forward_domains: splitLines(internalDnsDraft.forwardDomainsText),
           blocklist_domains: splitLines(internalDnsDraft.domainsText),

@@ -277,6 +277,7 @@ describe("internal DNS settings API", () => {
       server_dns: ["9.9.9.9"],
       search_domains: ["corp.example"],
       tunnel_dns: true,
+      default_upstreams: ["9.9.9.9"],
       forward_upstreams: ["1.1.1.1"],
       forward_domains: ["example.com"],
       blocklist_domains: ["ads.example"],

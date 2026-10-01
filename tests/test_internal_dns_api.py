@@ -176,6 +176,28 @@ internal_dns:
     assert payload["internal_dns"]["local_records"] == ["nas.corp.local 10.11.11.5"]
 
 
+def test_default_upstreams_saved_and_does_not_reconnect_clients(tmp_path: Path) -> None:
+    # default_upstreams only changes what the built-in resolver forwards to,
+    # not what's pushed to connected VPN clients -- same category as
+    # local_records above, so it must not force a reconnect either.
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+
+    response = client.post(
+        "/api/internal-dns/settings",
+        auth=("admin", "secret"),
+        json={"default_upstreams": ["9.9.9.9", "149.112.112.112"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reconnect_required"] is False
+    assert payload["internal_dns"]["default_upstreams"] == ["9.9.9.9", "149.112.112.112"]
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["internal_dns"]["default_upstreams"] == ["9.9.9.9", "149.112.112.112"]
+
+
 def test_forward_domains_change_reconnects_clients_and_feeds_split_dns(
     tmp_path: Path,
 ) -> None:

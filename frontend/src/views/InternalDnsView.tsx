@@ -12,6 +12,7 @@ export type InternalDnsDraft = {
   port: number;
   blocklistEnabled: boolean;
   localRecordsEnabled: boolean;
+  defaultUpstreamsText: string;
   forwardUpstreamsText: string;
   forwardDomainsText: string;
   domainsText: string;
@@ -134,6 +135,16 @@ export function InternalDnsView({
             <label className="blocklist-domains">
               <span>Default upstream DNS servers</span>
               <textarea
+                rows={3}
+                value={draft.defaultUpstreamsText}
+                onChange={(event) =>
+                  onDraftChange({ ...draft, defaultUpstreamsText: event.target.value })
+                }
+              />
+            </label>
+            <label className="blocklist-domains">
+              <span>Server DNS servers</span>
+              <textarea
                 aria-label="DNS servers (same as Server)"
                 rows={3}
                 value={serverDraft.dns}
@@ -152,8 +163,10 @@ export function InternalDnsView({
             </label>
           </div>
           <p className="muted-line dns-shared-note">
-            These are the server-wide upstream resolvers. VPN clients use them directly when the
-            built-in resolver is off; otherwise the built-in resolver forwards unmatched queries to them.
+            Default upstream DNS servers is what the built-in resolver forwards unmatched queries
+            to -- leave it empty to fall back to Server DNS servers below. Server DNS servers
+            (shared with Config → Server) is also what gets pushed straight to VPN clients
+            whenever the built-in resolver isn&rsquo;t in play for them.
           </p>
         </details>
 

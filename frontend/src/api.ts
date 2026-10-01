@@ -1054,6 +1054,7 @@ export type InternalDnsStatus = {
   server_dns?: string[];
   search_domains?: string[];
   tunnel_dns?: boolean;
+  default_upstreams: string[];
   forward_upstreams: string[];
   forward_domains: string[];
   blocklist_domains: string[];
@@ -1074,6 +1075,7 @@ export type InternalDnsSettingsRequest = {
   server_dns: string[];
   search_domains: string[];
   tunnel_dns: boolean;
+  default_upstreams: string[];
   forward_upstreams: string[];
   forward_domains: string[];
   blocklist_domains: string[];

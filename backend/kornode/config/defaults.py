@@ -139,6 +139,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cache_size": 150,
         "log_queries": False,
         "local_records": [],
+        "default_upstreams": [],
         "forward_upstreams": [],
         "forward_domains": [],
     },

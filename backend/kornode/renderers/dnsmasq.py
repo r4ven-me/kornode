@@ -21,13 +21,18 @@ class DnsmasqConfigRenderer(TemplateRenderer):
             and config.routing.mode == "split"
             and config.routing.split.tunnel_dns
         )
-        # server.dns doubles as "DNS pushed to clients" and "dnsmasq upstreams";
-        # when tunnel_dns is on, configs often list the dnsmasq address itself
-        # there (that IS the client DNS). dnsmasq silently ignores upstreams on
-        # a local interface, which would leave split-domain masks pointing at a
-        # dropped server — so keep only real upstreams.
         listen = config.internal_dns.listen
-        upstream_dns = [dns for dns in config.server.dns if dns != listen]
+        # internal_dns.default_upstreams is what the resolver itself forwards
+        # unmatched queries to; empty falls back to server.dns (which has its
+        # own separate job -- DNS pushed straight to VPN clients, see
+        # client_dns_servers() -- regardless of default_upstreams). When
+        # tunnel_dns is on, configs often list the dnsmasq address itself in
+        # one of these (that IS the client DNS then). dnsmasq silently
+        # ignores upstreams on a local interface, which would leave
+        # split-domain masks pointing at a dropped server -- so keep only
+        # real upstreams.
+        upstream_dns_source = config.internal_dns.default_upstreams or config.server.dns
+        upstream_dns = [dns for dns in upstream_dns_source if dns != listen]
         local_records = (
             [
                 {"host": host, "ip": ip}

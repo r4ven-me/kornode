@@ -292,6 +292,29 @@ def test_dnsmasq_render_includes_blocklist_and_upstreams(tmp_path: Path) -> None
     assert "nftset=" not in rendered
 
 
+def test_dnsmasq_render_prefers_default_upstreams_over_server_dns(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        {
+            "server": {"dns": ["1.1.1.1", "8.8.8.8"]},
+            "internal_dns": {"default_upstreams": ["9.9.9.9"]},
+        },
+    )
+    rendered = DnsmasqConfigRenderer().render(config)
+    assert "server=9.9.9.9" in rendered
+    assert "server=1.1.1.1" not in rendered
+    assert "server=8.8.8.8" not in rendered
+
+
+def test_dnsmasq_render_falls_back_to_server_dns_when_default_upstreams_empty(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, {"server": {"dns": ["9.9.9.9"]}})
+    assert config.internal_dns.default_upstreams == []
+    rendered = DnsmasqConfigRenderer().render(config)
+    assert "server=9.9.9.9" in rendered
+
+
 def test_rendered_files_include_dnsmasq_and_blocklist(tmp_path: Path) -> None:
     config = _config(
         tmp_path,

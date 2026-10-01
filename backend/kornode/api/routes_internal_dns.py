@@ -29,6 +29,7 @@ class InternalDnsSettingsRequest(BaseModel):
     cache_size: int = Field(default=150, ge=0, le=10000)
     log_queries: bool = False
     local_records: list[str] = Field(default_factory=list)
+    default_upstreams: list[str] = Field(default_factory=list)
     forward_upstreams: list[str] = Field(default_factory=list)
     forward_domains: list[str] = Field(default_factory=list)
 
@@ -80,6 +81,7 @@ def save_internal_dns_settings(
             "cache_size": payload.cache_size,
             "log_queries": payload.log_queries,
             "local_records": payload.local_records,
+            "default_upstreams": payload.default_upstreams,
             "forward_upstreams": payload.forward_upstreams,
             "forward_domains": payload.forward_domains,
         },

@@ -168,6 +168,7 @@ class InternalDnsService:
             "cache_size": settings.cache_size,
             "log_queries": settings.log_queries,
             "local_records": list(settings.local_records),
+            "default_upstreams": settings.default_upstreams,
             "forward_upstreams": settings.forward_upstreams,
             "forward_domains": settings.forward_domains,
         }

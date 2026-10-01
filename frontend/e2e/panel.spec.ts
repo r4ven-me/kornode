@@ -120,6 +120,7 @@ test("DNS Save persists one atomic draft and applies it", async ({ page }) => {
   await page.getByLabel("Use built-in resolver").check();
   await page.getByLabel("Enable local records").check();
   await page.getByLabel("Enable blocklist").check();
+  await page.getByLabel("Default upstream DNS servers").fill("9.9.9.1");
   await page.getByLabel("DNS servers (same as Server)").fill("9.9.9.9\n1.1.1.1");
   await page.getByRole("tab", { name: "DNS forwarding", exact: true }).click();
   await page.getByLabel("DNS servers", { exact: true }).fill("1.1.1.1\n8.8.8.8");
@@ -137,6 +138,7 @@ test("DNS Save persists one atomic draft and applies it", async ({ page }) => {
     port: 53,
     blocklist_enabled: true,
     local_records_enabled: true,
+    default_upstreams: ["9.9.9.1"],
     server_dns: ["9.9.9.9", "1.1.1.1"],
     forward_upstreams: ["1.1.1.1", "8.8.8.8"],
     forward_domains: ["example.com", "example.net"]

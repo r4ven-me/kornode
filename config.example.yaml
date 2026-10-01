@@ -158,14 +158,20 @@ routing:
     domains: []
 
 # Internal DNS features use the project-owned dnsmasq instance at listen:port.
-# Any enabled feature makes dnsmasq active and causes VPN clients to use it;
-# upstream resolvers are taken from server.dns.
+# Any enabled feature makes dnsmasq active and causes VPN clients to use it.
 internal_dns:
   resolver_enabled: false
   listen: 10.10.10.1
   port: 53
   blocklist_enabled: false
   local_records_enabled: false
+  # What the resolver forwards unmatched queries to. Empty falls back to
+  # server.dns -- set this instead of server.dns when you want the resolver's
+  # upstream to differ from what's pushed directly to VPN clients (or when
+  # the VPN server itself is disabled and server.dns isn't otherwise
+  # meaningful).
+  # Example: default_upstreams: [1.1.1.1, 8.8.8.8]
+  default_upstreams: []
   # Optional forwarding for selected domain zones. Clients still use this
   # resolver; the shared upstream list applies to every domain below.
   forward_upstreams: []
