@@ -93,10 +93,12 @@ def diff_config(request: Request) -> dict[str, str]:
 def get_config_source(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     path = _config_path(request)
+    exists = path.exists()
+    content = path.read_text(encoding="utf-8") if exists else ""
     return {
         "path": str(path),
-        "exists": path.exists(),
-        "content": _dump_yaml(config.model_dump_safe()),
+        "exists": exists,
+        "content": _masked_yaml(content, config),
     }
 
 
@@ -218,8 +220,8 @@ def _load_existing_mapping(path: Path) -> dict[str, Any]:
 def _validate_yaml_config(data: dict[str, Any], path: Path) -> AppConfig:
     environment = combined_environment(path, environ=None)
     env_overrides = env_overrides_from_mapping(environment)
-    merged = deep_merge(DEFAULT_CONFIG, data)
-    merged = deep_merge(merged, env_overrides)
+    merged = deep_merge(DEFAULT_CONFIG, env_overrides)
+    merged = deep_merge(merged, data)
     merged = resolve_secret_refs(merged, environment)
     return AppConfig.model_validate(merged)
 

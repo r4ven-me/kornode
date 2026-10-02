@@ -62,6 +62,7 @@ export function DashboardView({
         <Metric label="Logs" value={state.logFiles.length.toString()} />
         <Metric label="Config" value={state.configSource?.exists ? "Persistent" : "Default"} />
       </section>
+      <ConfigurationPrecedencePanel />
       <InterfaceLoadPanel name={interfaceName} history={interfaceHistory} />
       <section className="panel">
         <div className="panel-header">
@@ -171,6 +172,46 @@ export function DashboardView({
         </div>
       </section>
     </div>
+  );
+}
+
+export function ConfigurationPrecedencePanel() {
+  const sources = [
+    { label: "Application defaults", accent: false },
+    { label: ".env", accent: false },
+    { label: "Environment", accent: false },
+    { label: "YAML / Web panel", accent: true },
+    { label: "CLI flags", accent: false }
+  ];
+
+  return (
+    <section className="panel config-precedence-panel">
+      <div className="panel-header">
+        <div>
+          <h2>Configuration precedence</h2>
+          <p className="muted-line">Sources are applied from left to right.</p>
+        </div>
+        <Pill kind="ok">YAML-first</Pill>
+      </div>
+      <div className="config-precedence-chain" aria-label="Configuration source precedence">
+        {sources.map((source, index) => (
+          <div className="config-precedence-step" key={source.label}>
+            {index > 0 && (
+              <span className="config-precedence-arrow" aria-hidden="true">
+                →
+              </span>
+            )}
+            <div className={`config-precedence-node${source.accent ? " accent" : ""}`}>
+              {source.label}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="config-precedence-note">
+        A source on the right overrides the same setting on the left. Settings saved in the Web
+        panel are written to YAML; environment values are used when a field is absent from YAML.
+      </p>
+    </section>
   );
 }
 

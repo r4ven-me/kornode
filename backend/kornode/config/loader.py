@@ -66,8 +66,8 @@ def load_config(
     environment = combined_environment(resolved_config_path, resolved_env_file, environ)
     env_overrides = env_overrides_from_mapping(environment)
 
-    merged = deep_merge(DEFAULT_CONFIG, yaml_config)
-    merged = deep_merge(merged, env_overrides)
+    merged = deep_merge(DEFAULT_CONFIG, env_overrides)
+    merged = deep_merge(merged, yaml_config)
     if cli_overrides:
         merged = deep_merge(merged, cli_overrides)
     merged = resolve_secret_refs(merged, environment)

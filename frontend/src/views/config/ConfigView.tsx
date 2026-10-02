@@ -436,18 +436,28 @@ export function ConfigView({
           <div>
             <h2>Persistent YAML</h2>
             <p className="muted-line">
-              {source?.path ?? "/etc/kornode/config.yaml"} &mdash; full configuration, including
-              every default value not explicitly set
+              {source?.path ?? "/etc/kornode/config.yaml"} &mdash; only fields explicitly stored on
+              disk; inherited values are shown under Effective config
             </p>
           </div>
-          {dirty && <Pill kind="warning">Unsaved</Pill>}
+          <div className="toolbar">
+            {source && !source.exists && <Pill kind="muted">Not created</Pill>}
+            {dirty && <Pill kind="warning">Unsaved</Pill>}
+          </div>
         </div>
         <textarea
           className="config-editor"
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
+          placeholder="# No persistent YAML yet. Add settings here to create the file."
           spellCheck={false}
         />
+        {source && !source.exists && !dirty && (
+          <p className="muted-line">
+            The active configuration currently comes from environment variables and application
+            defaults. Saving this editor creates the YAML file without copying inherited values.
+          </p>
+        )}
         {validation && (
           <details className="rendered-file" open>
             <summary>Validation</summary>
@@ -517,6 +527,10 @@ export function ConfigView({
         <summary>Effective config</summary>
         <section className="panel">
           <h2>Effective config</h2>
+          <p className="muted-line">
+            Read-only result after applying defaults, .env, environment, persistent YAML and CLI
+            overrides.
+          </p>
           <pre>{JSON.stringify(config ?? {}, null, 2)}</pre>
         </section>
       </details>

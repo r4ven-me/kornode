@@ -14,8 +14,8 @@ disabled by default.
 
 - typed Python backend: FastAPI, Typer, Pydantic v2, Jinja2;
 - YAML-first configuration;
-- overrides via `.env` and environment variables;
-- settings precedence: CLI overrides -> environment -> `.env` -> YAML -> defaults;
+- configuration fallbacks via `.env` and environment variables;
+- settings precedence: CLI overrides -> YAML -> environment -> `.env` -> defaults;
 - generates `ocserv.conf`, `dnsmasq.conf`, `nftables.nft`, `supervisor.conf`;
 - idempotent runtime initialization: missing configs and auto-certificates are created
   on container start;
@@ -561,11 +561,13 @@ Section by section, beyond what's already covered in depth elsewhere in this REA
   renders as `key = value` lines (`null` value for a bare flag), a list renders each
   entry verbatim as-is, for any directive the typed config doesn't model yet.
 
-## Env Overrides and Secrets
+## Environment Fallbacks and Secrets
 
-Any YAML field can be overridden with an environment variable prefixed with
-`KORNODE_`. This is a compatibility runtime namespace kept from an earlier version of
-the project: the public utility is called `korctl`, while the product is Korvus Node.
+Any field omitted from YAML can be supplied with an environment variable prefixed
+with `KORNODE_`. Values explicitly stored in YAML take precedence over environment
+variables so settings saved through the web panel remain effective after a restart.
+This is a compatibility runtime namespace kept from an earlier version of the project:
+the public utility is called `korctl`, while the product is Korvus Node.
 Nesting is expressed with a double underscore:
 
 ```env

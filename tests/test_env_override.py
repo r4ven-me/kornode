@@ -30,7 +30,7 @@ INVALID-KEY=ignored
     }
 
 
-def test_env_overrides_yaml_and_dotenv(tmp_path: Path) -> None:
+def test_yaml_overrides_env_while_process_env_overrides_dotenv(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     env_path = tmp_path / ".env"
     config_path.write_text(
@@ -45,7 +45,9 @@ web:
         encoding="utf-8",
     )
     env_path.write_text(
-        "KORNODE_SERVER__PORT=4443\nKORNODE_WEB__ENABLED=true\n",
+        "KORNODE_SERVER__PORT=4443\n"
+        "KORNODE_SERVER__REALM=Dotenv Realm\n"
+        "KORNODE_WEB__ENABLED=true\n",
         encoding="utf-8",
     )
 
@@ -54,12 +56,14 @@ web:
         env_file=env_path,
         environ={
             "KORNODE_SERVER__DNS": '["1.1.1.1", "9.9.9.9"]',
-            "KORNODE_WEB__ENABLED": "false",
+            "KORNODE_SERVER__REALM": "Process Realm",
+            "KORNODE_WEB__ENABLED": "true",
         },
     )
 
-    assert config.server.port == 4443
-    assert config.server.dns == ["1.1.1.1", "9.9.9.9"]
+    assert config.server.port == 443
+    assert config.server.dns == ["8.8.8.8"]
+    assert config.server.realm == "Process Realm"
     assert config.web.enabled is False
 
 

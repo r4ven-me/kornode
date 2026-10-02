@@ -34,8 +34,8 @@ Before coding, read and extract behavior from:
 - Design a proper architecture: config models, service layer, command runner, renderers, API, CLI, GUI.
 - CLI must work even when Web GUI is disabled.
 - Web GUI must be disabled by default.
-- All YAML config values must be overridable by environment variables and `.env`.
-- CLI flags override env, env overrides YAML, YAML overrides application defaults.
+- All application config values must be configurable through environment variables and `.env` when omitted from YAML.
+- CLI flags override YAML, YAML overrides env, env overrides application defaults.
 - Never log secrets.
 - Never print passphrases, tokens, passwords or private key material.
 - Prefer explicit subprocess argument lists over shell commands.

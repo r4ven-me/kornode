@@ -153,8 +153,8 @@ def save_config_patch(patch: dict[str, Any], *, write_rendered: bool = True) -> 
 def _validate_config_data(data: dict[str, Any], path: Path) -> AppConfig:
     environment = combined_environment(path, STATE.get("env_file"), None)
     env_overrides = env_overrides_from_mapping(environment)
-    merged = deep_merge(DEFAULT_CONFIG, data)
-    merged = deep_merge(merged, env_overrides)
+    merged = deep_merge(DEFAULT_CONFIG, env_overrides)
+    merged = deep_merge(merged, data)
     merged = resolve_secret_refs(merged, environment)
     return AppConfig.model_validate(merged)
 
