@@ -199,7 +199,10 @@ export function App() {
               />
               <span>Dry-run</span>
             </label>
-            <span className="status ok">Connected as {authInfo.username}</span>
+            <span className="status ok connection-status">
+              <span className="connection-label">Connected as&nbsp;</span>
+              {authInfo.username}
+            </span>
             <IconButton
               label="Reload panel data"
               icon={RefreshCw}

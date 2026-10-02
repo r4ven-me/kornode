@@ -144,7 +144,9 @@ test("per-user and per-group config dialogs save through their own endpoints", a
   await signIn(page);
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
-  await page.getByRole("button", { name: "Per-user config", exact: true }).click();
+  const aliceCard = page.locator("details.user-card", { hasText: "alice" });
+  await aliceCard.locator("summary").click();
+  await aliceCard.getByRole("button", { name: "Per-user config", exact: true }).click();
   const userDialog = page.getByRole("dialog");
   await expect(userDialog.getByRole("heading", { name: "alice config" })).toBeVisible();
   await userDialog.getByLabel("Hostname").fill("alice-laptop");

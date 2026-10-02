@@ -64,58 +64,72 @@ export function DashboardView({
       </section>
       <ConfigurationPrecedencePanel />
       <InterfaceLoadPanel name={interfaceName} history={interfaceHistory} />
-      <section className="panel">
+      <section className="panel server-control-panel">
         <div className="panel-header">
-          <h2>Korvus Node</h2>
-          <div className="toolbar">
-            <Pill kind={serverRunning ? "ok" : serverStopped ? "muted" : "warning"}>
-              {serverRunning ? "Running" : serverStopped ? "Stopped" : "Unknown"}
-            </Pill>
-            <ActionButton
-              label="Start"
-              icon={Play}
-              disabled={serverRunning}
-              busy={busy === "start-server"}
-              onClick={onStartServer}
-            />
-            <ActionButton
-              label="Stop"
-              icon={Square}
-              danger
-              disabled={!serverRunning}
-              busy={busy === "stop-server"}
-              onClick={onStopServer}
-            />
-            <ActionButton
-              label="Reload"
-              icon={RefreshCw}
-              disabled={!serverRunning}
-              busy={busy === "reload-server"}
-              onClick={onReloadServer}
-            />
-            <ActionButton
-              label="Restart ocserv"
-              icon={RefreshCw}
-              danger
-              disabled={!serverRunning}
-              busy={busy === "restart-server"}
-              onClick={onRestartServer}
-            />
-            <ActionButton
-              label="Render configs"
-              icon={Save}
-              title="Write generated Korvus Node, supervisor, dnsmasq and nftables files from YAML"
-              busy={busy === "write-config"}
-              onClick={onWriteConfig}
-            />
-            <ActionButton
-              label="Apply firewall/NAT"
-              icon={Terminal}
-              title="Apply generated nftables firewall, split-routing and VPN masquerade rules"
-              busy={busy === "apply-nft"}
-              onClick={onApplyNft}
-            />
+          <div>
+            <h2>Korvus Node</h2>
+            <p className="muted-line">Runtime and generated network configuration.</p>
           </div>
+          <Pill kind={serverRunning ? "ok" : serverStopped ? "muted" : "warning"}>
+            {serverRunning ? "Running" : serverStopped ? "Stopped" : "Unknown"}
+          </Pill>
+        </div>
+        <div className="server-action-groups">
+          <section className="server-action-group">
+            <h3>Server</h3>
+            <div className="toolbar">
+              <ActionButton
+                label="Start"
+                icon={Play}
+                primary={serverStopped}
+                disabled={serverRunning}
+                busy={busy === "start-server"}
+                onClick={onStartServer}
+              />
+              <ActionButton
+                label="Stop"
+                icon={Square}
+                danger
+                disabled={!serverRunning}
+                busy={busy === "stop-server"}
+                onClick={onStopServer}
+              />
+              <ActionButton
+                label="Reload"
+                icon={RefreshCw}
+                disabled={!serverRunning}
+                busy={busy === "reload-server"}
+                onClick={onReloadServer}
+              />
+              <ActionButton
+                label="Restart ocserv"
+                icon={RefreshCw}
+                danger
+                disabled={!serverRunning}
+                busy={busy === "restart-server"}
+                onClick={onRestartServer}
+              />
+            </div>
+          </section>
+          <section className="server-action-group">
+            <h3>Configuration</h3>
+            <div className="toolbar">
+              <ActionButton
+                label="Render configs"
+                icon={Save}
+                title="Write generated Korvus Node, supervisor, dnsmasq and nftables files from YAML"
+                busy={busy === "write-config"}
+                onClick={onWriteConfig}
+              />
+              <ActionButton
+                label="Apply firewall/NAT"
+                icon={Terminal}
+                title="Apply generated nftables firewall, split-routing and VPN masquerade rules"
+                busy={busy === "apply-nft"}
+                onClick={onApplyNft}
+              />
+            </div>
+          </section>
         </div>
         <CommandBlock result={state.serverStatus} />
       </section>

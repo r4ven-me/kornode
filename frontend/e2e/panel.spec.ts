@@ -266,8 +266,9 @@ test("core management buttons call expected API endpoints with CSRF", async ({ p
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
   await page.getByLabel("Username").fill("bob");
-  await page.getByLabel("Password").fill("secret");
+  await page.getByLabel("Password", { exact: true }).fill("secret");
   await page.getByRole("button", { name: "Create", exact: true }).click();
+  await page.locator("details.user-card", { hasText: "alice" }).locator("summary").click();
   await page.getByRole("button", { name: "Delete user", exact: true }).click();
 
   await page.getByRole("button", { name: "Sessions", exact: true }).click();
@@ -334,7 +335,9 @@ test("group membership dialogs fetch fresh data instead of trusting stale state"
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
-  await page.getByRole("table").getByRole("button", { name: "Groups" }).click();
+  const aliceCard = page.locator("details.user-card", { hasText: "alice" });
+  await aliceCard.locator("summary").click();
+  await aliceCard.getByRole("button", { name: "Groups", exact: true }).click();
   await expect(page.getByRole("heading", { name: "alice groups" })).toBeVisible();
   const devopsRow = page.locator(".group-choice", { hasText: "devops" });
   await expect(devopsRow.locator("input[type=checkbox]")).not.toBeChecked();
