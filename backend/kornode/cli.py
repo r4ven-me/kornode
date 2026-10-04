@@ -679,24 +679,52 @@ def upstream_watch(
         if config.upstream.enabled:
             selected = service.selected_profile()
             if selected is not None:
-                if service.is_healthy():
+                # Restore fwmark tables before probing. The kernel removes a
+                # route as soon as its tunnel device disappears; probing
+                # first can therefore create a bootstrap deadlock where the
+                # failed probe triggers another reconnect before the route
+                # gets a chance to be restored.
+                service.ensure_policy_routing()
+                healthy, failure_reason = service.health_status()
+                if healthy:
                     consecutive_failures = 0
                     ever_connected = True
-                    # The kernel drops the fwmark table's route whenever the
-                    # tunnel device bounces; heal it while the tunnel is up.
-                    service.ensure_policy_routing()
                 elif selected.kind == "external_interface":
                     # No dial/redial possible for an externally-managed
                     # interface -- status()/the GUI already surfaces the
                     # down link; never attempt recover() for it.
                     consecutive_failures = 0
+                    service.log_healthcheck_failure(
+                        reason=failure_reason,
+                        streak=0,
+                        threshold=config.upstream.check_threshold,
+                        state="recovery unsupported for external interface",
+                    )
                 elif not config.upstream.connect_on_boot and not ever_connected:
                     consecutive_failures = 0
+                    service.log_healthcheck_failure(
+                        reason=failure_reason,
+                        streak=0,
+                        threshold=config.upstream.check_threshold,
+                        state="recovery deferred by connect_on_boot",
+                    )
                 elif time.monotonic() < settled_until:
-                    pass
+                    service.log_healthcheck_failure(
+                        reason=failure_reason,
+                        streak=consecutive_failures,
+                        threshold=config.upstream.check_threshold,
+                        state="settling; failure not counted",
+                    )
                 else:
                     consecutive_failures += 1
-                    if consecutive_failures >= config.upstream.check_threshold:
+                    threshold_reached = consecutive_failures >= config.upstream.check_threshold
+                    service.log_healthcheck_failure(
+                        reason=failure_reason,
+                        streak=consecutive_failures,
+                        threshold=config.upstream.check_threshold,
+                        state="recovery triggered" if threshold_reached else "counted",
+                    )
+                    if threshold_reached:
                         if service.recover():
                             settled_until = time.monotonic() + config.upstream.check_settle_seconds
                             ever_connected = True

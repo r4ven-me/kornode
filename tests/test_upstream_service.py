@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import fcntl
 import os
+import re
 import subprocess
 import sys
 import time
@@ -751,6 +752,57 @@ def test_status_reports_not_connected_when_pid_file_stale(tmp_path: Path) -> Non
 
 def test_status_reports_not_connected_when_no_pid_file(tmp_path: Path) -> None:
     assert UpstreamService(_config(tmp_path)).status().connected is False
+
+
+def test_connect_waits_for_tunnel_interface_before_applying_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile())
+    config.upstream.active_profile = "primary"
+    runner = FakeRunner(tmp_path)
+    service = UpstreamService(config, runner=runner)
+    expected_interface = service.profile_interface(config.upstream.profiles[0])
+    interface_checks = iter([False, False, True])
+    monkeypatch.setattr(service, "_interface_exists", lambda _interface: next(interface_checks))
+
+    try:
+        service.connect_active()
+    finally:
+        runner.close()
+
+    route_calls = [
+        call["argv"] for call in runner.calls if call["argv"][:3] == ["ip", "route", "replace"]
+    ]
+    assert route_calls
+    assert route_calls[-1][4:6] == ["dev", expected_interface]
+
+
+def test_connect_fails_when_required_policy_route_cannot_be_installed(tmp_path: Path) -> None:
+    class RouteFailRunner(FakeRunner):
+        def run(self, argv: list[str], **kwargs: Any) -> CommandResult:
+            result = super().run(argv, **kwargs)
+            if argv[:3] == ["ip", "route", "replace"]:
+                return CommandResult(
+                    argv=tuple(argv),
+                    returncode=2,
+                    stdout="",
+                    stderr="simulated route failure",
+                )
+            return result
+
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile())
+    config.upstream.active_profile = "primary"
+    runner = RouteFailRunner(tmp_path)
+    service = UpstreamService(config, runner=runner)
+
+    try:
+        with pytest.raises(CommandError) as exc_info:
+            service.connect_active()
+        assert exc_info.value.result.stderr == "simulated route failure"
+    finally:
+        runner.close()
 
 
 def test_connect_raises_when_backgrounded_process_dies_immediately(tmp_path: Path) -> None:
@@ -1635,6 +1687,130 @@ def test_upstream_lock_is_reentrant_within_one_instance(tmp_path: Path) -> None:
         os.fstat(outer_fd)
 
 
+def test_watchdog_restores_policy_routing_before_healthcheck(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kornode import cli
+
+    config = AppConfig.model_validate(
+        _upstream_config(
+            tmp_path,
+            active_profile="primary",
+            profiles=[
+                {
+                    "name": "primary",
+                    "server": "vpn.example.com",
+                    "auth_type": "password",
+                    "username": "user",
+                }
+            ],
+        )
+    )
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    events: list[str] = []
+    monkeypatch.setattr(
+        UpstreamService,
+        "ensure_policy_routing",
+        lambda self: events.append("ensure") or [],
+    )
+    monkeypatch.setattr(
+        UpstreamService,
+        "health_status",
+        lambda self: (events.append("health") or True, "healthy"),
+    )
+    monkeypatch.setattr(UpstreamService, "enforce_profile_enablement", lambda self: [])
+    monkeypatch.setattr(UpstreamService, "refresh_server_routes", lambda self: None)
+
+    cli.upstream_watch(once=True)
+
+    assert events == ["ensure", "health"]
+
+
+def test_upstream_log_entries_include_utc_timestamps(tmp_path: Path) -> None:
+    service = UpstreamService(_config(tmp_path))
+
+    service._append_log("diagnostic event")
+
+    line = service.log_file.read_text(encoding="utf-8").strip()
+    assert re.fullmatch(
+        r"\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] diagnostic event",
+        line,
+    )
+
+
+def test_watchdog_logs_every_failed_healthcheck_with_streak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kornode import cli
+
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "secrets_dir": tmp_path / "secrets",
+                "log_dir": tmp_path / "logs",
+            },
+            "routing": {"fwmark": "0x0c01", "table_id": 1201},
+            "upstream": {
+                "enabled": True,
+                "check_interval": 1,
+                "check_threshold": 2,
+                "active_profile": "primary",
+                "profiles": [
+                    {
+                        "name": "primary",
+                        "server": "vpn.example.com",
+                        "auth_type": "password",
+                        "username": "user",
+                    }
+                ],
+            },
+        }
+    )
+    monkeypatch.setattr(cli, "get_config", lambda: config)
+    monkeypatch.setattr(
+        UpstreamService,
+        "health_status",
+        lambda self: (False, "connection process or interface is down"),
+    )
+    recover_calls: list[None] = []
+
+    def _fake_recover(service: UpstreamService) -> bool:
+        recover_calls.append(None)
+        service._append_log("all reconnect attempts failed")
+        return False
+
+    monkeypatch.setattr(UpstreamService, "recover", _fake_recover)
+    monkeypatch.setattr(UpstreamService, "enforce_profile_enablement", lambda self: [])
+    monkeypatch.setattr(UpstreamService, "refresh_server_routes", lambda self: None)
+
+    class _StopLoop(Exception):
+        pass
+
+    tick_count = 0
+
+    def _fake_sleep(_seconds: float) -> None:
+        nonlocal tick_count
+        tick_count += 1
+        if tick_count >= 2:
+            raise _StopLoop
+
+    monkeypatch.setattr(cli.time, "sleep", _fake_sleep)
+
+    with pytest.raises(_StopLoop):
+        cli.upstream_watch(once=False)
+
+    lines = (config.system.log_dir / "upstream.log").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    assert "healthcheck failed: connection process or interface is down" in lines[0]
+    assert "streak=1/2; state=counted" in lines[0]
+    assert "streak=2/2; state=recovery triggered" in lines[1]
+    assert "all reconnect attempts failed" in lines[2]
+    assert all(re.match(r"^\[\d{4}-\d{2}-\d{2}T", line) for line in lines)
+    assert len(recover_calls) == 1
+
+
 def test_watchdog_respects_connect_on_boot_until_first_connection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1669,7 +1845,11 @@ def test_watchdog_respects_connect_on_boot_until_first_connection(
     # has existed since this watchdog process started).
     healthy_sequence = iter([False, False, True, False])
     recover_calls: list[None] = []
-    monkeypatch.setattr(UpstreamService, "is_healthy", lambda self: next(healthy_sequence))
+    monkeypatch.setattr(
+        UpstreamService,
+        "health_status",
+        lambda self: (next(healthy_sequence), "simulated failure"),
+    )
     monkeypatch.setattr(
         UpstreamService,
         "recover",

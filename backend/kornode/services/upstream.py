@@ -36,7 +36,7 @@ DISCONNECT_GRACE_SECONDS = 5
 # failure past that point (e.g. the tun interface name already being in
 # use) kills the daemon within well under a second with no way for the
 # parent to report it. See _verify_backgrounded.
-BACKGROUND_GRACE_SECONDS = 2
+BACKGROUND_GRACE_SECONDS = 5
 SYNC_TIMEOUT_SECONDS = 20
 SYNC_MAX_BYTES = 1024 * 1024
 SYNC_USER_AGENT = "kornode-client-sync/1.0"
@@ -285,6 +285,19 @@ class UpstreamService:
             if entry.get("operstate") == "UP" or "LOWER_UP" in entry.get("flags", []):
                 return True
         return False
+
+    def _interface_exists(self, interface: str) -> bool:
+        """Whether the tunnel device has been created yet.
+
+        TUN devices commonly report ``operstate UNKNOWN`` even while usable,
+        so connection bootstrap must check existence rather than link state.
+        """
+        result = self.runner.run(
+            ["ip", "link", "show", "dev", interface],
+            timeout=5,
+            check=False,
+        )
+        return result.ok
 
     def _connection_age(self, profile: UpstreamProfileConfig) -> tuple[str | None, int | None]:
         """Return the current OpenConnect process start time and age.
@@ -561,12 +574,27 @@ class UpstreamService:
         )
 
     def _append_log(self, line: str) -> None:
+        timestamp = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         try:
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
             with self.log_file.open("a", encoding="utf-8") as handle:
-                handle.write(line if line.endswith("\n") else f"{line}\n")
+                message = line.rstrip("\n")
+                handle.write(f"[{timestamp}] {message}\n")
         except OSError:
             pass
+
+    @staticmethod
+    def _require_policy_routing(results: list[CommandResult]) -> None:
+        """Fail a connect when its required rule or route was not installed.
+
+        A missing rule during cleanup is expected and harmless; every other
+        result from ``PolicyRoutingService.apply()`` is required for the
+        connection to carry marked traffic safely.
+        """
+        for result in results:
+            if result.ok or tuple(result.argv[:3]) == ("ip", "rule", "del"):
+                continue
+            raise CommandError(result)
 
     def connect(self, name: str | None = None, *, dry_run: bool = False) -> CommandResult:
         """Dial one profile's connection (the active one when name is None).
@@ -619,7 +647,9 @@ class UpstreamService:
                 # reaching here means the tunnel is up and the interface
                 # actually exists -- only now can a route via it be
                 # installed.
-                self.policy_routing.apply(self.profile_interface(profile))
+                self._require_policy_routing(
+                    self.policy_routing.apply(self.profile_interface(profile))
+                )
             if not dry_run:
                 # A connected profile that's also a named target gets its
                 # own table pointed at its own interface, regardless of
@@ -627,7 +657,7 @@ class UpstreamService:
                 # doesn't care which profile is "active".
                 for target_profile, routing in self._named_target_routing():
                     if target_profile.name == profile.name:
-                        routing.apply(self.profile_interface(profile))
+                        self._require_policy_routing(routing.apply(self.profile_interface(profile)))
                 # The vpnc-script hook has already stored whatever routes/
                 # split-DNS domains the server pushed in this handshake
                 # (openconnect runs it before backgrounding); apply them now
@@ -636,36 +666,38 @@ class UpstreamService:
             return result
 
     def _verify_backgrounded(self, profile: UpstreamProfileConfig, result: CommandResult) -> None:
-        """Confirm the daemonized openconnect is still alive after --background.
+        """Wait until both the daemon and its tunnel interface are ready.
 
-        The --background parent exits 0 as soon as it forks into the
-        background -- BEFORE the daemon finishes binding the tun device.
-        A failure past that point (e.g. "Failed to bind local tun device
-        (TUNSETIFF): Device or resource busy", one real-world cause: the
-        interface name is still held by another still-negotiating attempt
-        for the same profile) kills the daemon within well under a second,
-        with no way for the already-exited parent to report it -- runner.run
-        returns a clean success. Without this check, connect() would look
-        successful, recover() would log a false "reconnected", and the
-        watchdog's next few health-check ticks would find the process gone
-        and retry the same doomed dial forever, each cycle logging a
-        misleading success followed by silence instead of a visible error.
+        OpenConnect's ``--background`` parent exits before the daemon has
+        finished creating the TUN device. Applying policy routes as soon as
+        only the PID appears races that setup: ``ip route replace ... dev``
+        fails, and the watchdog can then enter a reconnect loop because its
+        health probe runs without the route it is meant to restore.
         """
+        interface = self.profile_interface(profile)
         deadline = time.monotonic() + BACKGROUND_GRACE_SECONDS
-        while not self._profile_connected(profile) and time.monotonic() < deadline:
+        process_seen = False
+        while time.monotonic() < deadline:
+            process_seen = self._profile_connected(profile)
+            if process_seen and self._interface_exists(interface):
+                return
             time.sleep(0.2)
-        if self._profile_connected(profile):
-            return
+
+        if process_seen:
+            detail = (
+                f"tunnel interface '{interface}' did not appear within {BACKGROUND_GRACE_SECONDS}s"
+            )
+        else:
+            detail = (
+                "openconnect backgrounded but the process was gone moments later; "
+                "the tunnel interface may already be in use"
+            )
         raise CommandError(
             CommandResult(
                 argv=result.argv,
                 returncode=1,
                 stdout=result.stdout,
-                stderr=(
-                    f"{result.stderr}\nopenconnect backgrounded but the process was "
-                    f"gone moments later; see {self.log_file} for the actual failure "
-                    "(e.g. the tun interface name already in use)"
-                ).strip(),
+                stderr=f"{result.stderr}\n{detail}; see {self.log_file} for details".strip(),
             )
         )
 
@@ -810,15 +842,40 @@ class UpstreamService:
             dry_run=dry_run,
         )
 
-    def is_healthy(self) -> bool:
-        """Whether the active connection currently looks good: the
-        backgrounded process is alive and, if a check_host is configured,
-        it still answers."""
+    def health_status(self) -> tuple[bool, str]:
+        """Return health and a safe diagnostic reason for watchdog logs.
+
+        The reason deliberately excludes the probe target and command output:
+        either may contain deployment details that should not be copied into
+        routine logs.
+        """
         profile = self.selected_profile()
-        if profile is None or not self._profile_connected(profile):
-            return False
+        if profile is None:
+            return False, "no active upstream profile"
+        if not self._profile_connected(profile):
+            return False, "connection process or interface is down"
         result = self.healthcheck()
-        return result is None or result.ok
+        if result is not None and not result.ok:
+            return False, f"tunnel probe failed with exit status {result.returncode}"
+        return True, "healthy"
+
+    def log_healthcheck_failure(
+        self,
+        *,
+        reason: str,
+        streak: int,
+        threshold: int,
+        state: str,
+    ) -> None:
+        """Record one failed watchdog check without logging probe secrets."""
+        self._append_log(
+            f"healthcheck failed: {reason}; streak={streak}/{threshold}; state={state}"
+        )
+
+    def is_healthy(self) -> bool:
+        """Whether the active connection currently looks good."""
+        healthy, _reason = self.health_status()
+        return healthy
 
     def ensure_policy_routing(self) -> list[CommandResult]:
         """Re-assert the fwmark rule/route for the active connected profile,
