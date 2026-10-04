@@ -417,8 +417,13 @@ class UpstreamService:
         server_cert_pin (see _accepted_server_pin()).
         """
         server = f"{profile.server}:{profile.port}"
+        # Everything secret goes through the 0600 --config file, never argv:
+        # /proc/<pid>/cmdline is readable by every local user for the tunnel's
+        # whole lifetime. The camouflage secret is part of the server URL
+        # (its query), so it moves into --server= in that file.
+        config_lines: list[str] = []
         if profile.camouflage_secret:
-            server = f"{server}/?{profile.camouflage_secret}"
+            config_lines.append(f"server={server}/?{profile.camouflage_secret}")
         argv = [
             "openconnect",
             "--interface",
@@ -455,17 +460,22 @@ class UpstreamService:
                 if key_path:
                     argv.extend(["--sslkey", str(key_path)])
                 if profile.cert_pass:
-                    # Through a 0600 --config file, never --key-password=
-                    # on the command line, which every local user could read
-                    # from the process list for the tunnel's whole lifetime.
-                    argv.append(f"--config={self._materialize_key_password(profile)}")
-        argv.append(server)
+                    # Never --key-password= on the command line.
+                    config_lines.append(f"key-password={profile.cert_pass}")
+        if config_lines:
+            argv.append(f"--config={self._materialize_openconnect_conf(profile, config_lines)}")
+        if not profile.camouflage_secret:
+            # With a camouflage secret the server comes from --server= in the
+            # config file instead of a positional argument.
+            argv.append(server)
         return argv
 
-    def _materialize_key_password(self, profile: UpstreamProfileConfig) -> Path:
+    def _materialize_openconnect_conf(
+        self, profile: UpstreamProfileConfig, lines: list[str]
+    ) -> Path:
         path = self._profile_secrets_dir(profile) / "openconnect.conf"
         self.files.ensure_dir(path.parent, mode=0o700)
-        self.files.atomic_write_text(path, f"key-password={profile.cert_pass}\n", mode=0o600)
+        self.files.atomic_write_text(path, "\n".join(lines) + "\n", mode=0o600)
         return path
 
     def _accepted_server_pin(self, profile: UpstreamProfileConfig, *, dry_run: bool) -> str | None:
@@ -638,7 +648,12 @@ class UpstreamService:
                 graceful_timeout=5,
                 dry_run=dry_run,
                 output_file=self.log_file,
-                extra_secrets=[profile.password or "", profile.cert_pass or "", profile.port],
+                extra_secrets=[
+                    profile.password or "",
+                    profile.cert_pass or "",
+                    profile.camouflage_secret or "",
+                    profile.port,
+                ],
             )
             if not dry_run:
                 self._verify_backgrounded(profile, result)

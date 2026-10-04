@@ -404,7 +404,10 @@ def test_openconnect_argv_always_uses_minimal_vpnc_script(tmp_path: Path) -> Non
     assert "ip link set" in content
 
 
-def test_openconnect_argv_appends_camouflage_secret_to_target(tmp_path: Path) -> None:
+def test_openconnect_argv_keeps_camouflage_secret_out_of_the_process_list(tmp_path: Path) -> None:
+    # The camouflage secret is the URL query of the server. Putting it on the
+    # command line would expose it in /proc/<pid>/cmdline for the tunnel's
+    # whole lifetime, so it goes into the 0600 --config file as --server=.
     config = _config(tmp_path)
     profile = UpstreamProfileConfig(
         name="primary",
@@ -417,7 +420,34 @@ def test_openconnect_argv_appends_camouflage_secret_to_target(tmp_path: Path) ->
 
     argv = UpstreamService(config).openconnect_argv(profile)
 
-    assert argv[-1] == "vpn.example.com:443/?s3cret"
+    assert not any("s3cret" in arg for arg in argv)
+    assert "vpn.example.com:443" not in argv
+    config_path = Path(next(arg for arg in argv if arg.startswith("--config=")).split("=", 1)[1])
+    assert config_path.stat().st_mode & 0o777 == 0o600
+    assert config_path.read_text(encoding="utf-8") == "server=vpn.example.com:443/?s3cret\n"
+
+
+def test_openconnect_argv_puts_camouflage_and_key_password_in_one_config(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    profile = UpstreamProfileConfig(
+        name="primary",
+        server="vpn.example.com",
+        port="443",
+        auth_type="p12",
+        cert_file="/etc/kornode/upstream.p12",
+        cert_pass="hunter2",
+        camouflage_secret="s3cret",
+    )
+
+    argv = UpstreamService(config).openconnect_argv(profile)
+
+    assert not any(("hunter2" in arg or "s3cret" in arg) for arg in argv)
+    assert "vpn.example.com:443" not in argv
+    assert _key_password_from_config(argv) == "hunter2"
+    config_path = Path(next(arg for arg in argv if arg.startswith("--config=")).split("=", 1)[1])
+    assert config_path.read_text(encoding="utf-8") == (
+        "server=vpn.example.com:443/?s3cret\nkey-password=hunter2\n"
+    )
 
 
 def test_openconnect_argv_omits_camouflage_suffix_when_unset(tmp_path: Path) -> None:
