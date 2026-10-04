@@ -152,15 +152,43 @@ table inet {{ filter_table }} {
   }
 
 {% set host_targets = targets | selectattr("host_enabled") | list %}
-{% if host_traffic_enabled or host_targets %}
+{% if upstream_killswitch or host_targets %}
+  chain input {
+    # Remember which upstream accepted a connection to a local service.
+    # The reply must use that same target's policy table; otherwise its
+    # initial route lookup follows the main table and can leak a private
+    # source address through the public uplink. Marking in the input hook
+    # is deliberate: local delivery has already been selected, so this
+    # conntrack mark cannot hairpin the inbound packet back into the tunnel.
+    type filter hook input priority mangle; policy accept;
+{% if upstream_killswitch %}
+    iifname "{{ outbound_interface }}" ct direction original ct state new counter ct mark set {{ config.routing.fwmark }}
+{% endif %}
+{% for target in host_targets %}
+    iifname "{{ target.interface }}" ct direction original ct state new counter ct mark set {{ target.fwmark }}
+{% endfor %}
+  }
+{% endif %}
+
+{% if upstream_killswitch or host_traffic_enabled or host_targets %}
   chain output {
     # "route" type: the mark must trigger a fresh route lookup so the
     # packet actually moves to the fwmark policy table.
     type route hook output priority mangle; policy accept;
+    # Restore marks only for replies to connections recorded by our input
+    # chain above. Restricting the accepted ct marks to this renderer's own
+    # targets avoids importing unrelated conntrack marks from other tools.
+{% if upstream_killswitch %}
+    ct direction reply ct mark {{ config.routing.fwmark }} counter meta mark set {{ config.routing.fwmark }}
+{% endif %}
+{% for target in host_targets %}
+    ct direction reply ct mark {{ target.fwmark }} counter meta mark set {{ target.fwmark }}
+{% endfor %}
     # ct direction original: only connections the host itself initiated.
-    # Replies to inbound connections (SSH, the panel, a VPN client whose
-    # public IP happens to land in a split set) keep their normal route. The
-    # VPN subnet itself is always exempt: the dnsmasq listen address and the
+    # Replies not explicitly recorded by our input chain (WAN SSH/panel, or
+    # any other non-upstream ingress) keep their normal route even if the
+    # peer address happens to land in a split set. The VPN subnet itself is
+    # always exempt: the dnsmasq listen address and the
     # clients' per-session /32 routes live there and must never be pulled
     # into the fwmark table.
 {% if host_traffic_enabled %}
@@ -212,19 +240,19 @@ table inet {{ filter_table }} {
   }
 {% endif %}
 
-{% if (upstream_killswitch and host_traffic_enabled) or host_targets %}
+{% if upstream_killswitch or host_targets %}
   chain postrouting {
-    # The host kill-switch must live in postrouting, NOT in an output-hook
-    # filter chain: every chain of one hook point shares the same
-    # nf_hook_state, so an output chain still sees the pre-reroute oifname
-    # (the uplink) even after the route chain re-routed the packet into
-    # the tunnel -- it would drop ALL marked host traffic. Postrouting is
-    # a fresh hook invocation and sees the final routing decision.
+    # The local/reply kill-switch must live in postrouting, NOT in an
+    # output-hook filter chain: every chain of one hook point shares the
+    # same nf_hook_state, so an output chain still sees the pre-reroute
+    # oifname (the uplink) even after the route chain re-routed the packet
+    # into the tunnel -- it would drop ALL marked local traffic. Postrouting
+    # is a fresh hook invocation and sees the final routing decision.
     type filter hook postrouting priority filter; policy accept;
     # Local delivery (a marked destination that is also an address on this
     # host) legitimately leaves via lo, never the tunnel.
     oifname "lo" accept
-{% if upstream_killswitch and host_traffic_enabled %}
+{% if upstream_killswitch %}
     meta mark {{ config.routing.fwmark }} oifname != "{{ outbound_interface }}" counter drop
 {% endif %}
     # Per-profile host routing is unconditional once a target exists (same

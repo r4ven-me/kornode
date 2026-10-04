@@ -260,7 +260,7 @@ def test_killswitch_absent_when_upstream_disabled(tmp_path: Path) -> None:
     assert "drop" not in rendered
 
 
-def test_client_traffic_off_suppresses_default_target_marking_and_killswitch(
+def test_client_traffic_off_suppresses_default_client_marking_and_nat(
     tmp_path: Path,
 ) -> None:
     config = load_config(
@@ -274,8 +274,17 @@ def test_client_traffic_off_suppresses_default_target_marking_and_killswitch(
 
     rendered = NftablesConfigRenderer().render(config)
 
-    assert f"counter meta mark set {config.routing.fwmark}" not in rendered
-    assert "drop" not in rendered
+    # Disabling client routing suppresses the broad client-subnet selector
+    # and its NAT, but not symmetric replies for local services accepted
+    # through the active upstream.
+    assert (
+        f"ip saddr {config.server.ipv4_network} counter "
+        f"meta mark set {config.routing.fwmark}" not in rendered
+    )
+    assert (
+        f'meta mark {config.routing.fwmark} oifname != "oc-middle0" counter drop'
+        in rendered
+    )
     assert (
         f'ip saddr {config.server.ipv4_network} meta mark {config.routing.fwmark} '
         'oifname "oc-middle0" masquerade' not in rendered
@@ -373,6 +382,17 @@ def test_host_traffic_split_mode_adds_output_marking_and_killswitch(tmp_path: Pa
     rendered = NftablesConfigRenderer().render(config)
 
     assert "type route hook output priority mangle" in rendered
+    # Connections accepted from an upstream to a local service retain that
+    # target in conntrack; reply packets restore its fwmark before routing.
+    assert "type filter hook input priority mangle" in rendered
+    assert (
+        'iifname "oc-middle0" ct direction original ct state new counter '
+        f"ct mark set {config.routing.fwmark}" in rendered
+    )
+    assert (
+        f"ct direction reply ct mark {config.routing.fwmark} counter "
+        f"meta mark set {config.routing.fwmark}" in rendered
+    )
     assert (
         f"ct direction original ip daddr != {config.server.ipv4_network} "
         f"ip daddr @host_split_v4_static counter meta mark set {config.routing.fwmark}"
@@ -397,6 +417,39 @@ def test_host_traffic_split_mode_adds_output_marking_and_killswitch(tmp_path: Pa
     )
 
 
+def test_active_upstream_routes_local_service_replies_without_host_routing(
+    tmp_path: Path,
+) -> None:
+    # Symmetric replies are transport correctness, not host-originated route
+    # selection: a service reached through the active tunnel must answer via
+    # that tunnel even when routing.host_traffic is deliberately disabled.
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "routing": {"client_traffic": False, "host_traffic": False},
+            "upstream": {"enabled": True, "profiles": [_upstream_profile()]},
+        },
+        environ={},
+    )
+
+    rendered = NftablesConfigRenderer().render(config)
+
+    assert (
+        'iifname "oc-middle0" ct direction original ct state new counter '
+        f"ct mark set {config.routing.fwmark}" in rendered
+    )
+    assert (
+        f"ct direction reply ct mark {config.routing.fwmark} counter "
+        f"meta mark set {config.routing.fwmark}" in rendered
+    )
+    assert (
+        f'meta mark {config.routing.fwmark} oifname != "oc-middle0" counter drop'
+        in rendered
+    )
+    # No ordinary host-originated packet is selected for the tunnel.
+    assert "ct direction original ip daddr" not in rendered
+
+
 def test_host_traffic_output_chain_absent_by_default(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
@@ -409,6 +462,7 @@ def test_host_traffic_output_chain_absent_by_default(tmp_path: Path) -> None:
     rendered = NftablesConfigRenderer().render(config)
 
     assert "hook output" not in rendered
+    assert "hook input" not in rendered
 
 
 def test_host_traffic_works_independent_of_client_mode(tmp_path: Path) -> None:
@@ -964,6 +1018,14 @@ def test_profile_host_routing_gets_its_own_set_marking_and_killswitch(tmp_path: 
 
     # finance is the 1st (only) profile -> offset 1 -> fwmark 0x0c02.
     assert "set host_v4_finance_static" in rendered
+    assert (
+        'iifname "oc-finance" ct direction original ct state new counter '
+        "ct mark set 0x0c02" in rendered
+    )
+    assert (
+        "ct direction reply ct mark 0x0c02 counter meta mark set 0x0c02"
+        in rendered
+    )
     assert "10.90.0.0/16" in rendered
     assert (
         f"ct direction original ip daddr != {config.server.ipv4_network} "
