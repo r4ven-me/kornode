@@ -827,6 +827,16 @@ class RoutingConfig(StrictModel):
     split: RoutingSplitConfig = Field(default_factory=RoutingSplitConfig)
     host_split: HostSplitConfig = Field(default_factory=HostSplitConfig)
 
+    @field_validator("host_dns", mode="before")
+    @classmethod
+    def validate_host_dns_off(cls, value: object) -> object:
+        # "off" is a YAML/env boolean word: YAML 1.1 and parse_env_value()
+        # both turn it into False before this model sees it. Map it back so
+        # `host_dns: off` and KORNODE_ROUTING__HOST_DNS=off mean the same.
+        if value is False:
+            return "off"
+        return value
+
     @field_validator("nft_prefix")
     @classmethod
     def validate_nft_prefix(cls, value: str) -> str:

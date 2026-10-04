@@ -87,3 +87,16 @@ def test_numeric_password_env_override_stays_string(tmp_path: Path) -> None:
     )
 
     assert config.web.admin_password == "12345678"
+
+
+def test_host_dns_off_survives_env_and_yaml_boolean_coercion(tmp_path: Path) -> None:
+    # Regression: "off" is a YAML/env boolean word, so it arrived as False and
+    # AppConfig rejected it -- the container crash-looped on deploy.
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("routing:\n  host_dns: off\n", encoding="utf-8")
+
+    from_yaml = load_config(config_path, environ={})
+    from_env = load_config(None, environ={"KORNODE_ROUTING__HOST_DNS": "off"})
+
+    assert from_yaml.routing.host_dns == "off"
+    assert from_env.routing.host_dns == "off"
