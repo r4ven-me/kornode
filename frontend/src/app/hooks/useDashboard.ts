@@ -146,8 +146,19 @@ export function useDashboard(
       { reload: dryRun, dryRunAware: true }
     );
     recordCommand("dashboard", result);
-    if (result !== null && authToken && !dryRun) {
-      await refreshServerStatus(authToken, "stopped");
+    if (result === null || !authToken || dryRun) {
+      return;
+    }
+    if (result.returncode !== 0) {
+      reportServerFailure(result, "Server did not stop");
+      return;
+    }
+    const observed = await refreshServerStatus(authToken, "stopped");
+    if (observed !== "stopped") {
+      core.setNotice({
+        kind: "error",
+        text: "Server stop requested, but ocserv is still running (see the status output below)"
+      });
     }
   };
 
@@ -175,11 +186,22 @@ export function useDashboard(
       { dryRunAware: true }
     );
     recordCommand("dashboard", result);
-    if (result !== null && authToken && !dryRun) {
-      await refreshServerStatus(authToken, "running");
-      const sessions = await fetchSessions(authToken);
-      updateSessions(sessions);
+    if (result === null || !authToken || dryRun) {
+      return;
     }
+    if (result.returncode !== 0) {
+      reportServerFailure(result, "ocserv did not restart");
+      return;
+    }
+    const observed = await refreshServerStatus(authToken, "running");
+    if (observed !== "running") {
+      core.setNotice({
+        kind: "error",
+        text: "ocserv restart requested, but it is not running (see the status output below)"
+      });
+    }
+    const sessions = await fetchSessions(authToken);
+    updateSessions(sessions);
   };
 
   // Shared by the Dashboard and the Config view's "Render configs" buttons.

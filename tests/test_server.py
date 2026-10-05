@@ -199,3 +199,27 @@ def test_server_start_reports_failure_when_ocserv_is_disabled(tmp_path: Path) ->
     assert rpc.calls == []
     assert result.returncode == 1
     assert "server.enabled" in result.stderr
+
+
+def test_server_stop_and_restart_report_failure_when_ocserv_is_disabled(tmp_path: Path) -> None:
+    config = AppConfig.model_validate(
+        {
+            "server": {"enabled": False},
+            "system": {
+                "generated_dir": tmp_path,
+                "data_dir": tmp_path,
+                "secrets_dir": tmp_path / "secrets",
+            },
+        }
+    )
+    rpc = FakeRpcClient()
+    service = ServerService(config, rpc_client=rpc)
+
+    stopped = service.stop()
+    restarted = service.restart()
+
+    assert rpc.calls == []
+    assert stopped.returncode == 1
+    assert restarted.returncode == 1
+    assert "server.enabled" in stopped.stderr
+    assert "server.enabled" in restarted.stderr

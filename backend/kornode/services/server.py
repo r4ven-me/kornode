@@ -36,21 +36,26 @@ class ServerService:
         if dry_run:
             return _dry_run_result("startProcess", "ocserv")
         if not self.config.server.enabled:
-            # With server.enabled false there is no [program:ocserv] in the
-            # supervisor config, so startProcess would only answer BAD_NAME.
-            return CommandResult(
-                ("supervisor-rpc", "startProcess", "ocserv"),
-                1,
-                "",
-                "ocserv is disabled: set server.enabled to true first",
-            )
+            return self._disabled_result("startProcess")
         self.config_service.write_rendered_files(self.config)
         return _run(lambda: self.rpc.start_process("ocserv"), "startProcess", "ocserv")
 
     def stop(self, *, dry_run: bool = False) -> CommandResult:
         if dry_run:
             return _dry_run_result("stopProcess", "ocserv")
+        if not self.config.server.enabled:
+            return self._disabled_result("stopProcess")
         return _run(lambda: self.rpc.stop_process("ocserv"), "stopProcess", "ocserv")
+
+    def _disabled_result(self, method: str) -> CommandResult:
+        # With server.enabled false there is no [program:ocserv] in the
+        # supervisor config, so the RPC would only answer BAD_NAME.
+        return CommandResult(
+            ("supervisor-rpc", method, "ocserv"),
+            1,
+            "",
+            "ocserv is disabled: set server.enabled to true first",
+        )
 
     def reload(self, *, dry_run: bool = False) -> CommandResult:
         if dry_run:
@@ -65,6 +70,8 @@ class ServerService:
     def restart(self, *, dry_run: bool = False) -> CommandResult:
         if dry_run:
             return _dry_run_result("restartProcess", "ocserv")
+        if not self.config.server.enabled:
+            return self._disabled_result("restartProcess")
         self.config_service.write_rendered_files(self.config)
 
         def _restart() -> None:
