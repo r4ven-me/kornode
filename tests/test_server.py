@@ -176,3 +176,26 @@ def test_apply_config_change_skips_disabled_ocserv(tmp_path: Path) -> None:
 
     assert ServerService(config, rpc_client=rpc).apply_config_change("") is None
     assert rpc.calls == []
+
+
+def test_server_start_reports_failure_when_ocserv_is_disabled(tmp_path: Path) -> None:
+    # With server.enabled false supervisor has no ocserv program, so the start
+    # must not reach startProcess (it would only say BAD_NAME) -- report a
+    # clear non-zero result instead, which the panel shows as an error.
+    config = AppConfig.model_validate(
+        {
+            "server": {"enabled": False},
+            "system": {
+                "generated_dir": tmp_path,
+                "data_dir": tmp_path,
+                "secrets_dir": tmp_path / "secrets",
+            },
+        }
+    )
+    rpc = FakeRpcClient()
+
+    result = ServerService(config, rpc_client=rpc).start()
+
+    assert rpc.calls == []
+    assert result.returncode == 1
+    assert "server.enabled" in result.stderr

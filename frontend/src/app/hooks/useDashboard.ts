@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  type CommandResult,
   type InterfaceStats,
   type SessionRecord,
   applyNft,
@@ -80,22 +81,34 @@ export function useDashboard(
     };
   }, [state.diagnostics]);
 
+  // Returns the last observed runtime state, so callers can tell whether the
+  // expected state was actually reached.
   const refreshServerStatus = async (
     token: string,
     expectedState?: "running" | "stopped"
-  ): Promise<void> => {
+  ): Promise<"running" | "stopped" | "unknown"> => {
     const attempts = expectedState ? 8 : 1;
+    let observed: "running" | "stopped" | "unknown" = "unknown";
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const [serverStatus, serverProcesses] = await Promise.all([
         fetchServerStatus(token),
         fetchServerProcesses(token)
       ]);
       setState((current) => ({ ...current, serverStatus, serverProcesses }));
-      if (!expectedState || serverRuntimeState(serverStatus) === expectedState) {
-        return;
+      observed = serverRuntimeState(serverStatus);
+      if (!expectedState || observed === expectedState) {
+        return observed;
       }
       await delay(350);
     }
+    return observed;
+  };
+
+  // runAction() only treats thrown errors as failures; the server endpoints
+  // answer 200 with a non-zero returncode, so check that here.
+  const reportServerFailure = (result: CommandResult, text: string) => {
+    const detail = (result.stderr || result.stdout).trim();
+    core.setNotice({ kind: "error", text: detail ? `${text}: ${detail}` : text });
   };
 
   const startServerAction = async () => {
@@ -106,8 +119,19 @@ export function useDashboard(
       { reload: dryRun, dryRunAware: true }
     );
     recordCommand("dashboard", result);
-    if (result !== null && authToken && !dryRun) {
-      await refreshServerStatus(authToken, "running");
+    if (result === null || !authToken || dryRun) {
+      return;
+    }
+    if (result.returncode !== 0) {
+      reportServerFailure(result, "Server did not start");
+      return;
+    }
+    const observed = await refreshServerStatus(authToken, "running");
+    if (observed !== "running") {
+      core.setNotice({
+        kind: "error",
+        text: "Server start requested, but ocserv is not running (see the status output below)"
+      });
     }
   };
 
