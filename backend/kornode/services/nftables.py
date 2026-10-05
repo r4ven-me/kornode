@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -124,11 +125,37 @@ class NftablesService:
         means the very next call repairs itself instead of needing a manual
         intervention.
         """
-        if self._static_sets_ready(outbound_interface):
+        # The surgical refresh only reloads the filter table's sets, so it can
+        # never update the NAT table. When the masquerade rules changed (e.g.
+        # server.ipv4_network moved to another subnet) the schema still
+        # matches and the refresh would leave the old NAT rules live; the
+        # fingerprint of the NAT block forces a full recreate in that case.
+        if self._static_sets_ready(outbound_interface) and self._nat_is_current(
+            outbound_interface
+        ):
             refresh_result = self._apply_static_refresh(outbound_interface)
             if refresh_result.ok:
                 return refresh_result
         return self._apply_full_recreate(outbound_interface)
+
+    def _nat_fingerprint(self, outbound_interface: str | None) -> str:
+        content = self.render(outbound_interface)
+        start = content.find(f"table ip {self.nat_table} {{")
+        if start < 0:
+            return ""
+        end = content.find("\n}", start)
+        block = content[start : end + 2] if end >= 0 else content[start:]
+        return hashlib.sha256(block.encode("utf-8")).hexdigest()
+
+    def _nat_fingerprint_path(self) -> Path:
+        return self.config.system.generated_dir / "nftables-nat.sha256"
+
+    def _nat_is_current(self, outbound_interface: str | None) -> bool:
+        try:
+            applied = self._nat_fingerprint_path().read_text(encoding="utf-8").strip()
+        except OSError:
+            return False
+        return applied == self._nat_fingerprint(outbound_interface)
 
     def _static_sets_ready(self, outbound_interface: str | None) -> bool:
         """Whether the live nftables table already has exactly the
@@ -172,7 +199,13 @@ class NftablesService:
         # delete table` commands beforehand -- that would leave a window
         # with no kill-switch/NAT at all if the reload then failed.
         self.files.atomic_write_text(target, content)
-        return self.runner.run(["nft", "-f", str(target)], timeout=30, check=False)
+        result = self.runner.run(["nft", "-f", str(target)], timeout=30, check=False)
+        if result.ok:
+            # Remember which NAT block is live; see _nat_is_current().
+            self.files.atomic_write_text(
+                self._nat_fingerprint_path(), self._nat_fingerprint(outbound_interface) + "\n"
+            )
+        return result
 
     def _reassert_policy_routing(
         self,

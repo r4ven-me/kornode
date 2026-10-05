@@ -565,6 +565,14 @@ def _nft_f_calls(calls: list[list[str]]) -> list[list[str]]:
     return [call for call in calls if tuple(call[:2]) == ("nft", "-f")]
 
 
+def _record_current_nat_fingerprint(config: AppConfig, runner: CommandRunner) -> None:
+    # The NAT block is unchanged since the last full recreate: the surgical
+    # refresh is only allowed in that state (see NftablesService._apply_ruleset).
+    fingerprint = NftablesService(config, runner=runner)._nat_fingerprint(None)
+    generated = config.system.generated_dir
+    (generated / "nftables-nat.sha256").write_text(fingerprint + "\n", encoding="utf-8")
+
+
 def test_nft_apply_uses_surgical_refresh_when_schema_already_matches(tmp_path: Path) -> None:
     # The common case: a routes/domains-only change (profile edit, pushed-
     # routes sync, panel Reload) with no change to which targets/host
@@ -575,6 +583,7 @@ def test_nft_apply_uses_surgical_refresh_when_schema_already_matches(tmp_path: P
     )
     expected = NftablesConfigRenderer().expected_set_names(config)
     runner = ReadySchemaRunner(expected)
+    _record_current_nat_fingerprint(config, runner)
 
     NftablesService(config, runner=runner).apply()
 
@@ -609,6 +618,7 @@ def test_nft_apply_self_heals_to_full_recreate_when_surgical_refresh_fails(
     )
     expected = NftablesConfigRenderer().expected_set_names(config)
     runner = ReadySchemaRunner(expected, refresh_ok=False)
+    _record_current_nat_fingerprint(config, runner)
 
     results = NftablesService(config, runner=runner).apply()
 
@@ -1245,3 +1255,54 @@ def test_nft_cleanup_removes_docker_user_compat_rules_by_handle(tmp_path: Path) 
     assert [
         "nft", "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", "22",
     ] in runner.calls
+
+
+def test_nft_apply_full_recreates_when_nat_block_changed_under_matching_schema(
+    tmp_path: Path,
+) -> None:
+    # Regression: moving server.ipv4_network left the set schema unchanged, so
+    # the surgical refresh ran and the live NAT table kept the old subnet's
+    # masquerade rules (client traffic left unmasqueraded). A stale NAT
+    # fingerprint must force the full recreate that reloads the NAT table.
+    config = AppConfig.model_validate(
+        {
+            "system": {"generated_dir": tmp_path},
+            "routing": {"mode": "split"},
+            "server": {"ipv4_network": "10.12.12.0/24"},
+        }
+    )
+    expected = NftablesConfigRenderer().expected_set_names(config)
+    runner = ReadySchemaRunner(expected)
+    service = NftablesService(config, runner=runner)
+    (tmp_path / "nftables-nat.sha256").write_text("stale-fingerprint\n", encoding="utf-8")
+
+    service.apply()
+
+    calls = _nft_f_calls(runner.calls)
+    assert len(calls) == 1
+    assert calls[0][2].endswith("nftables.nft")
+    assert (tmp_path / "nftables-nat.sha256").read_text(encoding="utf-8").strip() == (
+        service._nat_fingerprint(None)
+    )
+
+
+def test_nft_apply_keeps_surgical_refresh_when_nat_block_is_current(tmp_path: Path) -> None:
+    config = AppConfig.model_validate(
+        {
+            "system": {"generated_dir": tmp_path},
+            "routing": {"mode": "split"},
+            "server": {"ipv4_network": "10.12.12.0/24"},
+        }
+    )
+    expected = NftablesConfigRenderer().expected_set_names(config)
+    runner = ReadySchemaRunner(expected)
+    service = NftablesService(config, runner=runner)
+    (tmp_path / "nftables-nat.sha256").write_text(
+        service._nat_fingerprint(None) + "\n", encoding="utf-8"
+    )
+
+    service.apply()
+
+    calls = _nft_f_calls(runner.calls)
+    assert len(calls) == 1
+    assert calls[0][2].endswith("nftables-static-refresh.nft")
