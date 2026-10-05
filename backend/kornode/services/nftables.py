@@ -13,6 +13,10 @@ from kornode.services.policy_routing import PolicyRoutingService
 from kornode.services.routing import RoutingTarget
 
 _HANDLE_RE = re.compile(r"#\s*handle\s+(\d+)\s*$")
+# Route/domain lists live in one-line `elements = { ... }` set declarations;
+# the static refresh is the only thing that updates those, so they are left
+# out of the rules fingerprint.
+_SET_ELEMENTS_RE = re.compile(r"^\s*elements = \{.*\}\s*$\n?", re.MULTILINE)
 
 
 class NftablesService:
@@ -125,12 +129,13 @@ class NftablesService:
         means the very next call repairs itself instead of needing a manual
         intervention.
         """
-        # The surgical refresh only reloads the filter table's sets, so it can
-        # never update the NAT table. When the masquerade rules changed (e.g.
-        # server.ipv4_network moved to another subnet) the schema still
-        # matches and the refresh would leave the old NAT rules live; the
-        # fingerprint of the NAT block forces a full recreate in that case.
-        if self._static_sets_ready(outbound_interface) and self._nat_is_current(
+        # The surgical refresh only reloads the *_static set elements. Any
+        # other change -- masquerade rules (server.ipv4_network), client or
+        # host marking (routing.client_traffic / mode), kill-switch rules --
+        # lives in chains and table definitions it never touches, so while
+        # the rules fingerprint differs from the last full recreate the
+        # refresh would leave stale rules live. Fall back to the full recreate.
+        if self._static_sets_ready(outbound_interface) and self._rules_are_current(
             outbound_interface
         ):
             refresh_result = self._apply_static_refresh(outbound_interface)
@@ -138,24 +143,19 @@ class NftablesService:
                 return refresh_result
         return self._apply_full_recreate(outbound_interface)
 
-    def _nat_fingerprint(self, outbound_interface: str | None) -> str:
-        content = self.render(outbound_interface)
-        start = content.find(f"table ip {self.nat_table} {{")
-        if start < 0:
-            return ""
-        end = content.find("\n}", start)
-        block = content[start : end + 2] if end >= 0 else content[start:]
-        return hashlib.sha256(block.encode("utf-8")).hexdigest()
+    def _rules_fingerprint(self, outbound_interface: str | None) -> str:
+        content = _SET_ELEMENTS_RE.sub("", self.render(outbound_interface))
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    def _nat_fingerprint_path(self) -> Path:
-        return self.config.system.generated_dir / "nftables-nat.sha256"
+    def _rules_fingerprint_path(self) -> Path:
+        return self.config.system.generated_dir / "nftables-rules.sha256"
 
-    def _nat_is_current(self, outbound_interface: str | None) -> bool:
+    def _rules_are_current(self, outbound_interface: str | None) -> bool:
         try:
-            applied = self._nat_fingerprint_path().read_text(encoding="utf-8").strip()
+            applied = self._rules_fingerprint_path().read_text(encoding="utf-8").strip()
         except OSError:
             return False
-        return applied == self._nat_fingerprint(outbound_interface)
+        return applied == self._rules_fingerprint(outbound_interface)
 
     def _static_sets_ready(self, outbound_interface: str | None) -> bool:
         """Whether the live nftables table already has exactly the
@@ -201,9 +201,9 @@ class NftablesService:
         self.files.atomic_write_text(target, content)
         result = self.runner.run(["nft", "-f", str(target)], timeout=30, check=False)
         if result.ok:
-            # Remember which NAT block is live; see _nat_is_current().
+            # Remember which rules are live; see _rules_are_current().
             self.files.atomic_write_text(
-                self._nat_fingerprint_path(), self._nat_fingerprint(outbound_interface) + "\n"
+                self._rules_fingerprint_path(), self._rules_fingerprint(outbound_interface) + "\n"
             )
         return result
 

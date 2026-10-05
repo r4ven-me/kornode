@@ -565,12 +565,12 @@ def _nft_f_calls(calls: list[list[str]]) -> list[list[str]]:
     return [call for call in calls if tuple(call[:2]) == ("nft", "-f")]
 
 
-def _record_current_nat_fingerprint(config: AppConfig, runner: CommandRunner) -> None:
-    # The NAT block is unchanged since the last full recreate: the surgical
+def _record_current_rules_fingerprint(config: AppConfig, runner: CommandRunner) -> None:
+    # The rules are unchanged since the last full recreate: the surgical
     # refresh is only allowed in that state (see NftablesService._apply_ruleset).
-    fingerprint = NftablesService(config, runner=runner)._nat_fingerprint(None)
+    fingerprint = NftablesService(config, runner=runner)._rules_fingerprint(None)
     generated = config.system.generated_dir
-    (generated / "nftables-nat.sha256").write_text(fingerprint + "\n", encoding="utf-8")
+    (generated / "nftables-rules.sha256").write_text(fingerprint + "\n", encoding="utf-8")
 
 
 def test_nft_apply_uses_surgical_refresh_when_schema_already_matches(tmp_path: Path) -> None:
@@ -583,7 +583,7 @@ def test_nft_apply_uses_surgical_refresh_when_schema_already_matches(tmp_path: P
     )
     expected = NftablesConfigRenderer().expected_set_names(config)
     runner = ReadySchemaRunner(expected)
-    _record_current_nat_fingerprint(config, runner)
+    _record_current_rules_fingerprint(config, runner)
 
     NftablesService(config, runner=runner).apply()
 
@@ -618,7 +618,7 @@ def test_nft_apply_self_heals_to_full_recreate_when_surgical_refresh_fails(
     )
     expected = NftablesConfigRenderer().expected_set_names(config)
     runner = ReadySchemaRunner(expected, refresh_ok=False)
-    _record_current_nat_fingerprint(config, runner)
+    _record_current_rules_fingerprint(config, runner)
 
     results = NftablesService(config, runner=runner).apply()
 
@@ -1257,7 +1257,7 @@ def test_nft_cleanup_removes_docker_user_compat_rules_by_handle(tmp_path: Path) 
     ] in runner.calls
 
 
-def test_nft_apply_full_recreates_when_nat_block_changed_under_matching_schema(
+def test_nft_apply_full_recreates_when_rules_changed_under_matching_schema(
     tmp_path: Path,
 ) -> None:
     # Regression: moving server.ipv4_network left the set schema unchanged, so
@@ -1274,19 +1274,19 @@ def test_nft_apply_full_recreates_when_nat_block_changed_under_matching_schema(
     expected = NftablesConfigRenderer().expected_set_names(config)
     runner = ReadySchemaRunner(expected)
     service = NftablesService(config, runner=runner)
-    (tmp_path / "nftables-nat.sha256").write_text("stale-fingerprint\n", encoding="utf-8")
+    (tmp_path / "nftables-rules.sha256").write_text("stale-fingerprint\n", encoding="utf-8")
 
     service.apply()
 
     calls = _nft_f_calls(runner.calls)
     assert len(calls) == 1
     assert calls[0][2].endswith("nftables.nft")
-    assert (tmp_path / "nftables-nat.sha256").read_text(encoding="utf-8").strip() == (
-        service._nat_fingerprint(None)
+    assert (tmp_path / "nftables-rules.sha256").read_text(encoding="utf-8").strip() == (
+        service._rules_fingerprint(None)
     )
 
 
-def test_nft_apply_keeps_surgical_refresh_when_nat_block_is_current(tmp_path: Path) -> None:
+def test_nft_apply_keeps_surgical_refresh_when_rules_are_current(tmp_path: Path) -> None:
     config = AppConfig.model_validate(
         {
             "system": {"generated_dir": tmp_path},
@@ -1297,11 +1297,59 @@ def test_nft_apply_keeps_surgical_refresh_when_nat_block_is_current(tmp_path: Pa
     expected = NftablesConfigRenderer().expected_set_names(config)
     runner = ReadySchemaRunner(expected)
     service = NftablesService(config, runner=runner)
-    (tmp_path / "nftables-nat.sha256").write_text(
-        service._nat_fingerprint(None) + "\n", encoding="utf-8"
+    (tmp_path / "nftables-rules.sha256").write_text(
+        service._rules_fingerprint(None) + "\n", encoding="utf-8"
     )
 
     service.apply()
+
+    calls = _nft_f_calls(runner.calls)
+    assert len(calls) == 1
+    assert calls[0][2].endswith("nftables-static-refresh.nft")
+
+
+def test_nft_apply_full_recreates_when_only_marking_rules_changed(tmp_path: Path) -> None:
+    # Regression: routing.client_traffic only changes the prerouting mark
+    # rules, not any set name, so the surgical refresh kept the old marking
+    # live. Recorded rules from before the change must force a full recreate.
+    before = AppConfig.model_validate(
+        {"system": {"generated_dir": tmp_path}, "routing": {"mode": "full"}}
+    )
+    after = AppConfig.model_validate(
+        {
+            "system": {"generated_dir": tmp_path},
+            "routing": {"mode": "full", "client_traffic": False},
+        }
+    )
+    expected = NftablesConfigRenderer().expected_set_names(after)
+    runner = ReadySchemaRunner(expected)
+    _record_current_rules_fingerprint(before, runner)
+
+    NftablesService(after, runner=runner).apply()
+
+    calls = _nft_f_calls(runner.calls)
+    assert len(calls) == 1
+    assert calls[0][2].endswith("nftables.nft")
+
+
+def test_nft_apply_stays_surgical_when_only_route_lists_changed(tmp_path: Path) -> None:
+    # Route/domain edits only change set elements, which the surgical refresh
+    # is meant to handle -- they must not force a full recreate (that would
+    # wipe the *_dynamic sets on every profile edit).
+    before = AppConfig.model_validate(
+        {"system": {"generated_dir": tmp_path}, "routing": {"mode": "split"}}
+    )
+    after = AppConfig.model_validate(
+        {
+            "system": {"generated_dir": tmp_path},
+            "routing": {"mode": "split", "split": {"routes": ["198.51.100.0/24"]}},
+        }
+    )
+    expected = NftablesConfigRenderer().expected_set_names(after)
+    runner = ReadySchemaRunner(expected)
+    _record_current_rules_fingerprint(before, runner)
+
+    NftablesService(after, runner=runner).apply()
 
     calls = _nft_f_calls(runner.calls)
     assert len(calls) == 1
