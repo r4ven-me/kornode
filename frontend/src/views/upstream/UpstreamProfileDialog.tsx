@@ -427,17 +427,6 @@ export function UpstreamProfileDialog({
             )}
             <label
               className="switch"
-              title="Turns on the whole Upstream profiles feature (upstream.enabled) when you save -- affects every profile, not just this one. Leave off while you're still setting things up. Independent of 'This profile enabled' below, which only concerns this one profile."
-            >
-              <input
-                checked={draft.enable}
-                onChange={(event) => onDraftChange({ ...draft, enable: event.target.checked })}
-                type="checkbox"
-              />
-              <span>Turn on upstream profiles (all profiles)</span>
-            </label>
-            <label
-              className="switch"
               title="This profile only -- not the whole Upstream profiles feature (see the toggle above for that). Whether the watchdog keeps THIS specific profile dialed. Off disconnects it (if it's the default profile, that also clears the default selection) and keeps the watchdog from redialing it -- independent of failover, which only controls automatic switching."
             >
               <input

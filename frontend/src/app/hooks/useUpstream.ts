@@ -130,7 +130,7 @@ export function useUpstream(
       return;
     }
     const draft: UpstreamProfileDraft = {
-      ...upstreamProfileToDraft(active, Boolean(state.upstream?.enabled)),
+      ...upstreamProfileToDraft(active),
       check_host: checkHost
     };
     const result = await runAction("upstream-settings", "Check host saved", (token) =>
@@ -214,7 +214,7 @@ export function useUpstream(
   const createProfile = () => openProfileDialog(emptyUpstreamProfileDraft, false);
 
   const editProfile = (profile: UpstreamProfile) =>
-    openProfileDialog(upstreamProfileToDraft(profile, Boolean(state.upstream?.enabled)), true);
+    openProfileDialog(upstreamProfileToDraft(profile), true);
 
   const connectProfile = async (name: string) => {
     const result = await runAction(
@@ -283,7 +283,7 @@ export function useUpstream(
   };
 
   const editRelay = (profile: UpstreamProfile) => {
-    setRelayDraft(upstreamProfileToDraft(profile, Boolean(state.upstream?.enabled)));
+    setRelayDraft(upstreamProfileToDraft(profile));
     setRelayRoutesStatus(null);
     setRelayDomainsStatus(null);
     if (authToken) {

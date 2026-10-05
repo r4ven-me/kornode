@@ -153,7 +153,6 @@ export type UpstreamProfileDraft = {
   // Explicit fwmark/table_id offset override; blank derives it from the
   // profile's position in upstream.profiles.
   routing_offset: string;
-  enable: boolean;
   enabled: boolean;
 };
 

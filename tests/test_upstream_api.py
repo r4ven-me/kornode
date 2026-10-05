@@ -1013,3 +1013,49 @@ def test_upstream_profile_response_includes_kind_field(tmp_path: Path) -> None:
     profiles = client.get("/api/upstream", auth=("admin", "secret")).json()
 
     assert profiles[0]["kind"] == "openconnect"
+
+
+def test_saving_a_profile_leaves_global_upstream_enabled_alone(tmp_path: Path) -> None:
+    # Regression: saving a second profile with the global toggle off switched
+    # upstream.enabled off for every profile, the tunnels came down, and the
+    # panel (reachable only over the tunnel) became unreachable. Profile saves
+    # must not touch the global toggle -- that is POST /api/upstream/settings.
+    config_path = tmp_path / "config.yaml"
+    _client(config_path, tmp_path)  # writes the base config
+    upstream = {
+        "upstream": {
+            "enabled": True,
+            "active_profile": "office",
+            "profiles": [
+                {
+                    "name": "office",
+                    "server": "vpn.example.com",
+                    "auth_type": "password",
+                    "username": "user",
+                    "password": "secret",
+                }
+            ],
+        }
+    }
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8") + yaml.safe_dump(upstream), encoding="utf-8"
+    )
+    client = TestClient(create_app(config_path=config_path))
+
+    response = client.post(
+        "/api/upstream/profiles",
+        auth=("admin", "secret"),
+        json={
+            "name": "art-ext",
+            "server": "203.0.113.5",
+            "auth_type": "password",
+            "username": "user",
+            "password": "secret",
+            "enable": False,
+        },
+    )
+
+    assert response.status_code == 200
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))["upstream"]
+    assert saved["enabled"] is True
+    assert [item["name"] for item in saved["profiles"]] == ["office", "art-ext"]

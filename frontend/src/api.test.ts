@@ -98,7 +98,6 @@ const upstreamProfileDraft: UpstreamProfileDraft = {
   sync_interval: "60",
   sync_verify_tls: false,
   routing_offset: "",
-  enable: true,
   enabled: true
 };
 

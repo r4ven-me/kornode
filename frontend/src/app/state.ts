@@ -100,14 +100,10 @@ export const emptyUpstreamProfileDraft: UpstreamProfileDraft = {
   sync_interval: "60",
   sync_verify_tls: false,
   routing_offset: "",
-  enable: false,
   enabled: false
 };
 
-export function upstreamProfileToDraft(
-  profile: UpstreamProfile,
-  upstreamEnabled: boolean
-): UpstreamProfileDraft {
+export function upstreamProfileToDraft(profile: UpstreamProfile): UpstreamProfileDraft {
   return {
     name: profile.name,
     kind: profile.kind,
@@ -143,10 +139,6 @@ export function upstreamProfileToDraft(
     sync_interval: String(profile.sync_interval ?? 60),
     sync_verify_tls: profile.sync_verify_tls ?? false,
     routing_offset: profile.routing_offset != null ? String(profile.routing_offset) : "",
-    // Reflects the ACTUAL current upstream.enabled, not a hardcoded true --
-    // editing a profile while upstream is deliberately disabled must not
-    // silently re-enable it just because this checkbox defaulted on.
-    enable: upstreamEnabled,
     enabled: profile.enabled
   };
 }

@@ -94,15 +94,15 @@ class UpstreamProfileRequest(BaseModel):
     sync_interval: int = 60
     sync_verify_tls: bool = False
     # Per-profile: whether the watchdog should keep this profile dialed at
-    # all (UpstreamProfileConfig.enabled). Distinct from `enable` below,
-    # which is the *global* upstream.enabled toggle set when saving any
-    # profile from the create/edit form.
+    # all (UpstreamProfileConfig.enabled). Saving a profile never touches the
+    # global upstream.enabled toggle -- that one is only changed through
+    # POST /api/upstream/settings, so editing a profile can't take down the
+    # tunnels (and with them the panel, when it is only reachable over one).
     enabled: bool = True
     # Explicit fwmark/table_id offset override (UpstreamProfileConfig.
     # routing_offset). Omitted from the request -> an existing profile keeps
     # its saved value; an explicit null clears it back to position-derived.
     routing_offset: int | None = None
-    enable: bool = True
 
 
 @router.get("")
@@ -191,7 +191,7 @@ def save_profile(
 ) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     existing = next((item for item in config.upstream.profiles if item.name == payload.name), None)
-    data = payload.model_dump(exclude={"enable"}, exclude_none=True)
+    data = payload.model_dump(exclude_none=True)
     if existing:
         _preserve_unset_secret(data, existing, "password")
         _preserve_unset_secret(data, existing, "cert_pass")
@@ -211,7 +211,6 @@ def save_profile(
         profiles.append(profile)
     patch: dict[str, object] = {
         "profiles": [item.model_dump(mode="json") for item in profiles],
-        "enabled": payload.enable,
     }
     # Only pick a default profile automatically when there isn't one yet
     # (the very first profile ever saved). Once one is active, saving --
