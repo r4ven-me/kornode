@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
 from kornode.api.routes_config import apply_config_patch
 from kornode.config.models import AppConfig
+from kornode.services.apply import apply_dns_configuration, client_dns_signature
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
 from kornode.services.host_dns import HostDnsService
@@ -245,6 +246,7 @@ def refresh_host_domains_url(
 def save_routing_settings(
     request: Request,
     payload: RoutingSettingsRequest,
+    background_tasks: BackgroundTasks,
 ) -> dict[str, object]:
     split: dict[str, object] = {
         "tunnel_dns": payload.tunnel_dns,
@@ -277,14 +279,29 @@ def save_routing_settings(
         patch["table_id"] = payload.table_id
     if payload.nft_prefix is not None:
         patch["nft_prefix"] = payload.nft_prefix
+    previous_client_dns = client_dns_signature(request.app.state.config)
     loaded_config, written = apply_config_patch(request, {"routing": patch})
+    reconnect_required = previous_client_dns != client_dns_signature(loaded_config)
+    # Same path as the DNS page: dnsmasq and ocserv follow the saved settings
+    # right away, and clients reconnect only when what they see changed.
+    # RUNTIME: starts/stops dnsmasq and may reload ocserv.
+    dns_commands = apply_dns_configuration(
+        loaded_config,
+        background_tasks,
+        reconnect_clients=reconnect_required,
+    )
+    # RUNTIME: rewrites live nftables state, same as the Upstream Apply button.
+    nft_results = NftablesService(loaded_config).apply()
     # Apply right away instead of waiting for host-dns-guard's next cycle.
     # RUNTIME: touches the mounted host resolver files, if any.
     host_dns = HostDnsService(loaded_config).apply()
     return {
-        "status": "saved",
+        "status": "saved_and_applied",
         "written": written,
+        "reconnect_required": reconnect_required,
         "routing": loaded_config.routing.model_dump(mode="json"),
+        "dns": command_results(dns_commands),
+        "nft": command_results(nft_results),
         "host_dns": host_dns.as_dict(),
     }
 

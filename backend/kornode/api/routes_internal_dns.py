@@ -6,10 +6,9 @@ from pydantic import BaseModel, Field
 from kornode.api.auth import require_admin
 from kornode.api.routes_config import apply_config_patch
 from kornode.config.models import AppConfig
+from kornode.services.apply import apply_dns_configuration, client_dns_signature
 from kornode.services.command import CommandResult
 from kornode.services.internal_dns import InternalDnsService
-from kornode.services.server import ServerService
-from kornode.services.sessions import SessionService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -62,7 +61,7 @@ def save_internal_dns_settings(
     background_tasks: BackgroundTasks,
 ) -> dict[str, object]:
     previous_config: AppConfig = request.app.state.config
-    previous_client_dns = _client_dns_signature(previous_config)
+    previous_client_dns = client_dns_signature(previous_config)
     patch: dict[str, object] = {
         "server": {
             "dns": payload.server_dns,
@@ -87,8 +86,8 @@ def save_internal_dns_settings(
         },
     }
     loaded_config, written = apply_config_patch(request, patch)
-    reconnect_required = previous_client_dns != _client_dns_signature(loaded_config)
-    commands = _apply_dns_configuration(
+    reconnect_required = previous_client_dns != client_dns_signature(loaded_config)
+    commands = apply_dns_configuration(
         loaded_config,
         background_tasks,
         reconnect_clients=reconnect_required,
@@ -102,17 +101,6 @@ def save_internal_dns_settings(
     }
 
 
-def _client_dns_signature(
-    config: AppConfig,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], bool]:
-    return (
-        tuple(config.client_dns_servers()),
-        tuple(config.server.search_domains),
-        tuple(config.internal_dns.forward_domains),
-        config.dns_tunnel_active(),
-    )
-
-
 def _command_payload(result: CommandResult) -> dict[str, object]:
     return {
         "argv": list(result.argv),
@@ -123,39 +111,6 @@ def _command_payload(result: CommandResult) -> dict[str, object]:
     }
 
 
-def _disconnect_dns_clients(config: AppConfig, usernames: tuple[str, ...]) -> None:
-    sessions = SessionService(config)
-    for username in usernames:
-        sessions.kick(username)
-
-
-def _apply_dns_configuration(
-    config: AppConfig,
-    background_tasks: BackgroundTasks,
-    *,
-    reconnect_clients: bool,
-) -> list[CommandResult]:
-    from kornode.services.config import ConfigService
-
-    ConfigService().write_rendered_files(config)
-    results: list[CommandResult] = []
-    server = ServerService(config)
-    if config.dns_tunnel_active():
-        InternalDnsService(config).ensure_listen_address()
-        results.append(server.process_action("restart", "dnsmasq"))
-    else:
-        results.append(server.process_action("stop", "dnsmasq"))
-    if reconnect_clients:
-        reload_result = server.reload()
-        results.append(reload_result)
-        if reload_result.ok:
-            sessions = SessionService(config)
-            usernames = tuple(dict.fromkeys(item.username for item in sessions.list_sessions()))
-            if usernames:
-                background_tasks.add_task(_disconnect_dns_clients, config, usernames)
-    return results
-
-
 @router.post("/apply")
 def apply_internal_dns(
     request: Request,
@@ -163,7 +118,7 @@ def apply_internal_dns(
 ) -> list[dict[str, object]]:
     """Explicitly apply DNS configuration and reconnect active clients."""
     config: AppConfig = request.app.state.config
-    results = _apply_dns_configuration(config, background_tasks, reconnect_clients=True)
+    results = apply_dns_configuration(config, background_tasks, reconnect_clients=True)
     return [_command_payload(result) for result in results]
 
 

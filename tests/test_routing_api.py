@@ -7,6 +7,11 @@ import yaml
 from fastapi.testclient import TestClient
 
 from kornode.api.app import create_app
+from kornode.services.command import CommandResult
+
+
+def _ok_result() -> CommandResult:
+    return CommandResult(("true",), 0, "", "", dry_run=False)
 
 
 def _client(config_path: Path, tmp_path: Path) -> TestClient:
@@ -391,3 +396,42 @@ def test_routing_host_domains_refresh_fetches_and_caches(tmp_path: Path) -> None
     assert client.get("/api/routing/host-domains", auth=("admin", "secret")).json() == [
         "corp-internal.example"
     ]
+
+
+def test_routing_settings_tunnel_dns_starts_dnsmasq_and_reapplies_nft(tmp_path: Path) -> None:
+    # Regression: toggling split tunnel_dns on the Upstream page used to change
+    # dns_tunnel_active() without starting dnsmasq or reapplying nftables.
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+
+    with (
+        patch("kornode.services.apply.ServerService.process_action") as process_action,
+        patch("kornode.services.apply.ServerService.reload") as reload,
+        patch("kornode.api.routes_routing.NftablesService.apply", return_value=[]) as nft_apply,
+        patch("kornode.services.apply.InternalDnsService.ensure_listen_address"),
+        patch("kornode.services.apply.SessionService.list_sessions", return_value=[]),
+        patch("kornode.api.routes_routing.HostDnsService.apply") as host_apply,
+    ):
+        process_action.return_value = _ok_result()
+        reload.return_value = _ok_result()
+        host_apply.return_value.as_dict.return_value = {}
+        response = client.post(
+            "/api/routing/settings",
+            auth=("admin", "secret"),
+            json={
+                "mode": "split",
+                "host_mode": "full",
+                "tunnel_dns": True,
+                "host_traffic": False,
+                "client_traffic": True,
+                "host_dns": "off",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "saved_and_applied"
+    assert body["reconnect_required"] is True
+    process_action.assert_called_once_with("restart", "dnsmasq")
+    reload.assert_called_once()
+    nft_apply.assert_called_once()
