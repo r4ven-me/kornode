@@ -149,6 +149,18 @@ table inet {{ filter_table }} {
     ip saddr {{ config.server.ipv4_network }} counter meta mark set {{ target.fwmark }}
 {% endif %}
 {% endfor %}
+    # The local VPN server subnet is a protected routing domain. Responses
+    # and client-to-client traffic must use ocserv per-session /32 routes,
+    # never an upstream policy table, even if ingress supplied a mark.
+    ip daddr {{ config.server.ipv4_network }} counter meta mark set 0
+  }
+
+  chain prerouting_protected {
+    # Reverse DNAT runs at priority dstnat (-100), after the mangle chain
+    # above. Clear an upstream mark again at -50, when a reply destination
+    # has already been restored from the tunnel NAT address to a VPN client.
+    type filter hook prerouting priority -50; policy accept;
+    ip daddr {{ config.server.ipv4_network }} counter meta mark set 0
   }
 
 {% set host_targets = targets | selectattr("host_enabled") | list %}
@@ -179,10 +191,10 @@ table inet {{ filter_table }} {
     # chain above. Restricting the accepted ct marks to this renderer's own
     # targets avoids importing unrelated conntrack marks from other tools.
 {% if upstream_killswitch %}
-    ct direction reply ct mark {{ config.routing.fwmark }} counter meta mark set {{ config.routing.fwmark }}
+    ct direction reply ip daddr != {{ config.server.ipv4_network }} ct mark {{ config.routing.fwmark }} counter meta mark set {{ config.routing.fwmark }}
 {% endif %}
 {% for target in host_targets %}
-    ct direction reply ct mark {{ target.fwmark }} counter meta mark set {{ target.fwmark }}
+    ct direction reply ip daddr != {{ config.server.ipv4_network }} ct mark {{ target.fwmark }} counter meta mark set {{ target.fwmark }}
 {% endfor %}
     # ct direction original: only connections the host itself initiated.
     # Replies not explicitly recorded by our input chain (WAN SSH/panel, or
@@ -222,6 +234,9 @@ table inet {{ filter_table }} {
     ct direction original ip6 daddr @{{ target.host_set_v6_static }} counter meta mark set {{ target.fwmark }}
     ct direction original ip6 daddr @{{ target.host_set_v6_dynamic }} counter meta mark set {{ target.fwmark }}
 {% endfor %}
+    # Keep locally generated replies to VPN clients on their per-session
+    # routes even if another rule restored or supplied an upstream mark.
+    ip daddr {{ config.server.ipv4_network }} counter meta mark set 0
   }
 {% endif %}
 

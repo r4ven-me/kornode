@@ -390,8 +390,9 @@ def test_host_traffic_split_mode_adds_output_marking_and_killswitch(tmp_path: Pa
         f"ct mark set {config.routing.fwmark}" in rendered
     )
     assert (
-        f"ct direction reply ct mark {config.routing.fwmark} counter "
-        f"meta mark set {config.routing.fwmark}" in rendered
+        f"ct direction reply ip daddr != {config.server.ipv4_network} "
+        f"ct mark {config.routing.fwmark} counter meta mark set {config.routing.fwmark}"
+        in rendered
     )
     assert (
         f"ct direction original ip daddr != {config.server.ipv4_network} "
@@ -439,13 +440,21 @@ def test_active_upstream_routes_local_service_replies_without_host_routing(
         f"ct mark set {config.routing.fwmark}" in rendered
     )
     assert (
-        f"ct direction reply ct mark {config.routing.fwmark} counter "
-        f"meta mark set {config.routing.fwmark}" in rendered
+        f"ct direction reply ip daddr != {config.server.ipv4_network} "
+        f"ct mark {config.routing.fwmark} counter meta mark set {config.routing.fwmark}"
+        in rendered
     )
     assert (
         f'meta mark {config.routing.fwmark} oifname != "oc-middle0" counter drop'
         in rendered
     )
+    # Both packet paths explicitly protect the VPN server subnet: forwarded
+    # replies are cleared in prerouting and local replies in output.
+    protected_clear = (
+        f"ip daddr {config.server.ipv4_network} counter meta mark set 0"
+    )
+    assert rendered.count(protected_clear) == 3
+    assert "type filter hook prerouting priority -50" in rendered
     # No ordinary host-originated packet is selected for the tunnel.
     assert "ct direction original ip daddr" not in rendered
 
@@ -1033,8 +1042,8 @@ def test_profile_host_routing_gets_its_own_set_marking_and_killswitch(tmp_path: 
         "ct mark set 0x0c02" in rendered
     )
     assert (
-        "ct direction reply ct mark 0x0c02 counter meta mark set 0x0c02"
-        in rendered
+        f"ct direction reply ip daddr != {config.server.ipv4_network} "
+        "ct mark 0x0c02 counter meta mark set 0x0c02" in rendered
     )
     assert "10.90.0.0/16" in rendered
     assert (
