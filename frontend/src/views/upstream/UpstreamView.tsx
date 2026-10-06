@@ -96,9 +96,10 @@ export function UpstreamView({
   const profilesEnabled = Boolean(status?.enabled);
   const defaultProfile = status?.active_profile ?? null;
   const inert = !profilesEnabled || !serverEnabled;
-  const splitEnabled = routingDraft.mode === "split";
+  const splitEnabled = routingDraft.clientPolicy === "split";
   const splitDnsEnabled = splitEnabled && routingDraft.tunnelDns;
-  const relaying = hasProfiles && profilesEnabled && serverEnabled && routingDraft.clientTraffic;
+  const relaying =
+    hasProfiles && profilesEnabled && serverEnabled && routingDraft.clientPolicy !== "off";
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -202,33 +203,21 @@ export function UpstreamView({
                     : "No default profile selected yet (pick one in the Profiles tab). "}
                   A profile&rsquo;s own relay lists below always win over this default.
                 </p>
-                <label className="switch">
-                  <input
-                    checked={routingDraft.clientTraffic}
-                    disabled={inert}
-                    onChange={(event) =>
-                      onRoutingDraftChange({ ...routingDraft, clientTraffic: event.target.checked })
-                    }
-                    type="checkbox"
-                  />
+                <label>
                   <span>Relay VPN users&rsquo; traffic through the default profile</span>
+                  <select
+                    disabled={inert}
+                    value={routingDraft.clientPolicy}
+                    onChange={(event) =>
+                      onRoutingDraftChange({ ...routingDraft, clientPolicy: event.target.value })
+                    }
+                  >
+                    <option value="off">Off (VPN users stay on plain NAT)</option>
+                    <option value="full">Full (all traffic via Upstream)</option>
+                    <option value="split">Split (only listed traffic via Upstream)</option>
+                  </select>
                 </label>
-                {routingDraft.clientTraffic && (
-                  <label>
-                    <span>Mode</span>
-                    <select
-                      disabled={inert}
-                      value={routingDraft.mode}
-                      onChange={(event) =>
-                        onRoutingDraftChange({ ...routingDraft, mode: event.target.value })
-                      }
-                    >
-                      <option value="full">Full (all traffic via Upstream)</option>
-                      <option value="split">Split (only listed traffic via Upstream)</option>
-                    </select>
-                  </label>
-                )}
-                {routingDraft.clientTraffic && splitEnabled && (
+                {splitEnabled && (
                   <div className="routing-substep">
                     <label
                       className="switch"

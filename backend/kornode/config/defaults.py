@@ -111,9 +111,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "profiles": [],
     },
     "routing": {
-        "mode": "full",
-        "host_traffic": False,
-        "host_mode": "full",
+        # client_policy/host_policy keep their model defaults here on purpose:
+        # a default in this dict would be deep-merged under legacy YAML keys
+        # and shadow the migration in RoutingConfig.
         "host_dns": "off",
         "main_interface": "auto",
         "fwmark": "0x0c01",

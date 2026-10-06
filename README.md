@@ -69,7 +69,7 @@ docker compose up -d
 scheme, not just a performance tweak for special cases. The container uses the host's
 network interfaces directly instead of Docker's bridge/NAT, which removes an extra
 `docker-proxy` hop for VPN client traffic and lets the host itself participate in split
-routing (`routing.host_traffic`) and use the built-in `dnsmasq` as its own
+routing (`routing.host_policy`) and use the built-in `dnsmasq` as its own
 resolver - neither is possible under the default bridge network, since host packets
 never traverse the container's netfilter there. Two things worth knowing: `nft` rules
 are applied directly to the host's netfilter in this mode (not an isolated namespace),
@@ -253,7 +253,7 @@ auth:
     ocserv_oath_auth: false
 
 routing:
-  mode: full
+  client_policy: full
 
 upstream:
   enabled: false
@@ -461,9 +461,8 @@ upstream:
       check_host: 10.12.12.1
 
 routing:
-  mode: split # full | split
-  host_traffic: false
-  host_mode: full # full | split -- independent of the client-facing mode above
+  client_policy: split # off | full | split
+  host_policy: off # off | full | split -- independent of client_policy above
   main_interface: auto
   fwmark: "0x0c01"
   table_id: 1201
@@ -942,7 +941,7 @@ Example split config:
 
 ```yaml
 routing:
-  mode: split
+  client_policy: split
   main_interface: auto
   fwmark: "0x0c01"
   table_id: 1201
@@ -1084,7 +1083,7 @@ upstream:
       # camouflage_secret: "${SECRET:PRIVATE_MAIN_CAMOUFLAGE_SECRET}"
 
 routing:
-  mode: split
+  client_policy: split
   main_interface: auto
   fwmark: "0x0c01"
   table_id: 1201
@@ -1187,11 +1186,11 @@ docker compose exec kornode korctl upstream connect
 docker compose exec kornode korctl upstream disconnect
 ```
 
-`routing.mode: split` (as in the example above) really forces the listed routes/domains
+`routing.client_policy: split` (as in the example above) really forces the listed routes/domains
 through the upstream interface via a dedicated policy-routing table
 (`routing.fwmark`/`routing.table_id`) and turns on the kill-switch: if upstream is
 unreachable, that traffic won't go out directly from the host, it will be blocked by a
-firewall rule instead of leaking past the tunnel. `mode: full` does the same thing but
+firewall rule instead of leaking past the tunnel. `client_policy: full` does the same thing but
 for all client traffic. Several profiles can be connected **at the same time**: each has its own tunnel interface
 (`profiles[].interface`; without one, the first profile inherits `upstream.interface`,
 the next ones get `oc-up<N>`) and its own pid file. Exactly one is always active - the
@@ -1218,7 +1217,7 @@ Any profile can also carry its own `routes`/`domains` (CIDRs / domain names) in
 addition to the ones above - this targets that traffic through this specific profile's
 tunnel regardless of which profile is currently active/default, each with its own
 fwmark/table/kill-switch and nftables set, derived automatically from
-`routing.fwmark`/`table_id`. This is separate from `routing.mode`/`routing.split`, which
+`routing.fwmark`/`table_id`. This is separate from `routing.client_policy`/`routing.split`, which
 only shape the *default* profile's traffic:
 
 ```yaml
@@ -1240,7 +1239,7 @@ directly in `config.yaml`.
 
 The same idea applies to this **host's** own traffic (not VPN clients - this box may not
 even run a VPN server, see "Client-only deployment" below), via a separate toggle and
-separate lists, independent of the global `routing.host_traffic`/`host_mode`:
+separate lists, independent of the global `routing.host_policy`:
 
 ```yaml
 upstream:

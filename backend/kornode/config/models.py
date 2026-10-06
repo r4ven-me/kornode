@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import ipaddress
+import logging
 import re
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -20,6 +21,21 @@ BLOCKLIST_DOMAIN_RE = re.compile(
     r"^(?=.{1,253}$)(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.)+"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
 )
+
+
+_LOGGER = logging.getLogger(__name__)
+
+# Keys replaced by routing.client_policy / routing.host_policy; see
+# RoutingConfig.migrate_legacy_policy_keys.
+_LEGACY_ROUTING_KEYS = ("mode", "client_traffic", "host_mode", "host_traffic")
+
+
+def _is_truthy(value: object) -> bool:
+    # YAML 1.1 and parse_env_value() turn "off"/"no" into False, but a string
+    # may still arrive from an env override. Treat those spellings as off.
+    if isinstance(value, str):
+        return value.strip().lower() not in ("", "0", "false", "no", "off")
+    return bool(value)
 
 
 class StrictModel(BaseModel):
@@ -744,7 +760,7 @@ class RoutingSplitConfig(StrictModel):
 class HostSplitConfig(StrictModel):
     """Same shape as RoutingSplitConfig's routes/domains lists (inline,
     runtime-editable file, static files, URLs), but for the HOST's own
-    traffic under routing.host_mode: split -- deliberately a separate list
+    traffic under routing.host_policy: split -- deliberately a separate list
     from routing.split's, not shared, since an admin may want the host to
     follow entirely different routes/domains than clients do. No
     tunnel_dns or internal DNS listen/port fields here: those are about
@@ -789,26 +805,18 @@ class HostSplitConfig(StrictModel):
 
 
 class RoutingConfig(StrictModel):
-    # Whether a connected client's traffic is routed through Upstream by
-    # default at all (governed by `mode` below) when no profile claims it
-    # specifically via its own route_clients_enabled. Off leaves clients on
-    # plain host NAT even with Upstream enabled, relying only on explicit
-    # per-profile targeting. Defaults True (not False, unlike host_traffic)
-    # purely for upgrade compatibility: `mode` has always had an effect on
-    # its own until this toggle was introduced, so defaulting it off would
-    # silently stop routing client traffic for every already-configured
-    # deployment the moment they upgrade.
-    client_traffic: bool = True
-    mode: Literal["full", "split"] = "full"
-    # Route the server host's own traffic through upstream too: marks
-    # host-originated packets in the nftables output hook, so the host
-    # follows the same treatment as VPN clients without connecting to its
-    # own ocserv. Independent of `mode` -- host_mode picks full/split for the
-    # host's own traffic on its own terms, so e.g. "client full + host full"
-    # marks all host traffic unconditionally instead of reusing the split
-    # sets to approximate it.
-    host_traffic: bool = False
-    host_mode: Literal["full", "split"] = "full"
+    # Policy for a connected client's traffic that no profile claims via its
+    # own route_clients_enabled. "off" leaves clients on plain host NAT even
+    # with Upstream enabled (explicit per-profile targeting still works);
+    # "full" sends everything through Upstream; "split" sends only the
+    # configured routes/domains. Default "full" keeps upgraded deployments
+    # routing clients as before.
+    client_policy: Literal["off", "full", "split"] = "full"
+    # Same policy for the server host's own traffic, marked in the nftables
+    # output hook so the host follows Upstream without connecting to its own
+    # ocserv. Independent of client_policy. Default "off": host traffic is
+    # opt-in.
+    host_policy: Literal["off", "full", "split"] = "off"
     # Point the HOST's own resolver at the built-in dnsmasq, so domain-based
     # host routing (host_split/host_domains, server-pushed split-DNS)
     # actually sees the host's lookups. Needs network_mode: host plus a
@@ -826,6 +834,34 @@ class RoutingConfig(StrictModel):
     nft_prefix: str = "kornode"
     split: RoutingSplitConfig = Field(default_factory=RoutingSplitConfig)
     host_split: HostSplitConfig = Field(default_factory=HostSplitConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_policy_keys(cls, data: Any) -> Any:
+        # Pre-policy configs used mode/client_traffic and host_mode/host_traffic.
+        # Map them onto client_policy/host_policy. If the new key is already
+        # present (e.g. written by the panel after an upgrade), it wins and the
+        # legacy key is just dropped.
+        if not isinstance(data, dict):
+            return data
+        legacy_keys = [key for key in _LEGACY_ROUTING_KEYS if key in data]
+        if not legacy_keys:
+            return data
+        migrated = dict(data)
+        if "client_policy" not in migrated:
+            client_on = _is_truthy(migrated.get("client_traffic", True))
+            migrated["client_policy"] = migrated.get("mode", "full") if client_on else "off"
+        if "host_policy" not in migrated:
+            host_on = _is_truthy(migrated.get("host_traffic", False))
+            migrated["host_policy"] = migrated.get("host_mode", "full") if host_on else "off"
+        for key in legacy_keys:
+            migrated.pop(key)
+        _LOGGER.warning(
+            "routing: migrated legacy keys %s to client_policy/host_policy; "
+            "update config.yaml to the new names",
+            ", ".join(legacy_keys),
+        )
+        return migrated
 
     @field_validator("host_dns", mode="before")
     @classmethod
@@ -1181,11 +1217,7 @@ class AppConfig(StrictModel):
             reasons.append("local_records_enabled")
         if settings.forward_domains:
             reasons.append("forward_domains")
-        if (
-            self.routing.client_traffic
-            and self.routing.mode == "split"
-            and self.routing.split.tunnel_dns
-        ):
+        if self.routing.client_policy == "split" and self.routing.split.tunnel_dns:
             reasons.append("split_dns")
         if self.upstream.enabled and any(
             profile.enabled and profile.route_clients_enabled and profile.domains
@@ -1193,8 +1225,7 @@ class AppConfig(StrictModel):
         ):
             reasons.append("profile_domains")
         if (
-            self.routing.host_traffic
-            and self.routing.host_mode == "split"
+            self.routing.host_policy == "split"
             and (
                 self.routing.host_split.domains
                 or self.routing.host_split.domains_files

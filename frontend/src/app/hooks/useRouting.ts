@@ -58,11 +58,9 @@ const routingLists = {
 export function useRouting(core: PanelCore) {
   const { recordCommand, runAction } = core;
   const [routingDraft, setRoutingDraft] = useState<RoutingDraft>({
-    clientTraffic: true,
-    mode: "full",
+    clientPolicy: "full",
     tunnelDns: false,
-    hostTraffic: false,
-    hostMode: "full",
+    hostPolicy: "off",
     hostDns: "off",
     mainInterface: "auto",
     fwmark: "0x0c01",
@@ -125,11 +123,9 @@ export function useRouting(core: PanelCore) {
   const saveRoutingSettingsAction = async () => {
     const result = await runAction("routing-settings", "Routing settings saved", (token) =>
       saveRoutingSettings(token, {
-        client_traffic: routingDraft.clientTraffic,
-        mode: routingDraft.mode,
+        client_policy: routingDraft.clientPolicy,
         tunnel_dns: routingDraft.tunnelDns,
-        host_traffic: routingDraft.hostTraffic,
-        host_mode: routingDraft.hostMode,
+        host_policy: routingDraft.hostPolicy,
         host_dns: routingDraft.hostDns,
         main_interface: routingDraft.mainInterface,
         fwmark: routingDraft.fwmark,

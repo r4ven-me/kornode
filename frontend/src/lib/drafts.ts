@@ -10,11 +10,9 @@ export function splitLines(value: string): string[] {
 }
 
 export function readRoutingDraft(config: Record<string, unknown>): {
-  clientTraffic: boolean;
-  mode: string;
+  clientPolicy: string;
   tunnelDns: boolean;
-  hostTraffic: boolean;
-  hostMode: string;
+  hostPolicy: string;
   hostDns: string;
   mainInterface: string;
   fwmark: string;
@@ -33,11 +31,9 @@ export function readRoutingDraft(config: Record<string, unknown>): {
   const split = readRecord(routing.split);
   const hostSplit = readRecord(routing.host_split);
   return {
-    clientTraffic: readBoolean(routing.client_traffic, true),
-    mode: readString(routing.mode, "full"),
+    clientPolicy: readString(routing.client_policy, "full"),
     tunnelDns: readBoolean(split.tunnel_dns, false),
-    hostTraffic: readBoolean(routing.host_traffic, false),
-    hostMode: readString(routing.host_mode, "full"),
+    hostPolicy: readString(routing.host_policy, "off"),
     hostDns: readString(routing.host_dns, "off"),
     mainInterface: readString(routing.main_interface, "auto"),
     fwmark: readString(routing.fwmark, "0x0c01"),

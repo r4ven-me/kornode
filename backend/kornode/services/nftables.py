@@ -131,7 +131,7 @@ class NftablesService:
         """
         # The surgical refresh only reloads the *_static set elements. Any
         # other change -- masquerade rules (server.ipv4_network), client or
-        # host marking (routing.client_traffic / mode), kill-switch rules --
+        # host marking (routing.client_policy / mode), kill-switch rules --
         # lives in chains and table definitions it never touches, so while
         # the rules fingerprint differs from the last full recreate the
         # refresh would leave stale rules live. Fall back to the full recreate.

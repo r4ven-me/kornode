@@ -174,7 +174,7 @@ setup/confirm/disable flow.
   button) only re-points those redirection rules -- connections stay up.
 - how the *server's own* egress for that VPN client traffic is routed (as opposed
   to what ocserv pushes to clients themselves, which is `server.routes`/`no_routes`,
-  independent of this) is `routing.mode`, one web section ("Upstream", merged
+  independent of this) is `routing.client_policy`, one web section ("Upstream", merged
   with the former standalone "Routing" tab so the two aren't presented as
   unrelated features):
   - Both modes are only about *upstream* egress and are inert without one:
@@ -200,16 +200,16 @@ setup/confirm/disable flow.
     split-DNS domain resolution feeds the same nftables set; clients doing
     their *own* split routing/DNS locally instead just point their own
     resolver at this server's VPN address.
-  - `routing.host_traffic` extends routing to the **server host's own
-    traffic**, independent of the client-facing `routing.mode`: an nftables
+  - `routing.host_policy` extends routing to the **server host's own
+    traffic**, independent of the client-facing `routing.client_policy`: an nftables
     `output` chain (`type route hook output`) marks host-originated packets,
     so they hit the same fwmark policy route (and, with upstream enabled, the
     same kill-switch via a `postrouting` filter chain — postrouting on
     purpose: an output-hook filter chain shares its nf_hook_state with the
     route chain and still sees the pre-reroute oifname, so it would drop
-    every marked host packet even with the tunnel up). `routing.host_mode`
+    every marked host packet even with the tunnel up). `routing.host_policy`
     (`full`/`split`) picks which packets get marked, mirroring the
-    client-facing mode's own full/split logic but decided on its own terms:
+    client_policy's own full/split logic but decided on its own terms:
     `split` marks only destinations in the split sets (as before); `full`
     marks all host-originated traffic unconditionally — same caveat as split
     routes never covering the upstream server's own address, but sharper
@@ -226,7 +226,7 @@ setup/confirm/disable flow.
     source and replies would never return — this also silently kills dnsmasq's
     own queries to an upstream DNS reached through the tunnel, draining the
     domain-fed split sets. For domain masks to apply to the host too (in
-    `host_mode: split`), point the host's resolver at
+    `host_policy: split`), point the host's resolver at
     `internal_dns.listen` (the address already sits on `lo`, see
     "Listen address lifecycle"): `nameserver 10.10.10.1` in
     `/etc/resolv.conf`. This replaces the tempting-but-broken pattern of
@@ -253,7 +253,7 @@ setup/confirm/disable flow.
     can list its own `routes` (CIDRs) and/or `domains`, independent of
     whether that profile is the active one. `RoutingService.list_targets()`
     is the single source of truth: it always yields a `"default"` target
-    (the top-level `routing.mode`/routes/domains, following whichever
+    (the top-level `routing.client_policy`/routes/domains, following whichever
     profile is active), plus one extra target per profile that has its own
     `routes`/`domains` — each gets its own auto-derived fwmark/table
     (`routing.fwmark`/`table_id` + a per-target offset, 1, 2, 3... in
@@ -281,8 +281,8 @@ setup/confirm/disable flow.
   - **Per-profile HOST routing** (`route_host_enabled`/`host_routes`/
     `host_domains`, `services/upstream_pushed.py`): the same idea as the
     client-side targeting above, but for this host's own traffic, on its own
-    toggle/lists, independent of the global `routing.host_traffic`/
-    `host_mode` and of whether this box runs a VPN server at all
+    toggle/lists, independent of the global `routing.host_policy`/
+    `host_policy` and of whether this box runs a VPN server at all
     (`server.enabled: false` is a supported "client-only" deployment).
     `accept_server_routes` additionally merges in whatever the upstream
     pushes at connect time (`route =`/`split-dns =`), resolved through the
@@ -326,7 +326,7 @@ setup/confirm/disable flow.
      "Download & apply" button), validated (scheme, size cap, per-line domain parsing)
      and cached individually under `data_dir/internal-dns/urls/` before use.
 
-The same dnsmasq instance also serves split-DNS domains when `routing.mode: split` with
+The same dnsmasq instance also serves split-DNS domains when `routing.client_policy: split` with
 `split.tunnel_dns: true` is active — both features compose; enabling either one starts the
 `dnsmasq` supervisor program and switches the client DNS to the VPN server
 (`AppConfig.dns_tunnel_active()` / `client_dns_servers()`).
@@ -380,7 +380,7 @@ panel (a labeled input, checkbox or select bound to that specific field), groupe
 the "Server (VPN)" / "Authentication methods" panels (Config tab), the admin web panel's own
 settings live under "Web / API panel", `system`/`cli` under "General", `identity`/`certificates`
 live in their own dedicated tabs, and `routing` lives inside the "Upstream" tab (not its own
-tab) since routing.mode's full/split behavior only means anything in terms of the upstream
+tab) since routing.client_policy's full/split behavior only means anything in terms of the upstream
 connection it forces traffic through -- keeping them apart read as two unrelated features.
 
 When a new field is added to `AppConfig`, add its GUI control in the same change:

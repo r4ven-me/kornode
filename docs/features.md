@@ -107,7 +107,7 @@ Required:
 - cert/password/p12 auth support;
 - secret masking;
 - per-profile HOST routing (`route_host_enabled`/`host_routes`/`host_domains`),
-  independent of client-side targeting and of the global `routing.host_traffic`;
+  independent of client-side targeting and of the global `routing.host_policy`;
 - accept server-pushed routes and split-DNS domains (`accept_server_routes`),
   merged into the per-profile host routing above;
 - mid-session sync of those pushed lists on the live tunnel (`sync_url`/
@@ -137,7 +137,7 @@ Split mode supports:
 
 Also supported:
 
-- host-traffic routing (full/split), independent of the client-facing mode;
+- host-traffic routing (full/split), independent of client_policy;
 - per-upstream-profile targeted routes/domains, each with its own fwmark/table/kill-switch,
   regardless of which profile is active;
 - host DNS handoff to the built-in dnsmasq (`routing.host_dns`: `resolv_conf`/`resolved`),

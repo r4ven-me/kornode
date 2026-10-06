@@ -140,12 +140,12 @@ upstream:
   profiles: []
 
 routing:
-  mode: full
-  # Route the server host's own traffic through Upstream too, independent
-  # of the client-facing mode above (full: all host traffic; split: only
-  # the routes/domains below).
-  host_traffic: false
-  host_mode: full
+  # Policy for VPN clients' traffic: off (plain NAT), full (everything via
+  # Upstream) or split (only the routes/domains below).
+  client_policy: full
+  # Same policy for the server host's own traffic, independent of
+  # client_policy. full matches ALL host traffic; prefer split.
+  host_policy: off
   main_interface: auto
   fwmark: "0x0c01"
   table_id: 1201

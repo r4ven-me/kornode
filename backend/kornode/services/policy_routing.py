@@ -9,7 +9,7 @@ RULE_PRIORITY = 100
 
 
 class PolicyRoutingService:
-    """Forces routing.mode=full/split marked traffic to actually egress via
+    """Forces routing.client_policy=full/split marked traffic to actually egress via
     the upstream tunnel, instead of relying on the kernel's normal routing
     table to happen to send it there.
 

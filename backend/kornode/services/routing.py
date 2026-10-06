@@ -36,7 +36,7 @@ _ROUTING_FILE_REWRITE_LOCK = threading.Lock()
 @dataclass(frozen=True)
 class RoutingTarget:
     """One fwmark/table/kill-switch worth of routing: either the "default"
-    bucket (whichever profile is active, governed by routing.mode) or one
+    bucket (whichever profile is active, governed by routing.client_policy) or one
     profile with its own explicit routes/domains, which always gets that
     traffic regardless of which profile is currently active."""
 
@@ -59,7 +59,7 @@ class RoutingTarget:
     set_v4_dynamic: str
     set_v6_static: str
     set_v6_dynamic: str
-    mode: str  # "full" or "split" -- only the default target can be "full"
+    mode: str  # "full", "split" or "off" -- only the default target can be "full" or "off"
     routes: list[str]
     domains: list[str]
     # Whether this target's own profile is actually expected to be
@@ -71,10 +71,10 @@ class RoutingTarget:
     # Per-profile HOST routing (UpstreamProfileConfig.route_host_enabled):
     # the host's own traffic matching these routes/domains is marked and
     # sent through this target's own tunnel, on its own dedicated nft sets
-    # -- independent of routing.host_traffic/host_mode, which only ever
+    # -- independent of routing.host_policy, which only ever
     # covers the default target. Always empty/None for the default target;
     # that one's host marking is handled separately in the template (see
-    # host_traffic_enabled/host_mode).
+    # host_traffic_enabled).
     host_routes: list[str]
     host_domains: list[str]
     # Same static/dynamic pairing as set_v4_static/set_v4_dynamic above.
@@ -418,15 +418,14 @@ class RoutingService:
         """
         config = self.config
         upstream_active = config.upstream.enabled and config.upstream.selected_profile() is not None
-        # With client_traffic off, unmarked client packets keep using the
+        # With client_policy "off", unmarked client packets keep using the
         # kernel's normal route (the host's own uplink), not the tunnel --
         # default_interface reflects the active profile's tunnel regardless
-        # of client_traffic (it's also used for the HOST's own masquerade
-        # via host_traffic, which is independent), so this target's own
+        # of client_policy (it's also used for the HOST's own masquerade
+        # via host_policy, which is independent), so this target's own
         # NAT/killswitch interface must fall back to main_interface here.
-        default_target_interface = (
-            default_interface if config.routing.client_traffic else config.routing.main_interface
-        )
+        client_on = config.routing.client_policy != "off"
+        default_target_interface = default_interface if client_on else config.routing.main_interface
         targets = [
             RoutingTarget(
                 name="default",
@@ -437,16 +436,16 @@ class RoutingService:
                 set_v4_dynamic="split_v4_dynamic",
                 set_v6_static="split_v6_static",
                 set_v6_dynamic="split_v6_dynamic",
-                mode=config.routing.mode,
+                mode=config.routing.client_policy,
                 routes=self.list_routes(),
-                domains=self.list_domains() if config.routing.mode == "split" else [],
-                # routes/domains stay populated regardless of client_traffic
+                domains=self.list_domains() if config.routing.client_policy == "split" else [],
+                # routes/domains stay populated regardless of client_policy
                 # -- only the kill-switch, and the client-facing marking
                 # rendered in the template, are gated on it. (Host's own
                 # split-mode marking uses its own separate
                 # routing.host_split routes/domains -- see
                 # NftablesConfigRenderer.render's host_split_routes/domains.)
-                killswitch=upstream_active and config.routing.client_traffic,
+                killswitch=upstream_active and client_on,
                 profile=config.upstream.selected_profile(),
                 host_routes=[],
                 host_domains=[],

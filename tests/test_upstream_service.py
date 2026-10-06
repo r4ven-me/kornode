@@ -943,7 +943,7 @@ def test_connect_active_applies_nftables_before_dialing_when_mode_not_direct(
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
-    assert config.routing.mode == "full"
+    assert config.routing.client_policy == "full"
     runner = FakeRunner(tmp_path)
     service = UpstreamService(config, runner=runner)
     try:

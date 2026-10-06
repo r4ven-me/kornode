@@ -3,11 +3,9 @@ import { ActionButton, Pill } from "../../components/ui";
 import type { RoutingListStatus } from "../../api";
 
 export type RoutingDraft = {
-  clientTraffic: boolean;
-  mode: string;
+  clientPolicy: string;
   tunnelDns: boolean;
-  hostTraffic: boolean;
-  hostMode: string;
+  hostPolicy: string;
   hostDns: string;
   mainInterface: string;
   fwmark: string;

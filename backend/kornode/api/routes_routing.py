@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -34,11 +36,9 @@ class ListUrlRefreshRequest(BaseModel):
 
 
 class RoutingSettingsRequest(BaseModel):
-    client_traffic: bool = True
-    mode: str
+    client_policy: Literal["off", "full", "split"] = "full"
     tunnel_dns: bool = False
-    host_traffic: bool = False
-    host_mode: str = "full"
+    host_policy: Literal["off", "full", "split"] = "off"
     host_dns: str | None = None
     main_interface: str | None = None
     fwmark: str | None = None
@@ -262,10 +262,8 @@ def save_routing_settings(
         "domains_urls": payload.host_domains_urls,
     }
     patch: dict[str, object] = {
-        "client_traffic": payload.client_traffic,
-        "mode": payload.mode,
-        "host_traffic": payload.host_traffic,
-        "host_mode": payload.host_mode,
+        "client_policy": payload.client_policy,
+        "host_policy": payload.host_policy,
         "split": split,
         "host_split": host_split,
     }

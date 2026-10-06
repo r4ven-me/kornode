@@ -13,7 +13,7 @@ class NftablesConfigRenderer(TemplateRenderer):
         self, config: AppConfig, outbound_interface: str | None = None
     ) -> tuple[list[RoutingTarget], str, bool]:
         """The default target (whichever profile is active, governed by
-        routing.mode) plus one target per profile with its own explicit
+        routing.client_policy) plus one target per profile with its own explicit
         routes/domains -- each gets its own fwmark/table/set so several
         profiles can carry different traffic simultaneously. See
         RoutingService.list_targets().
@@ -43,7 +43,7 @@ class NftablesConfigRenderer(TemplateRenderer):
         targets, outbound_interface, upstream_active = self.resolve_targets(
             config, outbound_interface
         )
-        host_split_active = config.routing.host_traffic and config.routing.host_mode == "split"
+        host_split_active = config.routing.host_policy == "split"
         routing_service = RoutingService(config)
 
         context: dict[str, Any] = {
@@ -60,17 +60,17 @@ class NftablesConfigRenderer(TemplateRenderer):
             # Host traffic (below) only ever follows the default target.
             "upstream_killswitch": upstream_active,
             # Whether the default target's own client-facing marking rule
-            # (mode: full/split) is rendered at all -- off leaves clients on
-            # plain host NAT (relying only on explicit per-profile
+            # (client_policy: full/split) is rendered at all -- "off" leaves
+            # clients on plain host NAT (relying only on explicit per-profile
             # targeting) even though the default target's set stays
             # populated (used by its own killswitch/masquerade context).
-            "client_traffic_enabled": config.routing.client_traffic,
-            # Independent of the client-facing `mode`: host_mode picks
-            # full/split for the HOST's own traffic on its own terms, off
-            # its own separate routing.host_split routes/domains -- NOT
-            # shared with the client-facing default target's set.
-            "host_traffic_enabled": config.routing.host_traffic,
-            "host_mode": config.routing.host_mode,
+            "client_traffic_enabled": config.routing.client_policy != "off",
+            # Independent of client_policy: host_policy picks full/split for
+            # the HOST's own traffic on its own terms, off its own separate
+            # routing.host_split routes/domains -- NOT shared with the
+            # client-facing default target's set.
+            "host_traffic_enabled": config.routing.host_policy != "off",
+            "host_mode": config.routing.host_policy,
             "host_split_routes": routing_service.list_host_routes() if host_split_active else [],
             "host_split_domains": (
                 routing_service.list_host_domains() if host_split_active else []
@@ -88,7 +88,7 @@ class NftablesConfigRenderer(TemplateRenderer):
         from kornode.services.routing import RoutingService
 
         targets, _, _ = self.resolve_targets(config, outbound_interface)
-        host_split_active = config.routing.host_traffic and config.routing.host_mode == "split"
+        host_split_active = config.routing.host_policy == "split"
         context: dict[str, Any] = {
             "filter_table": f"{config.routing.nft_prefix}_filter",
             "targets": targets,
@@ -110,7 +110,7 @@ class NftablesConfigRenderer(TemplateRenderer):
         the last apply).
         """
         targets, _, _ = self.resolve_targets(config, outbound_interface)
-        host_split_active = config.routing.host_traffic and config.routing.host_mode == "split"
+        host_split_active = config.routing.host_policy == "split"
         names: set[str] = set()
         for target in targets:
             names.update(

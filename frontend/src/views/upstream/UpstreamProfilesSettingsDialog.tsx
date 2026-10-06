@@ -181,45 +181,33 @@ export function UpstreamProfilesSettingsDialog({
                     server pushes) -- see the profile&rsquo;s edit dialog.
                     {!upstreamEnabled && " Inert until upstream profiles are enabled."}
                   </p>
-                  <label className="switch">
-                    <input
-                      checked={routingDraft.hostTraffic}
-                      disabled={!upstreamEnabled}
-                      onChange={(event) =>
-                        onRoutingDraftChange({ ...routingDraft, hostTraffic: event.target.checked })
-                      }
-                      type="checkbox"
-                    />
+                  <label
+                    title={
+                      routingDraft.hostPolicy === "full"
+                        ? "Caution: matches ALL host-originated traffic, which can also capture the outbound Upstream connection itself and cause a routing loop unless your network already routes that address another way. Prefer Split with a curated route list when precision matters."
+                        : undefined
+                    }
+                  >
                     <span>Route this host&rsquo;s own traffic through the default profile</span>
-                  </label>
-                  {routingDraft.hostTraffic && (
-                    <label
-                      title={
-                        routingDraft.hostMode === "full"
-                          ? "Caution: matches ALL host-originated traffic, which can also capture the outbound Upstream connection itself and cause a routing loop unless your network already routes that address another way. Prefer Split with a curated route list when precision matters."
-                          : undefined
+                    <select
+                      disabled={!upstreamEnabled}
+                      value={routingDraft.hostPolicy}
+                      onChange={(event) =>
+                        onRoutingDraftChange({ ...routingDraft, hostPolicy: event.target.value })
                       }
                     >
-                      <span>Host mode</span>
-                      <select
-                        disabled={!upstreamEnabled}
-                        value={routingDraft.hostMode}
-                        onChange={(event) =>
-                          onRoutingDraftChange({ ...routingDraft, hostMode: event.target.value })
-                        }
-                      >
-                        <option value="full">Full (all host traffic)</option>
-                        <option value="split">Split (routes/domains in the Host routes tab)</option>
-                      </select>
-                    </label>
-                  )}
+                      <option value="off">Off</option>
+                      <option value="full">Full (all host traffic)</option>
+                      <option value="split">Split (routes/domains in the Host routes tab)</option>
+                    </select>
+                  </label>
                 </div>
               </details>
 
               <details className="settings-details">
                 <summary>Host routes</summary>
                 <div className="settings-details-body">
-                  {routingDraft.hostTraffic && routingDraft.hostMode === "split" ? (
+                  {routingDraft.hostPolicy === "split" ? (
                     <div className="routing-substep">
                       <p className="muted-line">
                         Own list, separate from the Routing tab&rsquo;s relay lists -- the host
@@ -256,7 +244,7 @@ export function UpstreamProfilesSettingsDialog({
               <details className="settings-details">
                 <summary>Files &amp; links</summary>
                 <div className="settings-details-body">
-                  {routingDraft.hostTraffic && routingDraft.hostMode === "split" ? (
+                  {routingDraft.hostPolicy === "split" ? (
                     <div className="routing-substep">
                       <section className="split">
                         <RoutingListSourcesPanel

@@ -49,7 +49,7 @@ def test_routing_settings_saves_new_fields(tmp_path: Path) -> None:
         "/api/routing/settings",
         auth=("admin", "secret"),
         json={
-            "mode": "full",
+            "client_policy": "full",
             "main_interface": "eth0",
             "fwmark": "0x1234",
             "table_id": 1500,
@@ -73,35 +73,45 @@ def test_routing_settings_saves_host_traffic_flag(tmp_path: Path) -> None:
         "/api/routing/settings",
         auth=("admin", "secret"),
         json={
-            "mode": "split",
+            "client_policy": "split",
             "tunnel_dns": True,
-            "host_traffic": True,
-            "host_mode": "full",
+            "host_policy": "full",
         },
     )
 
     assert response.status_code == 200
-    assert response.json()["routing"]["host_traffic"] is True
-    assert response.json()["routing"]["host_mode"] == "full"
+    assert response.json()["routing"]["host_policy"] == "full"
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["routing"]["host_traffic"] is True
-    assert saved["routing"]["host_mode"] == "full"
+    assert saved["routing"]["host_policy"] == "full"
 
 
-def test_routing_settings_saves_client_traffic_flag(tmp_path: Path) -> None:
+def test_routing_settings_saves_client_policy_off(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
 
     response = client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"mode": "split", "client_traffic": False},
+        json={"client_policy": "off"},
     )
 
     assert response.status_code == 200
-    assert response.json()["routing"]["client_traffic"] is False
+    assert response.json()["routing"]["client_policy"] == "off"
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["routing"]["client_traffic"] is False
+    assert saved["routing"]["client_policy"] == "off"
+
+
+def test_routing_settings_rejects_unknown_policy(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+
+    response = client.post(
+        "/api/routing/settings",
+        auth=("admin", "secret"),
+        json={"client_policy": "maybe"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_routing_routes_bulk_set_replaces_the_whole_list(tmp_path: Path) -> None:
@@ -165,7 +175,7 @@ def test_routing_settings_saves_static_file_and_url_lists(tmp_path: Path) -> Non
         "/api/routing/settings",
         auth=("admin", "secret"),
         json={
-            "mode": "full",
+            "client_policy": "full",
             "routes_files": [static_routes],
             "routes_urls": ["https://lists.example.com/routes.txt"],
             "domains_files": [static_domains],
@@ -189,7 +199,7 @@ def test_routing_routes_status_reports_files_and_urls(tmp_path: Path) -> None:
     client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"mode": "full", "routes_files": [str(static_routes)]},
+        json={"client_policy": "full", "routes_files": [str(static_routes)]},
     )
 
     response = client.get("/api/routing/routes/status", auth=("admin", "secret"))
@@ -221,7 +231,7 @@ def test_routing_routes_refresh_fetches_and_caches(tmp_path: Path) -> None:
     client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"mode": "full", "routes_urls": [url]},
+        json={"client_policy": "full", "routes_urls": [url]},
     )
 
     with patch(
@@ -252,7 +262,7 @@ def test_routing_domains_refresh_preview_does_not_persist(tmp_path: Path) -> Non
     client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"mode": "full", "domains_urls": [url]},
+        json={"client_policy": "full", "domains_urls": [url]},
     )
 
     with patch(
@@ -317,7 +327,7 @@ def test_routing_settings_saves_host_static_file_and_url_lists(tmp_path: Path) -
         "/api/routing/settings",
         auth=("admin", "secret"),
         json={
-            "mode": "full",
+            "client_policy": "full",
             "host_routes_files": [static_routes],
             "host_routes_urls": ["https://lists.example.com/host-routes.txt"],
             "host_domains_files": [],
@@ -344,7 +354,7 @@ def test_routing_host_routes_status_reports_files_and_urls(tmp_path: Path) -> No
     client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"mode": "full", "host_routes_files": [str(static_routes)]},
+        json={"client_policy": "full", "host_routes_files": [str(static_routes)]},
     )
 
     response = client.get("/api/routing/host-routes/status", auth=("admin", "secret"))
@@ -376,7 +386,7 @@ def test_routing_host_domains_refresh_fetches_and_caches(tmp_path: Path) -> None
     client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"mode": "full", "host_domains_urls": [url]},
+        json={"client_policy": "full", "host_domains_urls": [url]},
     )
 
     with patch(
@@ -419,11 +429,9 @@ def test_routing_settings_tunnel_dns_starts_dnsmasq_and_reapplies_nft(tmp_path: 
             "/api/routing/settings",
             auth=("admin", "secret"),
             json={
-                "mode": "split",
-                "host_mode": "full",
+                "client_policy": "split",
+                "host_policy": "off",
                 "tunnel_dns": True,
-                "host_traffic": False,
-                "client_traffic": True,
                 "host_dns": "off",
             },
         )

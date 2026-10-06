@@ -12,14 +12,12 @@ class DnsmasqConfigRenderer(TemplateRenderer):
         from kornode.services.internal_dns import InternalDnsService
         from kornode.services.routing import RoutingService
 
-        # Gated on client_traffic too: with it off, the default target never
+        # Gated on client_policy too: with it off, the default target never
         # marks client traffic through Upstream at all (see nftables.nft.j2),
         # so resolving domains into its set / overriding their DNS server
         # would just be a silent, pointless DNS behavior change.
         split_dns_active = (
-            config.routing.client_traffic
-            and config.routing.mode == "split"
-            and config.routing.split.tunnel_dns
+            config.routing.client_policy == "split" and config.routing.split.tunnel_dns
         )
         listen = config.internal_dns.listen
         # internal_dns.default_upstreams is what the resolver itself forwards
@@ -65,7 +63,7 @@ class DnsmasqConfigRenderer(TemplateRenderer):
         # The HOST's own split-mode domains (routing.host_split.domains) --
         # a separate list from routing.split's, fed into its own dedicated
         # host_split_v4/v6 set (see nftables.nft.j2), not split_v4/v6.
-        host_split_active = config.routing.host_traffic and config.routing.host_mode == "split"
+        host_split_active = config.routing.host_policy == "split"
         context: dict[str, Any] = {
             "config": config,
             "upstream_dns": upstream_dns,

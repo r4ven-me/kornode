@@ -137,8 +137,8 @@ table inet {{ filter_table }} {
     # the default's blanket full-mode mark for the same traffic.
 {% for target in targets %}
 {% if target.name == "default" and not client_traffic_enabled %}
-  {# Client traffic through Upstream is off by default (routing.client_traffic) --
-     this target's set stays populated (routing.host_mode: split shares it) but
+  {# Client traffic through Upstream is off by default (routing.client_policy) --
+     this target's set stays populated (routing.host_policy: split shares it) but
      never marks client/forwarded traffic. #}
 {% elif target.mode == "split" %}
     ip daddr @{{ target.set_v4_static }} counter meta mark set {{ target.fwmark }}
@@ -212,7 +212,7 @@ table inet {{ filter_table }} {
     # your network setup already routes that address outside this policy
     # table some other way -- marking it would try to send the tunnel's own
     # traffic through the tunnel it's still establishing, a routing loop.
-    # Prefer host_mode: split with a curated route list when precision
+    # Prefer host_policy: split with a curated route list when precision
     # matters.
     ct direction original ip daddr != {{ config.server.ipv4_network }} counter meta mark set {{ config.routing.fwmark }}
     ct direction original ip6 counter meta mark set {{ config.routing.fwmark }}
@@ -225,7 +225,7 @@ table inet {{ filter_table }} {
 {% endif %}
     # Per-profile host routing (UpstreamProfileConfig.route_host_enabled):
     # rendered after the default block above, so a later "meta mark set"
-    # here takes priority over the default's blanket host_mode mark for the
+    # here takes priority over the default's blanket host_policy mark for the
     # same destination -- same "default first, named overrides win" pattern
     # as the client-side prerouting chain.
 {% for target in host_targets %}
@@ -272,7 +272,7 @@ table inet {{ filter_table }} {
 {% endif %}
     # Per-profile host routing is unconditional once a target exists (same
     # "explicitly assigned traffic must not silently leak" philosophy as the
-    # client-side forward kill-switch above), regardless of host_traffic.
+    # client-side forward kill-switch above), regardless of host_policy.
 {% for target in host_targets %}
     meta mark {{ target.fwmark }} oifname != "{{ target.interface }}" counter drop
 {% endfor %}

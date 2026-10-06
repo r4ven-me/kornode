@@ -972,11 +972,9 @@ export function refreshProfileDomainsUrl(
 export function saveRoutingSettings(
   token: string,
   payload: {
-    client_traffic: boolean;
-    mode: string;
+    client_policy: string;
     tunnel_dns: boolean;
-    host_traffic: boolean;
-    host_mode: string;
+    host_policy: string;
     host_dns: string;
     main_interface: string;
     fwmark: string;

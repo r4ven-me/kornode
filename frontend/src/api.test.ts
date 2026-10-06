@@ -313,7 +313,7 @@ describe("internal DNS settings API", () => {
 });
 
 describe("saveRoutingSettings", () => {
-  it("sends host_traffic/host_mode alongside the rest of the routing payload", async () => {
+  it("sends host_policy alongside the rest of the routing payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "saved" }), {
         status: 200,
@@ -323,11 +323,9 @@ describe("saveRoutingSettings", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await saveRoutingSettings("session", {
-      client_traffic: true,
-      mode: "split",
+      client_policy: "split",
       tunnel_dns: true,
-      host_traffic: true,
-      host_mode: "split",
+      host_policy: "split",
       host_dns: "resolv_conf",
       main_interface: "auto",
       fwmark: "0x0c01",
@@ -346,8 +344,7 @@ describe("saveRoutingSettings", () => {
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(path).toBe("/api/routing/settings");
     const sent = JSON.parse(String(init.body));
-    expect(sent.host_traffic).toBe(true);
-    expect(sent.host_mode).toBe("split");
+    expect(sent.host_policy).toBe("split");
     expect(sent.host_dns).toBe("resolv_conf");
   });
 });

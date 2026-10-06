@@ -10,7 +10,7 @@ def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
 
     assert config.server.port == 443
     assert config.web.enabled is False
-    assert config.routing.mode == "full"
+    assert config.routing.client_policy == "full"
     assert config.system.log_rotation.enabled is False
     assert config.certificates.letsencrypt.auto_renew_interval == 7
     assert config.certificates.letsencrypt.auto_renew_interval_unit == "days"

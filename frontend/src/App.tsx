@@ -308,7 +308,7 @@ export function App() {
             dnsServerDraft={routing.routingDraft}
             serverDraft={settings.serverSettingsDraft}
             resolverRequired={
-              (routing.routingDraft.mode === "split" && routing.routingDraft.tunnelDns) ||
+              (routing.routingDraft.clientPolicy === "split" && routing.routingDraft.tunnelDns) ||
               state.upstreamProfiles.some(
                 (profile) => profile.enabled && (profile.domains?.length ?? 0) > 0
               )
