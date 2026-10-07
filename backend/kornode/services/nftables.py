@@ -105,9 +105,9 @@ class NftablesService:
           also naturally drops any leftover set from a target that no
           longer exists.
         - ready: refresh ONLY the *_static sets in place (flush + re-add),
-          leaving every *_dynamic set -- every IP dnsmasq has resolved for a
-          split-DNS domain (see dnsmasq.conf.j2's nftset= directive) --
-          completely untouched.
+          leaving every *_dynamic set -- every IP DomainResolverService
+          (services/domain_resolver.py) has resolved for a configured domain,
+          on its own schedule -- completely untouched.
 
         The second path is what makes routine reloads (profile route/domain
         edits, host DNS toggles, periodic sync of upstream-pushed routes,
@@ -115,12 +115,11 @@ class NftablesService:
         Always doing a full recreate wipes the dynamic sets on every one of
         those, even though most of them don't actually change which
         targets/host-routing exist -- only their route/domain contents. A
-        domain resolved once at the start of a long session (e.g. an API/CLI
-        client holding one connection for the whole session, unlike a
-        browser which re-resolves constantly) would then silently fall out
-        of its split set the next time any of those fired mid-session, stop
-        being marked, and fall through to the default route -- breaking the
-        session with no client-visible cause.
+        domain resolved by the last resolver cycle would then silently fall
+        out of its split set the next time any of those fired, stop being
+        marked, and fall through to the default route -- breaking any
+        connection using it with no client-visible cause, until the next
+        resolver cycle repopulates it.
 
         Self-healing: if the live table gets torn down by something outside
         this process's control between the readiness check and the refresh

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kornode.config.models import AppConfig
 from kornode.renderers.base import TemplateRenderer
 from kornode.services.routing import RoutingTarget
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from kornode.services.domain_resolver import ResolvedSet
 
 
 class NftablesConfigRenderer(TemplateRenderer):
@@ -139,6 +144,14 @@ class NftablesConfigRenderer(TemplateRenderer):
                 }
             )
         return frozenset(names)
+
+    def render_dynamic_refresh(self, resolved: Sequence[ResolvedSet], filter_table: str) -> str:
+        """flush+add script for exactly the *_dynamic sets DomainResolverService
+        just resolved -- never touches a *_static set or any *_dynamic set
+        outside this list. See DomainResolverService.refresh().
+        """
+        context: dict[str, Any] = {"filter_table": filter_table, "resolved": resolved}
+        return self.render_template("nftables-dynamic-refresh.nft.j2", context)
 
     def target_path(self, config: AppConfig) -> Path:
         return config.generated_path("nftables.nft")

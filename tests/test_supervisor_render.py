@@ -106,6 +106,27 @@ def test_supervisor_render_always_includes_log_rotation_loop(tmp_path: Path) -> 
     assert "korctl logs-rotate" in rendered
 
 
+def test_supervisor_render_always_includes_domain_resolver(tmp_path: Path) -> None:
+    # Always registered, like host-dns-guard/log-rotation: a no-op cycle
+    # when there's nothing configured to resolve, so turning split routing
+    # on in the panel needs no supervisord restart.
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "generated_dir": str(tmp_path / "generated"),
+                "log_dir": str(tmp_path / "logs"),
+            }
+        },
+        environ={},
+    )
+
+    rendered = SupervisorConfigRenderer().render(config)
+
+    assert "[program:domain-resolver]" in rendered
+    assert "korctl domains watch" in rendered
+
+
 def test_supervisor_render_enables_web_tls_by_default(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",

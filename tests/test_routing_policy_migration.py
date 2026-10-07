@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 
+from kornode.config.loader import load_config
 from kornode.config.models import RoutingConfig
 
 
@@ -74,3 +76,24 @@ def test_new_keys_alone_do_not_warn(caplog: pytest.LogCaptureFixture) -> None:
         RoutingConfig.model_validate({"client_policy": "split"})
 
     assert caplog.text == ""
+
+
+def test_yaml_boolean_off_means_the_literal_string(tmp_path: Path) -> None:
+    # Regression test: YAML 1.1 (and parse_env_value()) turn the bare word
+    # "off" into the boolean False before pydantic ever sees it -- exactly
+    # like routing.host_dns already had to handle. config.example.yaml
+    # writes `host_policy: off` unquoted; without this, loading it raised
+    # "Input should be 'off', 'full' or 'split'" for a bool.
+    config = RoutingConfig.model_validate({"client_policy": False, "host_policy": False})
+
+    assert config.client_policy == "off"
+    assert config.host_policy == "off"
+
+    # The actual repro: a real YAML file with the word unquoted, like
+    # config.example.yaml has.
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "routing:\n  client_policy: full\n  host_policy: off\n", encoding="utf-8"
+    )
+    loaded = load_config(config_path, environ={})
+    assert loaded.routing.host_policy == "off"

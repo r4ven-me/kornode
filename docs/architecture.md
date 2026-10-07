@@ -191,10 +191,13 @@ setup/confirm/disable flow.
     if upstream is down, traffic is blocked rather than leaking out the host's
     own connection;
   - `split`: only `routing.split.routes` (CIDRs -- a single host is just a
-    /32) and domain-resolved addresses (fed into an nftables set by
-    dnsmasq's `nftset=`) are marked and subject to the same
+    /32) and domain-resolved addresses are marked and subject to the same
     forced-routing/kill-switch treatment; everything else is masqueraded
-    normally through the host, unaffected.
+    normally through the host, unaffected. Domains are resolved into their
+    nftables set by the independent `DomainResolverService`
+    (`backend/kornode/services/domain_resolver.py`, `korctl domains watch`),
+    on its own schedule -- not fed by dnsmasq answering a live query, so it
+    doesn't matter which resolver a VPN client or the host actually uses.
   - VPN clients always use this server's own dnsmasq (`internal_dns.listen`)
     as their DNS while `server.enabled` -- mandatory, not opt-in -- so
     split-DNS domain resolution feeds the same nftables set automatically
@@ -222,16 +225,27 @@ setup/confirm/disable flow.
     tunnel address: locally originated packets pick their source address
     *before* the fwmark re-route (same reason korclient masquerades its own
     tunnel egress), so without it they would enter the tunnel with the uplink
-    source and replies would never return — this also silently kills dnsmasq's
-    own queries to an upstream DNS reached through the tunnel, draining the
-    domain-fed split sets. For domain masks to apply to the host too (in
-    `host_policy: split`), point the host's resolver at
-    `internal_dns.listen` (the address already sits on `lo`, see
-    "Listen address lifecycle"): `nameserver 10.10.10.1` in
-    `/etc/resolv.conf`. This replaces the tempting-but-broken pattern of
-    connecting the host to its own ocserv as a client: such a session's sync
-    requests to `/api/client/routing` arrive over loopback with a non-tunnel
-    source address and fail the VPN-session check. **Requires
+    source and replies would never return — this also silently kills
+    `DomainResolverService`'s own queries if they happen to be reached
+    through the tunnel, draining the domain-fed split sets. Domain masks
+    apply to the host's own traffic the same way they apply to VPN
+    clients', regardless of which resolver the host itself uses for its own
+    lookups -- `DomainResolverService` resolves `routing.host_split`'s
+    domains independently (see `domain_groups()`), not by watching the
+    host's queries, so `host_policy: split` needs nothing from the host's
+    own resolver configuration.
+
+    `routing.host_dns` (point the host's own resolver at
+    `internal_dns.listen`, the address already sitting on `lo`, see "Listen
+    address lifecycle": `nameserver 10.10.10.1` in `/etc/resolv.conf`) is a
+    separate, narrower feature now: it lets the host's *own* lookups get
+    the blocklist/local-records effect too, and resolve a profile's
+    server-pushed internal-only names, which nothing but the upstream's own
+    DNS can answer -- unrelated to routing the host's traffic. This
+    replaces the tempting-but-broken pattern of connecting the host to its
+    own ocserv as a client: such a session's sync requests to
+    `/api/client/routing` arrive over loopback with a non-tunnel source
+    address and fail the VPN-session check. **Requires
     `network_mode: host`** — the
     project's `compose.yaml` uses it by default precisely for this and to drop
     an extra NAT hop for VPN traffic in general (see README's Quick Start), not

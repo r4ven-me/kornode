@@ -1305,9 +1305,12 @@ Or the **Sync now** button in the panel's Clients table.
 
 ### Host DNS
 
-`routing.host_dns` points this **host's** own resolver at the built-in dnsmasq, so
-domain-based host routing above (and `routing.host_split.domains`) actually applies to
-lookups the host itself makes, not just the container's:
+`routing.host_dns` points this **host's** own resolver at the built-in dnsmasq. This is
+*not* needed for domain-based host routing above (`routing.host_split.domains`,
+a profile's own `host_domains`) any more -- those are resolved into their nftables
+sets independently, regardless of which resolver the host uses. It's for the host's
+*own* lookups: getting the blocklist/local-records effect too, and being able to
+resolve a profile's server-pushed internal-only names at all:
 
 ```yaml
 routing:

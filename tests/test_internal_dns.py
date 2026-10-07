@@ -406,9 +406,11 @@ def test_each_internal_dns_feature_activates_dnsmasq_on_its_own(tmp_path: Path) 
         assert config.client_dns_servers() == ["1.1.1.1", "8.8.8.8"]
 
 
-def test_host_profile_domains_activate_dnsmasq_without_changing_client_dns(
-    tmp_path: Path,
-) -> None:
+def test_host_profile_domains_do_not_need_dnsmasq(tmp_path: Path) -> None:
+    # A profile's plain host_domains (not server-pushed) are resolved into
+    # their nftables set by DomainResolverService now -- see
+    # tests/test_domain_resolver.py -- so unlike before, this alone no
+    # longer has to keep dnsmasq running.
     config = _config(
         tmp_path,
         {
@@ -430,10 +432,10 @@ def test_host_profile_domains_activate_dnsmasq_without_changing_client_dns(
         },
     )
 
-    assert config.dnsmasq_active_reasons() == ["profile_host_domains"]
+    assert config.dnsmasq_active_reasons() == []
     assert config.client_dns_servers() == ["1.1.1.1", "8.8.8.8"]
     rendered_paths = [str(item.path) for item in ConfigService().render_files(config)]
-    assert str(config.generated_path("dnsmasq.conf")) in rendered_paths
+    assert str(config.generated_path("dnsmasq.conf")) not in rendered_paths
 
 
 def test_blocklist_and_local_records_require_their_own_flags(tmp_path: Path) -> None:

@@ -29,22 +29,7 @@ server=/{{ domain }}/{{ dns }}
 {% endfor %}
 {% endfor %}
 
-{% if split_dns_active and upstream_dns %}
-{% for domain in split_domains %}
-{% if domain not in forward_domain_names %}
-server=/{{ domain }}/{{ upstream_dns[0] }}
-{% endif %}
-nftset=/{{ domain }}/4#inet#{{ filter_table }}#{{ split_v4_set }},6#inet#{{ filter_table }}#{{ split_v6_set }}
-{% endfor %}
-{% endif %}
-
-{% for target in named_targets_with_domains %}
-{% for domain in target.domains %}
-nftset=/{{ domain }}/4#inet#{{ filter_table }}#{{ target.set_v4_dynamic }},6#inet#{{ filter_table }}#{{ target.set_v6_dynamic }}
-{% endfor %}
-{% endfor %}
-
-{% for target in named_targets_with_host_domains %}
+{% for target in named_targets_with_server_domains %}
 {% for domain in target.server_domains %}
 {% if domain not in forward_domain_names %}
 {% for dns in target.server_dns %}
@@ -52,13 +37,6 @@ server=/{{ domain }}/{{ dns }}
 {% endfor %}
 {% endif %}
 {% endfor %}
-{% for domain in target.host_domains %}
-nftset=/{{ domain }}/4#inet#{{ filter_table }}#{{ target.host_set_v4_dynamic }},6#inet#{{ filter_table }}#{{ target.host_set_v6_dynamic }}
-{% endfor %}
-{% endfor %}
-
-{% for domain in host_split_domains %}
-nftset=/{{ domain }}/4#inet#{{ filter_table }}#host_split_v4_dynamic,6#inet#{{ filter_table }}#host_split_v6_dynamic
 {% endfor %}
 
 {% for record in local_records %}

@@ -254,10 +254,10 @@ def test_dnsmasq_render_resolves_pushed_domains_through_upstream_dns(tmp_path: P
     rendered = DnsmasqConfigRenderer().render(config)
 
     assert "server=/corp.example.com/172.16.0.53" in rendered
-    assert "nftset=/corp.example.com/4#inet#kornode_filter#host_v4_office" in rendered
-    # The admin's own host domains keep resolving through the normal DNS.
+    # The admin's own host domains keep resolving through the normal DNS --
+    # dnsmasq needs nothing for either domain's nftables set, that's
+    # DomainResolverService's job now (see tests/test_domain_resolver.py).
     assert "server=/own.example/" not in rendered
-    assert "nftset=/own.example/4#inet#kornode_filter#host_v4_office" in rendered
 
 
 def test_accepting_server_routes_keeps_dnsmasq_running(tmp_path: Path) -> None:

@@ -25,6 +25,7 @@ from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
 from kornode.services.diagnostics import DiagnosticsService
+from kornode.services.domain_resolver import DomainResolverService
 from kornode.services.files import FileManager
 from kornode.services.groups import GroupConfigService
 from kornode.services.host_dns import HostDnsService
@@ -856,6 +857,55 @@ def domains_reload(
     ConfigService().write_rendered_files(config)
     for result in NftablesService(config).apply(dry_run=dry_run):
         echo_result(result)
+
+
+@domains_app.command("resolve")
+def domains_resolve(
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """One-shot: resolve every configured split/profile/host domain and
+    refresh their nftables *_dynamic sets. See DomainResolverService."""
+    outcome = DomainResolverService(get_config()).refresh(dry_run=dry_run)
+    if outcome.result is not None:
+        echo_result(outcome.result)
+    else:
+        typer.echo("no domains configured; nothing to resolve")
+
+
+@domains_app.command("watch")
+def domains_watch() -> None:
+    """Supervisor entrypoint: periodically resolve configured split/profile/
+    host domains into their nftables *_dynamic sets, independent of which
+    resolver VPN clients or the host actually use for their own lookups
+    (see services/domain_resolver.py). Reloads config every cycle, like
+    host-dns guard / upstream watch. The interval follows the lowest TTL
+    seen last cycle, clamped to [MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS]
+    (services/domain_resolver.py).
+    """
+    import signal
+
+    from kornode.services.domain_resolver import MAX_INTERVAL_SECONDS
+
+    stopping = False
+
+    def _stop(_signum: int, _frame: object) -> None:
+        nonlocal stopping
+        stopping = True
+
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+    while not stopping:
+        interval = MAX_INTERVAL_SECONDS
+        try:
+            outcome = DomainResolverService(get_config()).refresh()
+            interval = outcome.next_interval_seconds
+            if outcome.result is not None and not outcome.result.ok:
+                typer.echo(f"domain resolve: nft apply failed: {outcome.result.stderr}", err=True)
+        except Exception as exc:  # noqa: BLE001 - keep watching
+            typer.echo(f"domain resolve failed: {exc}", err=True)
+        deadline = time.monotonic() + interval
+        while not stopping and time.monotonic() < deadline:
+            time.sleep(0.5)
 
 
 @internal_dns_app.command("status")

@@ -46,15 +46,14 @@ class RoutingTarget:
     interface: str
     # Each family is a static/dynamic pair, not a single set: `_static` holds
     # this target's config-known routes (profile `routes`, `routing.split`),
-    # rebuilt on every apply; `_dynamic` is populated only by dnsmasq's
-    # nftset= directive as split-DNS domains resolve (see dnsmasq.conf.j2)
-    # and is never touched by a routes/domains-only refresh. A naive
-    # single-set design that gets flushed on every refresh would wipe out
-    # every already-resolved domain IP each time a reload happens (profile
-    # edit, host DNS toggle, pushed-routes sync, panel Reload) -- silently
-    # breaking any long-lived connection still using one while a
-    # constantly-re-resolving client recovers almost immediately. See
-    # NftablesService.apply()'s docstring.
+    # rebuilt on every apply; `_dynamic` holds whatever DomainResolverService
+    # (services/domain_resolver.py) last resolved this target's own domains
+    # into, on its own schedule, and is never touched by a routes/domains-only
+    # config refresh. A naive single-set design that gets flushed on every
+    # refresh would wipe out every resolved domain IP each time a reload
+    # happens (profile edit, host DNS toggle, pushed-routes sync, panel
+    # Reload) -- silently breaking any long-lived connection still using one
+    # between resolver cycles. See NftablesService.apply()'s docstring.
     set_v4_static: str
     set_v4_dynamic: str
     set_v6_static: str

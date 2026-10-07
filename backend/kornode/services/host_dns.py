@@ -1,12 +1,23 @@
 """Point the host's own resolver at the built-in dnsmasq (routing.host_dns).
 
-Domain-based host routing (routing.host_split domains, per-profile
-host_domains, server-pushed split-DNS) only works when the host's lookups go
-through dnsmasq: its nftset= directives are what fill the host nft sets, and
-server-pushed domains must resolve through the upstream's DNS. Under
-network_mode: host the container shares the host's network namespace but
-not its files, so the host's resolver configuration is reached through a
-bind mount:
+Domain-based host routing itself (routing.host_split domains, per-profile
+host_domains) does NOT need this any more: DomainResolverService
+(services/domain_resolver.py) resolves those domains into the host nft sets
+on its own schedule, independent of which resolver the host's own lookups
+actually go through -- nftables marks traffic by destination IP, and that
+IP is the same regardless of who resolved the name.
+
+What still genuinely needs this: a profile's server-pushed domains
+(accept_server_routes) are typically internal-only names nothing but the
+upstream's own DNS can answer at all -- the host's own applications can't
+even get an IP to connect to for one of those unless the host's lookups go
+through dnsmasq, which has the `server=/domain/...` override that redirects
+them. Enabling this also gives the host's own traffic whatever
+blocklist/local-records effect the admin wants, the same as VPN clients get.
+
+Under network_mode: host the container shares the host's network namespace
+but not its files, so the host's resolver configuration is reached through
+a bind mount:
 
 - resolv_conf: /etc/resolv.conf -> /host/etc/resolv.conf. Rewritten in
   place (a bind-mounted file can't be replaced by rename), the original is

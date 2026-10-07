@@ -833,10 +833,12 @@ class RoutingConfig(StrictModel):
     # ocserv. Independent of client_policy. Default "off": host traffic is
     # opt-in.
     host_policy: Literal["off", "full", "split"] = "off"
-    # Point the HOST's own resolver at the built-in dnsmasq, so domain-based
-    # host routing (host_split/host_domains, server-pushed split-DNS)
-    # actually sees the host's lookups. Needs network_mode: host plus a
-    # mount of the host file/directory (see services/host_dns.py):
+    # Point the HOST's own resolver at the built-in dnsmasq -- NOT needed
+    # for domain-based host routing itself any more (DomainResolverService
+    # pre-resolves those independently of this), only so the host's own
+    # lookups can resolve a profile's server-pushed internal-only names and
+    # get the blocklist/local-records effect too (see services/host_dns.py).
+    # Needs network_mode: host plus a mount of the host file/directory:
     #   resolv_conf -- /etc/resolv.conf:/host/etc/resolv.conf, rewritten in
     #                  place and restored when kornode stops;
     #   resolved    -- /etc/systemd/resolved.conf.d:/host/resolved.conf.d, a
@@ -879,12 +881,14 @@ class RoutingConfig(StrictModel):
         )
         return migrated
 
-    @field_validator("host_dns", mode="before")
+    @field_validator("host_dns", "client_policy", "host_policy", mode="before")
     @classmethod
-    def validate_host_dns_off(cls, value: object) -> object:
+    def validate_literal_off(cls, value: object) -> object:
         # "off" is a YAML/env boolean word: YAML 1.1 and parse_env_value()
         # both turn it into False before this model sees it. Map it back so
-        # `host_dns: off` and KORNODE_ROUTING__HOST_DNS=off mean the same.
+        # `host_policy: off`/KORNODE_ROUTING__HOST_POLICY=off (and the same
+        # for client_policy/host_dns) mean the literal string "off", not the
+        # boolean.
         if value is False:
             return "off"
         return value
@@ -1292,28 +1296,16 @@ class AppConfig(StrictModel):
             reasons.append("local_records_enabled")
         if settings.forward_domains:
             reasons.append("forward_domains")
-        if self.routing.client_policy == "split":
-            reasons.append("split_dns")
-        if self.upstream.enabled and any(
-            profile.enabled and profile.route_clients_enabled and profile.domains
-            for profile in self.upstream.profiles
-        ):
-            reasons.append("profile_domains")
-        if (
-            self.routing.host_policy == "split"
-            and (
-                self.routing.host_split.domains
-                or self.routing.host_split.domains_files
-                or self.routing.host_split.domains_urls
-                or self.routing.host_split.domains_file.exists()
-            )
-        ):
-            reasons.append("host_split_domains")
-        if self.upstream.enabled and any(
-            profile.enabled and profile.route_host_enabled and profile.host_domains
-            for profile in self.upstream.profiles
-        ):
-            reasons.append("profile_host_domains")
+        # routing.split/host_split domains and a profile's own plain
+        # domains/host_domains do NOT need dnsmasq any more: they're
+        # resolved into their nftables *_dynamic sets by the independent
+        # DomainResolverService (services/domain_resolver.py), not by
+        # dnsmasq answering a live query. Only a profile's server-pushed
+        # domains still need dnsmasq, for the next reason -- those are
+        # typically internal-only names requiring a `server=/domain/...`
+        # override to the upstream's own DNS, a real answer-correctness
+        # need independent of nftables set population.
+        #
         # Pushed split-DNS domains aren't known until the upstream sends
         # them, so a profile accepting them keeps dnsmasq running up front
         # (see services/upstream_pushed.py).

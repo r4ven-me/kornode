@@ -72,6 +72,19 @@ stdout_logfile_maxbytes=0
 redirect_stderr=true
 {% endif %}
 
+[program:domain-resolver]
+; Always registered, like dnsmasq/host-dns-guard above: resolves configured
+; split/profile/host domains into their nftables *_dynamic sets on its own
+; schedule, independent of which resolver VPN clients or the host actually
+; use for their own lookups (see services/domain_resolver.py). A no-op
+; cycle when no domain-based routing is configured at all.
+command=/usr/local/bin/korctl domains watch
+autorestart=true
+stopwaitsecs=5
+stdout_logfile={{ config.system.log_dir }}/domain-resolver.log
+stdout_logfile_maxbytes=0
+redirect_stderr=true
+
 [program:host-dns-guard]
 ; Always registered, like dnsmasq above: a no-op loop while
 ; routing.host_dns is off, so enabling it in the panel needs no supervisord
