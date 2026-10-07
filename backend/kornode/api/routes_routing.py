@@ -43,13 +43,9 @@ class RoutingSettingsRequest(BaseModel):
     fwmark: str | None = None
     table_id: int | None = None
     nft_prefix: str | None = None
-    routes_files: list[str] = Field(default_factory=list)
     routes_urls: list[str] = Field(default_factory=list)
-    domains_files: list[str] = Field(default_factory=list)
     domains_urls: list[str] = Field(default_factory=list)
-    host_routes_files: list[str] = Field(default_factory=list)
     host_routes_urls: list[str] = Field(default_factory=list)
-    host_domains_files: list[str] = Field(default_factory=list)
     host_domains_urls: list[str] = Field(default_factory=list)
 
 
@@ -79,14 +75,14 @@ def list_routes(request: Request) -> list[str]:
 def routes_status(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     service = RoutingService(config)
-    return {"files": service.routes_files_status(), "urls": service.routes_urls_status()}
+    return {"urls": service.routes_urls_status()}
 
 
 @router.get("/domains/status")
 def domains_status(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     service = RoutingService(config)
-    return {"files": service.domains_files_status(), "urls": service.domains_urls_status()}
+    return {"urls": service.domains_urls_status()}
 
 
 @router.post("/routes/refresh")
@@ -157,10 +153,7 @@ def set_host_routes(
 def host_routes_status(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     service = RoutingService(config)
-    return {
-        "files": service.host_routes_files_status(),
-        "urls": service.host_routes_urls_status(),
-    }
+    return {"urls": service.host_routes_urls_status()}
 
 
 @router.post("/host-routes/refresh")
@@ -209,10 +202,7 @@ def set_host_domains(
 def host_domains_status(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     service = RoutingService(config)
-    return {
-        "files": service.host_domains_files_status(),
-        "urls": service.host_domains_urls_status(),
-    }
+    return {"urls": service.host_domains_urls_status()}
 
 
 @router.post("/host-domains/refresh")
@@ -248,15 +238,11 @@ def save_routing_settings(
     background_tasks: BackgroundTasks,
 ) -> dict[str, object]:
     split: dict[str, object] = {
-        "routes_files": payload.routes_files,
         "routes_urls": payload.routes_urls,
-        "domains_files": payload.domains_files,
         "domains_urls": payload.domains_urls,
     }
     host_split: dict[str, object] = {
-        "routes_files": payload.host_routes_files,
         "routes_urls": payload.host_routes_urls,
-        "domains_files": payload.host_domains_files,
         "domains_urls": payload.host_domains_urls,
     }
     patch: dict[str, object] = {

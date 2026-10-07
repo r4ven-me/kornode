@@ -65,13 +65,9 @@ export function useRouting(core: PanelCore) {
     fwmark: "0x0c01",
     tableId: 1201,
     nftPrefix: "kornode",
-    routesFilesText: "",
     routesUrlsText: "",
-    domainsFilesText: "",
     domainsUrlsText: "",
-    hostRoutesFilesText: "",
     hostRoutesUrlsText: "",
-    hostDomainsFilesText: "",
     hostDomainsUrlsText: ""
   });
 
@@ -129,13 +125,9 @@ export function useRouting(core: PanelCore) {
         fwmark: routingDraft.fwmark,
         table_id: routingDraft.tableId,
         nft_prefix: routingDraft.nftPrefix,
-        routes_files: splitLines(routingDraft.routesFilesText),
         routes_urls: splitLines(routingDraft.routesUrlsText),
-        domains_files: splitLines(routingDraft.domainsFilesText),
         domains_urls: splitLines(routingDraft.domainsUrlsText),
-        host_routes_files: splitLines(routingDraft.hostRoutesFilesText),
         host_routes_urls: splitLines(routingDraft.hostRoutesUrlsText),
-        host_domains_files: splitLines(routingDraft.hostDomainsFilesText),
         host_domains_urls: splitLines(routingDraft.hostDomainsUrlsText)
       })
     );

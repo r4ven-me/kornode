@@ -10,47 +10,35 @@ export type RoutingDraft = {
   fwmark: string;
   tableId: number;
   nftPrefix: string;
-  routesFilesText: string;
   routesUrlsText: string;
-  domainsFilesText: string;
   domainsUrlsText: string;
-  hostRoutesFilesText: string;
   hostRoutesUrlsText: string;
-  hostDomainsFilesText: string;
   hostDomainsUrlsText: string;
 };
 
 export function RoutingListSourcesPanel({
   title,
-  filesLabel,
-  filesPlaceholder,
   urlsLabel,
   urlsPlaceholder,
   disabled,
   disabledHint = "Inert until Upstream is enabled and Mode is Split above",
-  filesText,
   urlsText,
   status,
   busy,
   busyKeyPrefix,
-  onFilesTextChange,
   onUrlsTextChange,
   onPreviewUrl,
   onRefreshUrl
 }: {
   title: string;
-  filesLabel: string;
-  filesPlaceholder: string;
   urlsLabel: string;
   urlsPlaceholder: string;
   disabled: boolean;
   disabledHint?: string;
-  filesText: string;
   urlsText: string;
   status: RoutingListStatus | null;
   busy: string | null;
   busyKeyPrefix: string;
-  onFilesTextChange: (value: string) => void;
   onUrlsTextChange: (value: string) => void;
   onPreviewUrl: (url: string) => void;
   onRefreshUrl: (url: string) => void;
@@ -59,19 +47,9 @@ export function RoutingListSourcesPanel({
     <section className="panel">
       <div className="panel-header">
         <h2>{title}</h2>
-        {status && <Pill kind="muted">{status.urls.length + status.files.length} sources</Pill>}
+        {status && <Pill kind="muted">{status.urls.length} sources</Pill>}
       </div>
       <div className="settings-grid internal-dns-grid">
-        <label className="blocklist-domains" title={disabled ? disabledHint : undefined}>
-          <span>{filesLabel}</span>
-          <textarea
-            rows={3}
-            disabled={disabled}
-            placeholder={filesPlaceholder}
-            value={filesText}
-            onChange={(event) => onFilesTextChange(event.target.value)}
-          />
-        </label>
         <label className="blocklist-domains" title={disabled ? disabledHint : undefined}>
           <span>{urlsLabel}</span>
           <textarea
@@ -83,18 +61,6 @@ export function RoutingListSourcesPanel({
           />
         </label>
       </div>
-      {status && status.files.length > 0 && (
-        <ul className="blocklist-file-status">
-          {status.files.map((file) => (
-            <li key={file.path}>
-              <code>{file.path}</code>
-              <span className="muted-line">
-                {file.exists ? ` — ${file.count} entries` : " — file not found"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
       {status && status.urls.length > 0 && (
         <ul className="blocklist-url-status">
           {status.urls.map((entry) => {

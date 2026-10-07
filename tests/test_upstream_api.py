@@ -549,9 +549,7 @@ def test_upstream_profile_saves_routes_and_domains(tmp_path: Path) -> None:
             "username": "user",
             "routes": ["10.50.0.0/16"],
             "domains": ["finance-internal.corp"],
-            "routes_files": ["/lists/finance-routes.txt"],
             "routes_urls": ["https://lists.example.com/finance-routes.txt"],
-            "domains_files": ["/lists/finance-domains.txt"],
             "domains_urls": ["https://lists.example.com/finance-domains.txt"],
         },
     )
@@ -561,9 +559,7 @@ def test_upstream_profile_saves_routes_and_domains(tmp_path: Path) -> None:
     profile = saved["upstream"]["profiles"][0]
     assert profile["routes"] == ["10.50.0.0/16"]
     assert profile["domains"] == ["finance-internal.corp"]
-    assert profile["routes_files"] == ["/lists/finance-routes.txt"]
     assert profile["routes_urls"] == ["https://lists.example.com/finance-routes.txt"]
-    assert profile["domains_files"] == ["/lists/finance-domains.txt"]
     assert profile["domains_urls"] == ["https://lists.example.com/finance-domains.txt"]
 
 
@@ -571,8 +567,6 @@ def test_profile_relay_source_status_and_refresh_endpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config_path = tmp_path / "config.yaml"
-    route_file = tmp_path / "route-list.txt"
-    route_file.write_text("10.60.0.0/16\n", encoding="utf-8")
     route_url = "https://lists.example.com/routes.txt"
     domain_url = "https://lists.example.com/domains.txt"
     client = _client(config_path, tmp_path)
@@ -583,7 +577,6 @@ def test_profile_relay_source_status_and_refresh_endpoints(
             "name": "finance",
             "server": "finance.example.com",
             "username": "user",
-            "routes_files": [str(route_file)],
             "routes_urls": [route_url],
             "domains_urls": [domain_url],
         },
@@ -595,7 +588,7 @@ def test_profile_relay_source_status_and_refresh_endpoints(
         auth=("admin", "secret"),
     )
     assert status.status_code == 200
-    assert status.json()["files"] == [{"path": str(route_file), "exists": True, "count": 1}]
+    assert "files" not in status.json()
     assert status.json()["urls"][0]["url"] == route_url
 
     unknown = client.get(

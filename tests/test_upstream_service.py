@@ -232,6 +232,9 @@ def test_upstream_profile_relay_source_fields_are_validated_and_deduplicated(
                     "server": "vpn.example.com",
                     "auth_type": "password",
                     "username": "user",
+                    # routes_files/domains_files are removed -- see
+                    # UpstreamProfileConfig.drop_legacy_static_files --
+                    # and are ignored rather than rejected.
                     "routes_files": ["/lists/routes.txt", "/lists/routes.txt"],
                     "domains_files": ["/lists/domains.txt", "/lists/domains.txt"],
                     "routes_urls": ["https://lists.example.com/routes.txt"],
@@ -241,8 +244,8 @@ def test_upstream_profile_relay_source_fields_are_validated_and_deduplicated(
         )
     ).upstream.profiles[0]
 
-    assert profile.routes_files == [Path("/lists/routes.txt")]
-    assert profile.domains_files == [Path("/lists/domains.txt")]
+    assert not hasattr(profile, "routes_files")
+    assert not hasattr(profile, "domains_files")
     assert profile.routes_urls == ["https://lists.example.com/routes.txt"]
     assert profile.domains_urls == ["http://lists.example.com/domains.txt"]
 

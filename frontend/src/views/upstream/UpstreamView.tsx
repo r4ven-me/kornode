@@ -244,19 +244,13 @@ export function UpstreamView({
                     <section className="split">
                       <RoutingListSourcesPanel
                         title="Route sources"
-                        filesLabel="Route files (one path per line)"
-                        filesPlaceholder={"/var/lib/kornode/extra-routes.txt"}
                         urlsLabel="Route URLs (one per line)"
                         urlsPlaceholder={"https://lists.example.com/routes.txt"}
                         disabled={inert}
-                        filesText={routingDraft.routesFilesText}
                         urlsText={routingDraft.routesUrlsText}
                         status={routesStatus}
                         busy={busy}
                         busyKeyPrefix="routes"
-                        onFilesTextChange={(value) =>
-                          onRoutingDraftChange({ ...routingDraft, routesFilesText: value })
-                        }
                         onUrlsTextChange={(value) =>
                           onRoutingDraftChange({ ...routingDraft, routesUrlsText: value })
                         }
@@ -265,19 +259,13 @@ export function UpstreamView({
                       />
                       <RoutingListSourcesPanel
                         title="Domain sources"
-                        filesLabel="Domain files (one path per line)"
-                        filesPlaceholder={"/var/lib/kornode/extra-domains.txt"}
                         urlsLabel="Domain URLs (one per line)"
                         urlsPlaceholder={"https://lists.example.com/domains.txt"}
                         disabled={inert}
-                        filesText={routingDraft.domainsFilesText}
                         urlsText={routingDraft.domainsUrlsText}
                         status={domainsStatus}
                         busy={busy}
                         busyKeyPrefix="domains"
-                        onFilesTextChange={(value) =>
-                          onRoutingDraftChange({ ...routingDraft, domainsFilesText: value })
-                        }
                         onUrlsTextChange={(value) =>
                           onRoutingDraftChange({ ...routingDraft, domainsUrlsText: value })
                         }

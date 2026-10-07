@@ -249,19 +249,13 @@ export function UpstreamProfilesSettingsDialog({
                       <section className="split">
                         <RoutingListSourcesPanel
                           title="Host route sources"
-                          filesLabel="Host route files (one path per line)"
-                          filesPlaceholder={"/var/lib/kornode/extra-host-routes.txt"}
                           urlsLabel="Host route URLs (one per line)"
                           urlsPlaceholder={"https://lists.example.com/host-routes.txt"}
                           disabled={!upstreamEnabled}
-                          filesText={routingDraft.hostRoutesFilesText}
                           urlsText={routingDraft.hostRoutesUrlsText}
                           status={hostRoutesStatus}
                           busy={busy}
                           busyKeyPrefix="host-routes"
-                          onFilesTextChange={(value) =>
-                            onRoutingDraftChange({ ...routingDraft, hostRoutesFilesText: value })
-                          }
                           onUrlsTextChange={(value) =>
                             onRoutingDraftChange({ ...routingDraft, hostRoutesUrlsText: value })
                           }
@@ -270,19 +264,13 @@ export function UpstreamProfilesSettingsDialog({
                         />
                         <RoutingListSourcesPanel
                           title="Host domain sources"
-                          filesLabel="Host domain files (one path per line)"
-                          filesPlaceholder={"/var/lib/kornode/extra-host-domains.txt"}
                           urlsLabel="Host domain URLs (one per line)"
                           urlsPlaceholder={"https://lists.example.com/host-domains.txt"}
                           disabled={!upstreamEnabled}
-                          filesText={routingDraft.hostDomainsFilesText}
                           urlsText={routingDraft.hostDomainsUrlsText}
                           status={hostDomainsStatus}
                           busy={busy}
                           busyKeyPrefix="host-domains"
-                          onFilesTextChange={(value) =>
-                            onRoutingDraftChange({ ...routingDraft, hostDomainsFilesText: value })
-                          }
                           onUrlsTextChange={(value) =>
                             onRoutingDraftChange({ ...routingDraft, hostDomainsUrlsText: value })
                           }

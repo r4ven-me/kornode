@@ -79,18 +79,14 @@ export function UpstreamRelayDialog({
               <div className="field-full-width">
                 <RoutingListSourcesPanel
                   title="Relay route sources"
-                  filesLabel="Route files"
-                  filesPlaceholder={"/etc/kornode/relay-routes.txt"}
                   urlsLabel="Route URLs"
                   urlsPlaceholder={"https://example.com/relay-routes.txt"}
                   disabled={!draft.route_clients_enabled}
                   disabledHint="Inert until relaying VPN users' traffic through this profile is on"
-                  filesText={draft.routesFilesText}
                   urlsText={draft.routesUrlsText}
                   status={routesStatus}
                   busy={busy}
                   busyKeyPrefix="relay-routes"
-                  onFilesTextChange={(value) => onDraftChange({ ...draft, routesFilesText: value })}
                   onUrlsTextChange={(value) => onDraftChange({ ...draft, routesUrlsText: value })}
                   onPreviewUrl={onPreviewRoutesUrl}
                   onRefreshUrl={onRefreshRoutesUrl}
@@ -99,18 +95,14 @@ export function UpstreamRelayDialog({
               <div className="field-full-width">
                 <RoutingListSourcesPanel
                   title="Relay domain sources"
-                  filesLabel="Domain files"
-                  filesPlaceholder={"/etc/kornode/relay-domains.txt"}
                   urlsLabel="Domain URLs"
                   urlsPlaceholder={"https://example.com/relay-domains.txt"}
                   disabled={!draft.route_clients_enabled}
                   disabledHint="Inert until relaying VPN users' traffic through this profile is on"
-                  filesText={draft.domainsFilesText}
                   urlsText={draft.domainsUrlsText}
                   status={domainsStatus}
                   busy={busy}
                   busyKeyPrefix="relay-domains"
-                  onFilesTextChange={(value) => onDraftChange({ ...draft, domainsFilesText: value })}
                   onUrlsTextChange={(value) => onDraftChange({ ...draft, domainsUrlsText: value })}
                   onPreviewUrl={onPreviewDomainsUrl}
                   onRefreshUrl={onRefreshDomainsUrl}

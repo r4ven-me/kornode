@@ -17,13 +17,9 @@ export function readRoutingDraft(config: Record<string, unknown>): {
   fwmark: string;
   tableId: number;
   nftPrefix: string;
-  routesFilesText: string;
   routesUrlsText: string;
-  domainsFilesText: string;
   domainsUrlsText: string;
-  hostRoutesFilesText: string;
   hostRoutesUrlsText: string;
-  hostDomainsFilesText: string;
   hostDomainsUrlsText: string;
 } {
   const routing = readRecord(config.routing);
@@ -37,13 +33,9 @@ export function readRoutingDraft(config: Record<string, unknown>): {
     fwmark: readString(routing.fwmark, "0x0c01"),
     tableId: readNumber(routing.table_id, 1201),
     nftPrefix: readString(routing.nft_prefix, "kornode"),
-    routesFilesText: readStringArray(split.routes_files).join("\n"),
     routesUrlsText: readStringArray(split.routes_urls).join("\n"),
-    domainsFilesText: readStringArray(split.domains_files).join("\n"),
     domainsUrlsText: readStringArray(split.domains_urls).join("\n"),
-    hostRoutesFilesText: readStringArray(hostSplit.routes_files).join("\n"),
     hostRoutesUrlsText: readStringArray(hostSplit.routes_urls).join("\n"),
-    hostDomainsFilesText: readStringArray(hostSplit.domains_files).join("\n"),
     hostDomainsUrlsText: readStringArray(hostSplit.domains_urls).join("\n")
   };
 }

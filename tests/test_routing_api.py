@@ -165,50 +165,60 @@ def test_routing_domains_bulk_set_replaces_the_whole_list(tmp_path: Path) -> Non
     assert response.json() == ["corp.example.com", "internal.example"]
 
 
-def test_routing_settings_saves_static_file_and_url_lists(tmp_path: Path) -> None:
+def test_routing_settings_saves_url_lists(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
-    static_routes = str(tmp_path / "static-routes.txt")
-    static_domains = str(tmp_path / "static-domains.txt")
 
     response = client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
         json={
             "client_policy": "full",
-            "routes_files": [static_routes],
             "routes_urls": ["https://lists.example.com/routes.txt"],
-            "domains_files": [static_domains],
             "domains_urls": ["https://lists.example.com/domains.txt"],
         },
     )
 
     assert response.status_code == 200
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["routing"]["split"]["routes_files"] == [static_routes]
     assert saved["routing"]["split"]["routes_urls"] == ["https://lists.example.com/routes.txt"]
-    assert saved["routing"]["split"]["domains_files"] == [static_domains]
     assert saved["routing"]["split"]["domains_urls"] == ["https://lists.example.com/domains.txt"]
 
 
-def test_routing_routes_status_reports_files_and_urls(tmp_path: Path) -> None:
+def test_routing_settings_rejects_legacy_static_files_field(tmp_path: Path) -> None:
+    # routes_files/domains_files are removed (see
+    # RoutingSplitConfig.drop_legacy_static_files) -- the save request model
+    # doesn't even have the field any more, so sending it is just ignored,
+    # not an error.
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
-    static_routes = tmp_path / "static-routes.txt"
-    static_routes.write_text("10.40.0.0/16\n", encoding="utf-8")
+
+    response = client.post(
+        "/api/routing/settings",
+        auth=("admin", "secret"),
+        json={"client_policy": "full", "routes_files": ["/some/path.txt"]},
+    )
+
+    assert response.status_code == 200
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert "routes_files" not in saved["routing"]["split"]
+
+
+def test_routing_routes_status_reports_only_urls(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+    url = "https://lists.example.com/routes.txt"
     client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"client_policy": "full", "routes_files": [str(static_routes)]},
+        json={"client_policy": "full", "routes_urls": [url]},
     )
 
     response = client.get("/api/routing/routes/status", auth=("admin", "secret"))
 
     assert response.status_code == 200
-    assert response.json()["files"] == [
-        {"path": str(static_routes), "exists": True, "count": 1}
-    ]
-    assert response.json()["urls"] == []
+    assert "files" not in response.json()
+    assert response.json()["urls"] == [{"url": url, "count": 0, "meta": None}]
 
 
 def test_routing_routes_refresh_rejects_unsaved_url(tmp_path: Path) -> None:
@@ -318,26 +328,22 @@ def test_routing_host_domains_bulk_set_rejects_invalid_entries(tmp_path: Path) -
     assert client.get("/api/routing/host-domains", auth=("admin", "secret")).json() == []
 
 
-def test_routing_settings_saves_host_static_file_and_url_lists(tmp_path: Path) -> None:
+def test_routing_settings_saves_host_url_lists(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
-    static_routes = str(tmp_path / "static-host-routes.txt")
 
     response = client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
         json={
             "client_policy": "full",
-            "host_routes_files": [static_routes],
             "host_routes_urls": ["https://lists.example.com/host-routes.txt"],
-            "host_domains_files": [],
             "host_domains_urls": ["https://lists.example.com/host-domains.txt"],
         },
     )
 
     assert response.status_code == 200
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["routing"]["host_split"]["routes_files"] == [static_routes]
     assert saved["routing"]["host_split"]["routes_urls"] == [
         "https://lists.example.com/host-routes.txt"
     ]
@@ -346,24 +352,21 @@ def test_routing_settings_saves_host_static_file_and_url_lists(tmp_path: Path) -
     ]
 
 
-def test_routing_host_routes_status_reports_files_and_urls(tmp_path: Path) -> None:
+def test_routing_host_routes_status_reports_only_urls(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
-    static_routes = tmp_path / "static-host-routes.txt"
-    static_routes.write_text("10.50.0.0/16\n", encoding="utf-8")
+    url = "https://lists.example.com/host-routes.txt"
     client.post(
         "/api/routing/settings",
         auth=("admin", "secret"),
-        json={"client_policy": "full", "host_routes_files": [str(static_routes)]},
+        json={"client_policy": "full", "host_routes_urls": [url]},
     )
 
     response = client.get("/api/routing/host-routes/status", auth=("admin", "secret"))
 
     assert response.status_code == 200
-    assert response.json()["files"] == [
-        {"path": str(static_routes), "exists": True, "count": 1}
-    ]
-    assert response.json()["urls"] == []
+    assert "files" not in response.json()
+    assert response.json()["urls"] == [{"url": url, "count": 0, "meta": None}]
 
 
 def test_routing_host_routes_refresh_rejects_unsaved_url(tmp_path: Path) -> None:

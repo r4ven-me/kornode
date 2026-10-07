@@ -95,9 +95,7 @@ export type UpstreamProfile = {
   route_clients_enabled?: boolean;
   routes?: string[];
   domains?: string[];
-  routes_files?: string[];
   routes_urls?: string[];
-  domains_files?: string[];
   domains_urls?: string[];
   route_host_enabled?: boolean;
   host_routes?: string[];
@@ -134,9 +132,7 @@ export type UpstreamProfileDraft = {
   route_clients_enabled: boolean;
   routes: string;
   domains: string;
-  routesFilesText: string;
   routesUrlsText: string;
-  domainsFilesText: string;
   domainsUrlsText: string;
   // Same idea, for the HOST's own traffic through this specific profile --
   // independent toggle and lists.
@@ -830,12 +826,6 @@ export function setHostDomains(token: string, items: string[]): Promise<string[]
   });
 }
 
-export type RoutingListFileStatus = {
-  path: string;
-  exists: boolean;
-  count: number;
-};
-
 export type RoutingListUrlStatus = {
   url: string;
   count: number;
@@ -848,7 +838,6 @@ export type RoutingListUrlStatus = {
 };
 
 export type RoutingListStatus = {
-  files: RoutingListFileStatus[];
   urls: RoutingListUrlStatus[];
 };
 
@@ -979,13 +968,9 @@ export function saveRoutingSettings(
     fwmark: string;
     table_id: number;
     nft_prefix: string;
-    routes_files: string[];
     routes_urls: string[];
-    domains_files: string[];
     domains_urls: string[];
-    host_routes_files: string[];
     host_routes_urls: string[];
-    host_domains_files: string[];
     host_domains_urls: string[];
   }
 ): Promise<{ status: string; host_dns?: { mode: string; changed: boolean; detail: string } }> {
@@ -1300,9 +1285,7 @@ export function saveUpstreamProfile(
       camouflage_secret: payload.camouflage_secret || null,
       routes: payload.routes.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       domains: payload.domains.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      routes_files: payload.routesFilesText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       routes_urls: payload.routesUrlsText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      domains_files: payload.domainsFilesText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       domains_urls: payload.domainsUrlsText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       host_routes: payload.host_routes.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
       host_domains: payload.host_domains

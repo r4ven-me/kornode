@@ -17,7 +17,6 @@ from kornode.config.models import (
 from kornode.services.external_lists import (
     ExternalListCache,
     ExternalListFetchResult,
-    parse_list_text,
 )
 from kornode.services.files import FileManager
 from kornode.services.upstream_pushed import PushedRoutingStore
@@ -159,14 +158,12 @@ class RoutingService:
     def list_profile_routes(self, profile: UpstreamProfileConfig) -> list[str]:
         return self._merge_unique(
             profile.routes,
-            self._all_file_routes(profile),
             self._all_url_cache_routes(profile, self._profile_route_url_cache(profile)),
         )
 
     def list_profile_domains(self, profile: UpstreamProfileConfig) -> list[str]:
         return self._merge_unique(
             profile.domains,
-            self._all_file_domains(profile),
             self._all_url_cache_domains(profile, self._profile_domain_url_cache(profile)),
         )
 
@@ -178,7 +175,6 @@ class RoutingService:
         return self._merge_unique(
             split.routes,
             self.files.read_lines(split.routes_file),
-            self._all_file_routes(split),
             self._all_url_cache_routes(split, url_cache),
         )
 
@@ -190,50 +186,8 @@ class RoutingService:
         return self._merge_unique(
             split.domains,
             self.files.read_lines(split.domains_file),
-            self._all_file_domains(split),
             self._all_url_cache_domains(split, url_cache),
         )
-
-    def file_routes(self, path: Path) -> list[str]:
-        # Tolerant (skips malformed lines instead of raising), unlike
-        # add_route()/set_routes(): a statically configured file
-        # (admin-managed, possibly hand-edited or third-party) shouldn't
-        # have a single bad line invalidate the rest -- same philosophy as
-        # internal_dns's blocklist file/URL parsing.
-        text = "\n".join(self.files.read_lines(path))
-        return parse_list_text(text, normalize=self._normalize_route).items
-
-    def _all_file_routes(
-        self, split: RoutingSplitConfig | HostSplitConfig | UpstreamProfileConfig
-    ) -> list[str]:
-        merged: list[str] = []
-        for path in split.routes_files:
-            merged.extend(self.file_routes(path))
-        return merged
-
-    def all_file_routes(self) -> list[str]:
-        return self._all_file_routes(self.config.routing.split)
-
-    def all_file_host_routes(self) -> list[str]:
-        return self._all_file_routes(self.config.routing.host_split)
-
-    def file_domains(self, path: Path) -> list[str]:
-        text = "\n".join(self.files.read_lines(path))
-        return parse_list_text(text, normalize=self._normalize_domain).items
-
-    def _all_file_domains(
-        self, split: RoutingSplitConfig | HostSplitConfig | UpstreamProfileConfig
-    ) -> list[str]:
-        merged: list[str] = []
-        for path in split.domains_files:
-            merged.extend(self.file_domains(path))
-        return merged
-
-    def all_file_domains(self) -> list[str]:
-        return self._all_file_domains(self.config.routing.split)
-
-    def all_file_host_domains(self) -> list[str]:
-        return self._all_file_domains(self.config.routing.host_split)
 
     def url_cache_routes(self, url: str) -> list[str]:
         return self.route_urls.cached_items(url, normalize=self._normalize_route)
@@ -278,36 +232,6 @@ class RoutingService:
 
     def all_url_cache_host_domains(self) -> list[str]:
         return self._all_url_cache_domains(self.config.routing.host_split, self.host_domain_urls)
-
-    def routes_files_status(self) -> list[dict[str, object]]:
-        return self._files_status(self.config.routing.split.routes_files, self.file_routes)
-
-    def host_routes_files_status(self) -> list[dict[str, object]]:
-        return self._files_status(self.config.routing.host_split.routes_files, self.file_routes)
-
-    def domains_files_status(self) -> list[dict[str, object]]:
-        return self._files_status(self.config.routing.split.domains_files, self.file_domains)
-
-    def host_domains_files_status(self) -> list[dict[str, object]]:
-        return self._files_status(self.config.routing.host_split.domains_files, self.file_domains)
-
-    def profile_routes_files_status(
-        self, profile: UpstreamProfileConfig
-    ) -> list[dict[str, object]]:
-        return self._files_status(profile.routes_files, self.file_routes)
-
-    def profile_domains_files_status(
-        self, profile: UpstreamProfileConfig
-    ) -> list[dict[str, object]]:
-        return self._files_status(profile.domains_files, self.file_domains)
-
-    def _files_status(
-        self, paths: list[Path], reader: Callable[[Path], list[str]]
-    ) -> list[dict[str, object]]:
-        return [
-            {"path": str(path), "exists": path.exists(), "count": len(reader(path))}
-            for path in paths
-        ]
 
     def routes_urls_status(self) -> list[dict[str, object]]:
         return self._urls_status(

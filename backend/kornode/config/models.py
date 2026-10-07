@@ -38,6 +38,32 @@ def _is_truthy(value: object) -> bool:
     return bool(value)
 
 
+def _drop_removed_static_files(data: Any, label: str) -> Any:
+    """routes_files/domains_files -- admin-maintained external files kornode
+    just read, on top of the inline list/URLs/managed runtime file -- are
+    removed: a fourth source alongside three others doing the same job was
+    exactly the kind of knob proliferation this config is trying to cut
+    down on. No automatic migration: unlike the legacy keys above, their
+    actual content lives in files outside the config entirely, so moving
+    it into the inline list or the managed runtime file is left to the
+    admin, by hand.
+    """
+    if not isinstance(data, dict):
+        return data
+    present = [key for key in ("routes_files", "domains_files") if key in data]
+    if not present:
+        return data
+    data = dict(data)
+    paths = [str(path) for key in present for path in data.pop(key)]
+    _LOGGER.warning(
+        "%s: routes_files/domains_files are removed and were ignored (%s); move "
+        "their content into the inline list or the managed file by hand",
+        label,
+        ", ".join(paths) if paths else "no paths were configured",
+    )
+    return data
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
@@ -367,6 +393,12 @@ class AuthConfig(StrictModel):
 
 
 class UpstreamProfileConfig(StrictModel):
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_static_files(cls, data: Any) -> Any:
+        label = data.get("name", "?") if isinstance(data, dict) else "?"
+        return _drop_removed_static_files(data, f"upstream.profiles[{label!r}]")
+
     name: str
     # "openconnect" (default): kornode dials out itself and owns the whole
     # connect/disconnect/reconnect lifecycle, as every profile has always
@@ -419,9 +451,7 @@ class UpstreamProfileConfig(StrictModel):
     route_clients_enabled: bool = True
     routes: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
-    routes_files: list[Path] = Field(default_factory=list)
     routes_urls: list[str] = Field(default_factory=list)
-    domains_files: list[Path] = Field(default_factory=list)
     domains_urls: list[str] = Field(default_factory=list)
     # Same idea as routes/domains above, but for the HOST's own traffic
     # routed through this specific profile -- independent toggle and lists,
@@ -483,11 +513,6 @@ class UpstreamProfileConfig(StrictModel):
     @classmethod
     def validate_domains(cls, value: list[str]) -> list[str]:
         return [_validate_domain(item) for item in value]
-
-    @field_validator("routes_files", "domains_files")
-    @classmethod
-    def validate_list_files(cls, value: list[Path]) -> list[Path]:
-        return _dedup_paths(value)
 
     @field_validator("routes_urls")
     @classmethod
@@ -730,19 +755,21 @@ class RoutingSplitConfig(StrictModel):
             )
         return data
 
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_static_files(cls, data: Any) -> Any:
+        return _drop_removed_static_files(data, "routing.split")
+
     routes_file: Path = Path("/var/lib/kornode/routes.txt")
     domains_file: Path = Path("/var/lib/kornode/domains.txt")
     routes: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
-    # Static, admin-configured external sources -- same shape as
-    # internal_dns's blocklist_files/blocklist_urls: kornode reads/fetches
-    # and caches these, merged in alongside the inline `routes`/`domains`
-    # lists above and the separate runtime-editable routes_file/domains_file
-    # (which `korctl routes/domains add/delete` manage). See
-    # RoutingService.list_routes()/list_domains().
-    routes_files: list[Path] = Field(default_factory=list)
+    # External sources -- same shape as internal_dns's blocklist_urls:
+    # kornode fetches and caches these, merged in alongside the inline
+    # `routes`/`domains` lists above and the separate runtime-editable
+    # routes_file/domains_file (which `korctl routes/domains add/delete`
+    # manage). See RoutingService.list_routes()/list_domains().
     routes_urls: list[str] = Field(default_factory=list)
-    domains_files: list[Path] = Field(default_factory=list)
     domains_urls: list[str] = Field(default_factory=list)
 
     @field_validator("routes")
@@ -757,11 +784,6 @@ class RoutingSplitConfig(StrictModel):
     def validate_domains(cls, value: list[str]) -> list[str]:
         return [_validate_domain(item) for item in value]
 
-    @field_validator("routes_files", "domains_files")
-    @classmethod
-    def validate_list_files(cls, value: list[Path]) -> list[Path]:
-        return _dedup_paths(value)
-
     @field_validator("routes_urls")
     @classmethod
     def validate_routes_urls(cls, value: list[str]) -> list[str]:
@@ -775,9 +797,9 @@ class RoutingSplitConfig(StrictModel):
 
 class HostSplitConfig(StrictModel):
     """Same shape as RoutingSplitConfig's routes/domains lists (inline,
-    runtime-editable file, static files, URLs), but for the HOST's own
-    traffic under routing.host_policy: split -- deliberately a separate list
-    from routing.split's, not shared, since an admin may want the host to
+    runtime-editable file, URLs), but for the HOST's own traffic under
+    routing.host_policy: split -- deliberately a separate list from
+    routing.split's, not shared, since an admin may want the host to
     follow entirely different routes/domains than clients do. No internal
     DNS listen/port fields here: those are about clients picking this
     server as their DNS, which has no host equivalent -- host domains are
@@ -785,13 +807,16 @@ class HostSplitConfig(StrictModel):
     RoutingService.list_host_domains()).
     """
 
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_static_files(cls, data: Any) -> Any:
+        return _drop_removed_static_files(data, "routing.host_split")
+
     routes_file: Path = Path("/var/lib/kornode/host-routes.txt")
     domains_file: Path = Path("/var/lib/kornode/host-domains.txt")
     routes: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
-    routes_files: list[Path] = Field(default_factory=list)
     routes_urls: list[str] = Field(default_factory=list)
-    domains_files: list[Path] = Field(default_factory=list)
     domains_urls: list[str] = Field(default_factory=list)
 
     @field_validator("routes")
@@ -803,11 +828,6 @@ class HostSplitConfig(StrictModel):
     @classmethod
     def validate_domains(cls, value: list[str]) -> list[str]:
         return [_validate_domain(item) for item in value]
-
-    @field_validator("routes_files", "domains_files")
-    @classmethod
-    def validate_list_files(cls, value: list[Path]) -> list[Path]:
-        return _dedup_paths(value)
 
     @field_validator("routes_urls")
     @classmethod

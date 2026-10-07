@@ -80,9 +80,7 @@ class UpstreamProfileRequest(BaseModel):
     route_clients_enabled: bool = True
     routes: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
-    routes_files: list[str] = Field(default_factory=list)
     routes_urls: list[str] = Field(default_factory=list)
-    domains_files: list[str] = Field(default_factory=list)
     domains_urls: list[str] = Field(default_factory=list)
     route_host_enabled: bool = False
     host_routes: list[str] = Field(default_factory=list)
@@ -239,10 +237,7 @@ def profile_routes_sources_status(request: Request, name: str) -> dict[str, obje
     config: AppConfig = request.app.state.config
     profile = _profile_or_404(config, name)
     service = RoutingService(config)
-    return {
-        "files": service.profile_routes_files_status(profile),
-        "urls": service.profile_routes_urls_status(profile),
-    }
+    return {"urls": service.profile_routes_urls_status(profile)}
 
 
 @router.get("/profiles/{name}/domains-sources/status")
@@ -250,10 +245,7 @@ def profile_domains_sources_status(request: Request, name: str) -> dict[str, obj
     config: AppConfig = request.app.state.config
     profile = _profile_or_404(config, name)
     service = RoutingService(config)
-    return {
-        "files": service.profile_domains_files_status(profile),
-        "urls": service.profile_domains_urls_status(profile),
-    }
+    return {"urls": service.profile_domains_urls_status(profile)}
 
 
 def _profile_refresh_response(

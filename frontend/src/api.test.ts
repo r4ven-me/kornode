@@ -86,9 +86,7 @@ const upstreamProfileDraft: UpstreamProfileDraft = {
   route_clients_enabled: false,
   routes: "",
   domains: "",
-  routesFilesText: "",
   routesUrlsText: "",
-  domainsFilesText: "",
   domainsUrlsText: "",
   route_host_enabled: false,
   host_routes: "",
@@ -328,13 +326,9 @@ describe("saveRoutingSettings", () => {
       fwmark: "0x0c01",
       table_id: 1201,
       nft_prefix: "kornode",
-      routes_files: [],
       routes_urls: [],
-      domains_files: [],
       domains_urls: [],
-      host_routes_files: [],
       host_routes_urls: [],
-      host_domains_files: [],
       host_domains_urls: []
     });
 
