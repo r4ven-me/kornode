@@ -42,7 +42,10 @@ auth:
     assert "cert-user-oid = 2.5.4.3" in rendered
     assert "realm =" not in rendered
     assert "ipv4-network = 10.77.0.0/24" in rendered
-    assert "dns = 1.1.1.1" in rendered
+    # The built-in resolver is mandatory while server.enabled, pushed at its
+    # auto-computed listen address for this customized ipv4_network (see
+    # AppConfig.migrate_legacy_dns_keys) -- not server.dns's 1.1.1.1.
+    assert "dns = 10.77.0.1" in rendered
     assert "route = 192.168.1.0/24" in rendered
     assert 'auth = "certificate"' in rendered
     assert "log-level = 2" in rendered

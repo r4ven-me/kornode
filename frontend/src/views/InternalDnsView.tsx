@@ -4,15 +4,13 @@ import { SettingsTabs } from "../components/SettingsTabs";
 import { ActionButton, Pill } from "../components/ui";
 import type { ServerSettingsDraft } from "../lib/drafts";
 import type { CommandResult, InternalDnsStatus } from "../api";
-import type { RoutingDraft } from "./upstream/RoutingListSourcesPanel";
 
 export type InternalDnsDraft = {
-  enabled: boolean;
   listen: string;
   port: number;
   blocklistEnabled: boolean;
   localRecordsEnabled: boolean;
-  defaultUpstreamsText: string;
+  upstreamsText: string;
   forwardUpstreamsText: string;
   forwardDomainsText: string;
   domainsText: string;
@@ -26,14 +24,11 @@ export type InternalDnsDraft = {
 export function InternalDnsView({
   status,
   draft,
-  dnsServerDraft,
   serverDraft,
-  resolverRequired,
   busy,
   commandOutput,
   onClearCommand,
   onDraftChange,
-  onDnsServerDraftChange,
   onServerDraftChange,
   onSave,
   onPreviewUrl,
@@ -41,20 +36,21 @@ export function InternalDnsView({
 }: {
   status: InternalDnsStatus | null;
   draft: InternalDnsDraft;
-  dnsServerDraft: RoutingDraft;
   serverDraft: ServerSettingsDraft;
-  resolverRequired: boolean;
   busy: string | null;
   commandOutput: CommandResult | CommandResult[] | null;
   onClearCommand: () => void;
   onDraftChange: (value: InternalDnsDraft) => void;
-  onDnsServerDraftChange: (value: RoutingDraft) => void;
   onServerDraftChange: (value: ServerSettingsDraft) => void;
   onSave: () => void;
   onPreviewUrl: (url: string) => void;
   onRefreshUrl: (url: string) => void;
 }) {
-  const resolverActive = draft.enabled || resolverRequired;
+  // The built-in resolver is mandatory, not opt-in, whenever the VPN server
+  // is enabled -- there is no switch for it here any more, just a status
+  // line. Defaults to active while status hasn't loaded yet (server.enabled
+  // itself defaults true).
+  const resolverActive = status ? status.resolver_active : true;
   return (
     <div className="view-stack dns-view">
       <section className="panel">
@@ -85,24 +81,18 @@ export function InternalDnsView({
                 Blocklist
               </div>
               <span className="dns-chain-arrow">→</span>
-              <div className="dns-chain-node">Upstream DNS rules / default upstream</div>
+              <div className="dns-chain-node">Upstream DNS rules / upstream servers</div>
             </>
           )}
         </div>
 
+        <p className="muted-line">
+          {resolverActive
+            ? "Active automatically because the VPN server is enabled -- VPN clients always use it, no opt-out."
+            : "Inactive: the VPN server is disabled, so there are no VPN clients to serve it to."}
+        </p>
+
         <div className="settings-grid dns-switches">
-          <label className="switch" title={resolverRequired ? "Required by split or profile domains" : undefined}>
-            <input
-              checked={resolverActive}
-              disabled={resolverRequired}
-              onChange={(event) => onDraftChange({ ...draft, enabled: event.target.checked })}
-              type="checkbox"
-            />
-            <span>Use built-in resolver</span>
-          </label>
-          {resolverRequired && (
-            <p className="dns-lock-note">Locked on: split/profile domains require the built-in resolver.</p>
-          )}
           <label className="switch">
             <input
               checked={draft.localRecordsEnabled}
@@ -130,16 +120,14 @@ export function InternalDnsView({
 
       <SettingsTabs ariaLabel="DNS settings">
         <details>
-          <summary>Default upstream</summary>
+          <summary>Upstream</summary>
           <div className="settings-grid internal-dns-grid">
             <label className="blocklist-domains">
-              <span>Default upstream DNS servers</span>
+              <span>Upstream DNS servers</span>
               <textarea
                 rows={3}
-                value={draft.defaultUpstreamsText}
-                onChange={(event) =>
-                  onDraftChange({ ...draft, defaultUpstreamsText: event.target.value })
-                }
+                value={draft.upstreamsText}
+                onChange={(event) => onDraftChange({ ...draft, upstreamsText: event.target.value })}
               />
             </label>
             <label className="blocklist-domains">
@@ -163,10 +151,11 @@ export function InternalDnsView({
             </label>
           </div>
           <p className="muted-line dns-shared-note">
-            Default upstream DNS servers is what the built-in resolver forwards unmatched queries
-            to -- leave it empty to fall back to Server DNS servers below. Server DNS servers
-            (shared with Config → Server) is also what gets pushed straight to VPN clients
-            whenever the built-in resolver isn&rsquo;t in play for them.
+            Upstream DNS servers is what the built-in resolver forwards unmatched queries to --
+            independent of Server DNS servers below. Server DNS servers (shared with Config →
+            Server) only still matters when the VPN server itself is disabled: with no VPN
+            clients to push the built-in resolver to, this is what a client-only/middle-server
+            deployment uses instead.
           </p>
         </details>
 
@@ -212,21 +201,10 @@ export function InternalDnsView({
 
         <details>
           <summary>DNS forwarding</summary>
-          <p className="muted-line">Forward only the listed domains to these DNS servers. Other queries use the default upstream tab.</p>
+          <p className="muted-line">Forward only the listed domains to these DNS servers. Other queries use the upstream tab.</p>
           <div className="settings-grid internal-dns-grid">
             <label className="blocklist-domains"><span>DNS servers</span><textarea disabled={!resolverActive} rows={4} value={draft.forwardUpstreamsText} onChange={(event) => onDraftChange({ ...draft, forwardUpstreamsText: event.target.value })} /></label>
             <label className="blocklist-domains"><span>Domains</span><textarea disabled={!resolverActive} rows={4} value={draft.forwardDomainsText} onChange={(event) => onDraftChange({ ...draft, forwardDomainsText: event.target.value })} /></label>
-          </div>
-        </details>
-
-        <details>
-          <summary>Split DNS integration</summary>
-          <p className="muted-line dns-shared-note">
-            This switch belongs to split routing and controls whether split-routing domains are
-            resolved through the built-in resolver.
-          </p>
-          <div className="settings-grid">
-            <label className="switch"><input checked={dnsServerDraft.tunnelDns} onChange={(event) => onDnsServerDraftChange({ ...dnsServerDraft, tunnelDns: event.target.checked })} type="checkbox" /><span>Resolve split-routing domains through the built-in resolver</span></label>
           </div>
         </details>
       </SettingsTabs>

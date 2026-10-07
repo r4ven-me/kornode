@@ -16,8 +16,6 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 class InternalDnsSettingsRequest(BaseModel):
     server_dns: list[str] = Field(default_factory=lambda: ["1.1.1.1", "8.8.8.8"])
     search_domains: list[str] = Field(default_factory=list)
-    tunnel_dns: bool = False
-    resolver_enabled: bool = False
     listen: str = "10.10.10.1"
     port: int = Field(default=53, ge=1, le=65535)
     blocklist_enabled: bool = False
@@ -28,7 +26,7 @@ class InternalDnsSettingsRequest(BaseModel):
     cache_size: int = Field(default=150, ge=0, le=10000)
     log_queries: bool = False
     local_records: list[str] = Field(default_factory=list)
-    default_upstreams: list[str] = Field(default_factory=list)
+    upstreams: list[str] = Field(default_factory=lambda: ["1.1.1.1", "8.8.8.8"])
     forward_upstreams: list[str] = Field(default_factory=list)
     forward_domains: list[str] = Field(default_factory=list)
 
@@ -67,9 +65,7 @@ def save_internal_dns_settings(
             "dns": payload.server_dns,
             "search_domains": payload.search_domains,
         },
-        "routing": {"split": {"tunnel_dns": payload.tunnel_dns}},
         "internal_dns": {
-            "resolver_enabled": payload.resolver_enabled,
             "listen": payload.listen,
             "port": payload.port,
             "blocklist_enabled": payload.blocklist_enabled,
@@ -80,7 +76,7 @@ def save_internal_dns_settings(
             "cache_size": payload.cache_size,
             "log_queries": payload.log_queries,
             "local_records": payload.local_records,
-            "default_upstreams": payload.default_upstreams,
+            "upstreams": payload.upstreams,
             "forward_upstreams": payload.forward_upstreams,
             "forward_domains": payload.forward_domains,
         },

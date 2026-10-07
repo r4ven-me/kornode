@@ -4,7 +4,6 @@ import type { RoutingListStatus } from "../../api";
 
 export type RoutingDraft = {
   clientPolicy: string;
-  tunnelDns: boolean;
   hostPolicy: string;
   hostDns: string;
   mainInterface: string;

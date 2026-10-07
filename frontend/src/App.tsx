@@ -78,7 +78,7 @@ export function App() {
   const groups = useGroups(core);
   const settings = useSettings(core);
   const routing = useRouting(core);
-  const internalDns = useInternalDns(core, routing.routingDraft, settings.serverSettingsDraft);
+  const internalDns = useInternalDns(core, settings.serverSettingsDraft);
   const identity = useIdentity(core);
   const upstream = useUpstream(core, tab, configSection, routing.saveRoutingSettings);
   const certificates = useCertificates(core);
@@ -305,19 +305,11 @@ export function App() {
           <InternalDnsView
             status={state.internalDns}
             draft={internalDns.internalDnsDraft}
-            dnsServerDraft={routing.routingDraft}
             serverDraft={settings.serverSettingsDraft}
-            resolverRequired={
-              (routing.routingDraft.clientPolicy === "split" && routing.routingDraft.tunnelDns) ||
-              state.upstreamProfiles.some(
-                (profile) => profile.enabled && (profile.domains?.length ?? 0) > 0
-              )
-            }
             busy={busy}
             commandOutput={commandOutputs.internal_dns ?? null}
             onClearCommand={() => clearCommand("internal_dns")}
             onDraftChange={internalDns.setInternalDnsDraft}
-            onDnsServerDraftChange={routing.setRoutingDraft}
             onServerDraftChange={settings.setServerSettingsDraft}
             onSave={() => void internalDns.save()}
             onPreviewUrl={(url) => void internalDns.refreshBlocklist(url, true)}

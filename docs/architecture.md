@@ -195,11 +195,10 @@ setup/confirm/disable flow.
     dnsmasq's `nftset=`) are marked and subject to the same
     forced-routing/kill-switch treatment; everything else is masqueraded
     normally through the host, unaffected.
-  - In `full`/`split`, VPN clients should be pointed at this server's own
-    dnsmasq (`internal_dns.listen`, via `split.tunnel_dns`) so
-    split-DNS domain resolution feeds the same nftables set; clients doing
-    their *own* split routing/DNS locally instead just point their own
-    resolver at this server's VPN address.
+  - VPN clients always use this server's own dnsmasq (`internal_dns.listen`)
+    as their DNS while `server.enabled` -- mandatory, not opt-in -- so
+    split-DNS domain resolution feeds the same nftables set automatically
+    whenever `client_policy: split`.
   - `routing.host_policy` extends routing to the **server host's own
     traffic**, independent of the client-facing `routing.client_policy`: an nftables
     `output` chain (`type route hook output`) marks host-originated packets,
@@ -326,10 +325,10 @@ setup/confirm/disable flow.
      "Download & apply" button), validated (scheme, size cap, per-line domain parsing)
      and cached individually under `data_dir/internal-dns/urls/` before use.
 
-The same dnsmasq instance also serves split-DNS domains when `routing.client_policy: split` with
-`split.tunnel_dns: true` is active — both features compose; enabling either one starts the
-`dnsmasq` supervisor program and switches the client DNS to the VPN server
-(`AppConfig.dns_tunnel_active()` / `client_dns_servers()`).
+The same dnsmasq instance also serves split-DNS domains whenever `routing.client_policy: split`
+— both features compose; either one keeps the `dnsmasq` supervisor program running
+(`AppConfig.dns_tunnel_active()`), and the client DNS is the VPN server's own resolver
+unconditionally while `server.enabled` (`client_dns_servers()`).
 
 ### Listen address lifecycle (runtime-dependent)
 

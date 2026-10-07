@@ -66,7 +66,6 @@ def test_merged_blocklist_combines_three_sources(tmp_path: Path) -> None:
         tmp_path,
         {
             "internal_dns": {
-                "resolver_enabled": True,
                 "blocklist_domains": ["ads.example.com"],
                 "blocklist_files": [str(blocklist_file)],
                 "blocklist_urls": [url],
@@ -94,7 +93,6 @@ def test_merged_blocklist_combines_multiple_files_and_urls(tmp_path: Path) -> No
         tmp_path,
         {
             "internal_dns": {
-                "resolver_enabled": True,
                 "blocklist_files": [str(file_a), str(file_b)],
                 "blocklist_urls": [url_a, url_b],
             }
@@ -117,7 +115,7 @@ def test_merged_blocklist_combines_multiple_files_and_urls(tmp_path: Path) -> No
 
 
 def test_url_cache_ignored_when_url_not_configured(tmp_path: Path) -> None:
-    config = _config(tmp_path, {"internal_dns": {"resolver_enabled": True}})
+    config = _config(tmp_path)
     service = InternalDnsService(config)
     cache_path = service.blocklist_cache_path("https://stale.example.com/hosts.txt")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,7 +132,6 @@ def test_refresh_url_blocklist_validates_and_caches(
         tmp_path,
         {
             "internal_dns": {
-                "resolver_enabled": True,
                 "blocklist_urls": [url],
             }
         },
@@ -161,7 +158,7 @@ def test_refresh_url_blocklist_validates_and_caches(
 
 
 def test_refresh_url_blocklist_rejects_url_not_in_configured_list(tmp_path: Path) -> None:
-    config = _config(tmp_path, {"internal_dns": {"resolver_enabled": True}})
+    config = _config(tmp_path)
     with pytest.raises(ValueError, match="does not contain"):
         InternalDnsService(config).refresh_url_blocklist("https://unsaved.example.com/x")
 
@@ -174,7 +171,6 @@ def test_refresh_url_blocklist_rejects_empty_result(
         tmp_path,
         {
             "internal_dns": {
-                "resolver_enabled": True,
                 "blocklist_urls": [url],
             }
         },
@@ -212,18 +208,23 @@ def test_local_records_rejects_invalid_ip(tmp_path: Path) -> None:
 
 
 def test_internal_dns_requires_listen_inside_vpn_subnet(tmp_path: Path) -> None:
+    # An explicit listen wins over config/loader.py's auto-computed default
+    # (see test_config_loader.py), so this is the one way left to still hit
+    # the mismatch: listen explicitly set, and wrong for the subnet.
     with pytest.raises(ValueError, match="internal_dns.listen"):
         _config(
             tmp_path,
             {
                 "server": {"ipv4_network": "10.99.0.0/24"},
-                "internal_dns": {"resolver_enabled": True},
+                "internal_dns": {"listen": "10.10.10.1"},
             },
         )
 
 
-def test_client_dns_becomes_vpn_server_when_internal_dns_enabled(tmp_path: Path) -> None:
-    config = _config(tmp_path, {"internal_dns": {"resolver_enabled": True}})
+def test_client_dns_becomes_vpn_server_when_server_enabled(tmp_path: Path) -> None:
+    # The built-in resolver is mandatory, not opt-in, whenever the VPN
+    # server is enabled (the default) -- see AppConfig.client_dns_servers().
+    config = _config(tmp_path)
     assert config.dns_tunnel_active()
     assert config.client_dns_servers() == ["10.10.10.1"]
 
@@ -233,8 +234,10 @@ def test_client_dns_becomes_vpn_server_when_internal_dns_enabled(tmp_path: Path)
     assert "tunnel-all-dns = true" in rendered
 
 
-def test_client_dns_uses_server_dns_when_internal_dns_disabled(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+def test_client_dns_uses_server_dns_when_vpn_server_disabled(tmp_path: Path) -> None:
+    # The one case server.dns still matters: no VPN server means no VPN
+    # clients to push the built-in resolver to in the first place.
+    config = _config(tmp_path, {"server": {"enabled": False}})
     assert not config.dns_tunnel_active()
     rendered = OcservConfigRenderer().render(config)
     assert "dns = 1.1.1.1" in rendered
@@ -266,18 +269,19 @@ def test_dns_tunnel_active_when_a_named_upstream_target_has_domains(tmp_path: Pa
 def test_dns_tunnel_active_when_forward_domains_configured_alone(tmp_path: Path) -> None:
     # forward_upstreams/forward_domains must start dnsmasq on their own --
     # otherwise the forwarding config they describe is silently dead, since
-    # there is no dnsmasq process to do the forwarding.
+    # there is no dnsmasq process to do the forwarding. server.enabled is
+    # off here so this isn't just "the VPN server already made it mandatory".
     config = _config(
         tmp_path,
         {
+            "server": {"enabled": False},
             "internal_dns": {
                 "forward_upstreams": ["127.207.207.1"],
                 "forward_domains": ["r4ven.lan"],
-            }
+            },
         },
     )
 
-    assert not config.internal_dns.resolver_enabled
     assert config.dns_tunnel_active()
 
 
@@ -292,7 +296,9 @@ def test_dnsmasq_render_includes_blocklist_and_upstreams(tmp_path: Path) -> None
     assert "nftset=" not in rendered
 
 
-def test_dnsmasq_render_prefers_default_upstreams_over_server_dns(tmp_path: Path) -> None:
+def test_legacy_default_upstreams_key_migrates_to_upstreams(tmp_path: Path) -> None:
+    # internal_dns.default_upstreams was renamed to upstreams (no more
+    # fallback to server.dns) -- see AppConfig.migrate_legacy_dns_keys.
     config = _config(
         tmp_path,
         {
@@ -300,19 +306,22 @@ def test_dnsmasq_render_prefers_default_upstreams_over_server_dns(tmp_path: Path
             "internal_dns": {"default_upstreams": ["9.9.9.9"]},
         },
     )
+    assert config.internal_dns.upstreams == ["9.9.9.9"]
     rendered = DnsmasqConfigRenderer().render(config)
     assert "server=9.9.9.9" in rendered
     assert "server=1.1.1.1" not in rendered
     assert "server=8.8.8.8" not in rendered
 
 
-def test_dnsmasq_render_falls_back_to_server_dns_when_default_upstreams_empty(
-    tmp_path: Path,
-) -> None:
+def test_dnsmasq_render_upstreams_is_independent_of_server_dns(tmp_path: Path) -> None:
+    # upstreams has its own real default now; it no longer falls back to
+    # server.dns when left unset (that fallback silently broke in subtle
+    # ways -- see docs/architecture.md).
     config = _config(tmp_path, {"server": {"dns": ["9.9.9.9"]}})
-    assert config.internal_dns.default_upstreams == []
+    assert config.internal_dns.upstreams == ["1.1.1.1", "8.8.8.8"]
     rendered = DnsmasqConfigRenderer().render(config)
-    assert "server=9.9.9.9" in rendered
+    assert "server=1.1.1.1" in rendered
+    assert "server=9.9.9.9" not in rendered
 
 
 def test_rendered_files_include_dnsmasq_and_blocklist(tmp_path: Path) -> None:
@@ -343,28 +352,28 @@ def test_rendered_files_include_dnsmasq_and_blocklist(tmp_path: Path) -> None:
 
 
 def test_ensure_listen_address_assigns_ip_to_loopback(tmp_path: Path) -> None:
-    config = _config(tmp_path, {"internal_dns": {"resolver_enabled": True}})
+    config = _config(tmp_path)
     result = InternalDnsService(config).ensure_listen_address(dry_run=True)
     assert result.argv == ("ip", "addr", "replace", "10.10.10.1/32", "dev", "lo")
     assert result.dry_run
 
 
 def test_remove_listen_address_command(tmp_path: Path) -> None:
-    config = _config(tmp_path, {"internal_dns": {"resolver_enabled": True}})
+    config = _config(tmp_path)
     result = InternalDnsService(config).remove_listen_address(dry_run=True)
     assert result.argv == ("ip", "addr", "del", "10.10.10.1/32", "dev", "lo")
 
 
 def test_dnsmasq_argv_uses_generated_conf(tmp_path: Path) -> None:
-    config = _config(tmp_path, {"internal_dns": {"resolver_enabled": True}})
+    config = _config(tmp_path)
     argv = InternalDnsService(config).dnsmasq_argv()
     assert argv[0] == "/usr/sbin/dnsmasq"
     assert argv[1] == f"--conf-file={config.generated_path('dnsmasq.conf')}"
     assert argv[2] == "--keep-in-foreground"
 
 
-def test_dnsmasq_not_rendered_when_disabled(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+def test_dnsmasq_not_rendered_when_server_disabled(tmp_path: Path) -> None:
+    config = _config(tmp_path, {"server": {"enabled": False}})
     rendered_paths = [str(item.path) for item in ConfigService().render_files(config)]
     assert str(config.generated_path("dnsmasq.conf")) not in rendered_paths
     supervisor = SupervisorConfigRenderer().render(config)
@@ -377,13 +386,24 @@ def test_internal_dns_enabled_field_is_not_backward_compatible(tmp_path: Path) -
         _config(tmp_path, {"internal_dns": {"enabled": True}})
 
 
-def test_each_internal_dns_feature_activates_dnsmasq_and_client_dns(tmp_path: Path) -> None:
-    for flag in ("resolver_enabled", "blocklist_enabled", "local_records_enabled"):
-        config = _config(tmp_path, {"internal_dns": {flag: True}})
+def test_server_enabled_alone_activates_dnsmasq_and_client_dns(tmp_path: Path) -> None:
+    # The resolver is mandatory, not opt-in, whenever the VPN server itself
+    # is enabled -- see AppConfig.dnsmasq_active_reasons()/client_dns_servers().
+    config = _config(tmp_path)
+
+    assert config.dnsmasq_active_reasons() == ["server_enabled"]
+    assert config.client_dns_servers() == ["10.10.10.1"]
+
+
+def test_each_internal_dns_feature_activates_dnsmasq_on_its_own(tmp_path: Path) -> None:
+    # server.enabled off here so each flag is shown activating dnsmasq by
+    # itself, not just riding along with the VPN server's own reason.
+    for flag in ("blocklist_enabled", "local_records_enabled"):
+        config = _config(tmp_path, {"server": {"enabled": False}, "internal_dns": {flag: True}})
 
         assert config.dnsmasq_active_reasons() == [flag]
-        assert config.client_dns_reasons() == [flag]
-        assert config.client_dns_servers() == ["10.10.10.1"]
+        # No VPN server means no VPN clients to push the resolver to.
+        assert config.client_dns_servers() == ["1.1.1.1", "8.8.8.8"]
 
 
 def test_host_profile_domains_activate_dnsmasq_without_changing_client_dns(
@@ -392,6 +412,7 @@ def test_host_profile_domains_activate_dnsmasq_without_changing_client_dns(
     config = _config(
         tmp_path,
         {
+            "server": {"enabled": False},
             "upstream": {
                 "enabled": True,
                 "profiles": [
@@ -405,12 +426,11 @@ def test_host_profile_domains_activate_dnsmasq_without_changing_client_dns(
                         "host_domains": ["host.corp"],
                     }
                 ],
-            }
+            },
         },
     )
 
     assert config.dnsmasq_active_reasons() == ["profile_host_domains"]
-    assert config.client_dns_reasons() == []
     assert config.client_dns_servers() == ["1.1.1.1", "8.8.8.8"]
     rendered_paths = [str(item.path) for item in ConfigService().render_files(config)]
     assert str(config.generated_path("dnsmasq.conf")) in rendered_paths
@@ -421,7 +441,6 @@ def test_blocklist_and_local_records_require_their_own_flags(tmp_path: Path) -> 
         tmp_path,
         {
             "internal_dns": {
-                "resolver_enabled": True,
                 "blocklist_domains": ["ads.example.com"],
                 "local_records": ["nas.corp.local 10.11.11.5"],
             }

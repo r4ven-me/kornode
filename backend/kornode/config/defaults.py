@@ -120,7 +120,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "table_id": 1201,
         "nft_prefix": "kornode",
         "split": {
-            "tunnel_dns": False,
             "routes_file": "/var/lib/kornode/routes.txt",
             "domains_file": "/var/lib/kornode/domains.txt",
             "routes": [],
@@ -128,8 +127,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
     },
     "internal_dns": {
-        "resolver_enabled": False,
-        "listen": "10.10.10.1",
+        # listen and upstreams keep their model defaults here on purpose:
+        # AppConfig.migrate_legacy_dns_keys needs "listen" absent to tell
+        # "not set" from "set to the default", so it can recompute listen
+        # from a customized server.ipv4_network. Same reasoning as
+        # client_policy/host_policy in routing above for upstreams.
         "port": 53,
         "blocklist_enabled": False,
         "local_records_enabled": False,
@@ -139,7 +141,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cache_size": 150,
         "log_queries": False,
         "local_records": [],
-        "default_upstreams": [],
         "forward_upstreams": [],
         "forward_domains": [],
     },

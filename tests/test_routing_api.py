@@ -408,9 +408,14 @@ def test_routing_host_domains_refresh_fetches_and_caches(tmp_path: Path) -> None
     ]
 
 
-def test_routing_settings_tunnel_dns_starts_dnsmasq_and_reapplies_nft(tmp_path: Path) -> None:
-    # Regression: toggling split tunnel_dns on the Upstream page used to change
-    # dns_tunnel_active() without starting dnsmasq or reapplying nftables.
+def test_routing_settings_save_starts_dnsmasq_and_reapplies_nft(tmp_path: Path) -> None:
+    # Regression: saving routing settings used to only rewrite config files,
+    # leaving dnsmasq and nftables mismatched until a manual Apply/restart
+    # (see services/apply.py). The built-in resolver is mandatory while
+    # server.enabled (the default here), so dnsmasq must always be
+    # (re)started on save, and nft must always be reapplied -- but nothing
+    # about VPN clients' own view of DNS changes from a client_policy switch
+    # alone, so no reconnect is needed.
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
 
@@ -423,7 +428,6 @@ def test_routing_settings_tunnel_dns_starts_dnsmasq_and_reapplies_nft(tmp_path: 
         patch("kornode.api.routes_routing.HostDnsService.apply") as host_apply,
     ):
         process_action.return_value = _ok_result()
-        reload.return_value = _ok_result()
         host_apply.return_value.as_dict.return_value = {}
         response = client.post(
             "/api/routing/settings",
@@ -431,7 +435,6 @@ def test_routing_settings_tunnel_dns_starts_dnsmasq_and_reapplies_nft(tmp_path: 
             json={
                 "client_policy": "split",
                 "host_policy": "off",
-                "tunnel_dns": True,
                 "host_dns": "off",
             },
         )
@@ -439,7 +442,7 @@ def test_routing_settings_tunnel_dns_starts_dnsmasq_and_reapplies_nft(tmp_path: 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "saved_and_applied"
-    assert body["reconnect_required"] is True
+    assert body["reconnect_required"] is False
     process_action.assert_called_once_with("restart", "dnsmasq")
-    reload.assert_called_once()
+    reload.assert_not_called()
     nft_apply.assert_called_once()

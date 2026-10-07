@@ -97,7 +97,6 @@ export function UpstreamView({
   const defaultProfile = status?.active_profile ?? null;
   const inert = !profilesEnabled || !serverEnabled;
   const splitEnabled = routingDraft.clientPolicy === "split";
-  const splitDnsEnabled = splitEnabled && routingDraft.tunnelDns;
   const relaying =
     hasProfiles && profilesEnabled && serverEnabled && routingDraft.clientPolicy !== "off";
 
@@ -219,20 +218,11 @@ export function UpstreamView({
                 </label>
                 {splitEnabled && (
                   <div className="routing-substep">
-                    <label
-                      className="switch"
-                      title="Push this server's dnsmasq as the DNS for VPN users and resolve the Domains list below into the split set. Distinct from the per-user/group 'Split DNS' setting. The dnsmasq listen address/port are configured in Config → DNS."
-                    >
-                      <input
-                        checked={routingDraft.tunnelDns}
-                        disabled={inert}
-                        onChange={(event) =>
-                          onRoutingDraftChange({ ...routingDraft, tunnelDns: event.target.checked })
-                        }
-                        type="checkbox"
-                      />
-                      <span>Also split by domain (needs this server&rsquo;s own DNS)</span>
-                    </label>
+                    <p className="muted-line">
+                      Domains below are resolved through this server&rsquo;s own DNS, pushed to
+                      VPN users automatically (Config → DNS has the resolver&rsquo;s other
+                      settings).
+                    </p>
                     <section className="split">
                       <BulkListEditor
                         title="Routes"
@@ -242,16 +232,14 @@ export function UpstreamView({
                         disabled={inert}
                         onSave={onSaveRoutes}
                       />
-                      {splitDnsEnabled && (
-                        <BulkListEditor
-                          title="Domains"
-                          items={domains}
-                          placeholder={"internal.example\ncorp.example.com"}
-                          busy={busy === "save-domains"}
-                          disabled={inert}
-                          onSave={onSaveDomains}
-                        />
-                      )}
+                      <BulkListEditor
+                        title="Domains"
+                        items={domains}
+                        placeholder={"internal.example\ncorp.example.com"}
+                        busy={busy === "save-domains"}
+                        disabled={inert}
+                        onSave={onSaveDomains}
+                      />
                     </section>
                     <section className="split">
                       <RoutingListSourcesPanel
@@ -275,29 +263,27 @@ export function UpstreamView({
                         onPreviewUrl={onPreviewRoutesUrl}
                         onRefreshUrl={onRefreshRoutesUrl}
                       />
-                      {splitDnsEnabled && (
-                        <RoutingListSourcesPanel
-                          title="Domain sources"
-                          filesLabel="Domain files (one path per line)"
-                          filesPlaceholder={"/var/lib/kornode/extra-domains.txt"}
-                          urlsLabel="Domain URLs (one per line)"
-                          urlsPlaceholder={"https://lists.example.com/domains.txt"}
-                          disabled={inert}
-                          filesText={routingDraft.domainsFilesText}
-                          urlsText={routingDraft.domainsUrlsText}
-                          status={domainsStatus}
-                          busy={busy}
-                          busyKeyPrefix="domains"
-                          onFilesTextChange={(value) =>
-                            onRoutingDraftChange({ ...routingDraft, domainsFilesText: value })
-                          }
-                          onUrlsTextChange={(value) =>
-                            onRoutingDraftChange({ ...routingDraft, domainsUrlsText: value })
-                          }
-                          onPreviewUrl={onPreviewDomainsUrl}
-                          onRefreshUrl={onRefreshDomainsUrl}
-                        />
-                      )}
+                      <RoutingListSourcesPanel
+                        title="Domain sources"
+                        filesLabel="Domain files (one path per line)"
+                        filesPlaceholder={"/var/lib/kornode/extra-domains.txt"}
+                        urlsLabel="Domain URLs (one per line)"
+                        urlsPlaceholder={"https://lists.example.com/domains.txt"}
+                        disabled={inert}
+                        filesText={routingDraft.domainsFilesText}
+                        urlsText={routingDraft.domainsUrlsText}
+                        status={domainsStatus}
+                        busy={busy}
+                        busyKeyPrefix="domains"
+                        onFilesTextChange={(value) =>
+                          onRoutingDraftChange({ ...routingDraft, domainsFilesText: value })
+                        }
+                        onUrlsTextChange={(value) =>
+                          onRoutingDraftChange({ ...routingDraft, domainsUrlsText: value })
+                        }
+                        onPreviewUrl={onPreviewDomainsUrl}
+                        onRefreshUrl={onRefreshDomainsUrl}
+                      />
                     </section>
                     <p className="muted-line">
                       Route/domain sources are saved with the button below -- fill these in, click

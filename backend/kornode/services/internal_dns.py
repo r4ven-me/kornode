@@ -135,16 +135,17 @@ class InternalDnsService:
             for url in settings.blocklist_urls
         ]
         reasons = self.config.dnsmasq_active_reasons()
-        client_reasons = self.config.client_dns_reasons()
+        # The resolver is mandatory, not opt-in, whenever the VPN server is
+        # enabled -- see AppConfig.client_dns_servers(). resolver_active is
+        # purely informational now: there's no toggle left to reflect.
+        resolver_active = self.config.server.enabled
         configured = {
-            "resolver_enabled": settings.resolver_enabled,
             "blocklist_enabled": settings.blocklist_enabled,
             "local_records_enabled": settings.local_records_enabled,
         }
         effective = {
             "dnsmasq_active": bool(reasons),
-            "client_dns_uses_dnsmasq": bool(client_reasons),
-            "resolver_enabled": settings.resolver_enabled,
+            "resolver_active": resolver_active,
             "blocklist_enabled": settings.blocklist_enabled and bool(reasons),
             "local_records_enabled": settings.local_records_enabled and bool(reasons),
         }
@@ -152,12 +153,10 @@ class InternalDnsService:
             "configured": configured,
             "effective": effective,
             "effective_reasons": reasons,
-            "client_dns_reasons": client_reasons,
             **configured,
-            "enabled": settings.resolver_enabled,
+            "resolver_active": resolver_active,
             "server_dns": list(self.config.server.dns),
             "search_domains": list(self.config.server.search_domains),
-            "tunnel_dns": self.config.routing.split.tunnel_dns,
             "listen": self.config.internal_dns.listen,
             "port": self.config.internal_dns.port,
             "client_dns": self.config.client_dns_servers(),
@@ -168,7 +167,7 @@ class InternalDnsService:
             "cache_size": settings.cache_size,
             "log_queries": settings.log_queries,
             "local_records": list(settings.local_records),
-            "default_upstreams": settings.default_upstreams,
+            "upstreams": settings.upstreams,
             "forward_upstreams": settings.forward_upstreams,
             "forward_domains": settings.forward_domains,
         }

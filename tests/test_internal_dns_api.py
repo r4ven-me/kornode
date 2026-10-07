@@ -57,13 +57,14 @@ def test_internal_dns_status_defaults(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["configured"] == {
-        "resolver_enabled": False,
         "blocklist_enabled": False,
         "local_records_enabled": False,
     }
-    assert payload["effective"]["dnsmasq_active"] is False
-    assert payload["effective_reasons"] == []
-    assert payload["client_dns"] == ["1.1.1.1", "8.8.8.8"]
+    # The resolver is mandatory, not opt-in, while server.enabled (the
+    # default) -- see AppConfig.dnsmasq_active_reasons().
+    assert payload["effective"]["dnsmasq_active"] is True
+    assert payload["effective_reasons"] == ["server_enabled"]
+    assert payload["client_dns"] == ["10.10.10.1"]
     assert payload["total"] == 0
 
 
@@ -76,7 +77,6 @@ def test_internal_dns_settings_enable_switches_client_dns(tmp_path: Path) -> Non
         auth=("admin", "secret"),
         json={
             "server_dns": ["9.9.9.9"],
-            "resolver_enabled": True,
             "listen": "10.10.10.2",
             "port": 5353,
             "blocklist_enabled": True,
@@ -90,10 +90,9 @@ def test_internal_dns_settings_enable_switches_client_dns(tmp_path: Path) -> Non
     payload = response.json()
     assert payload["status"] == "saved_and_applied"
     assert payload["reconnect_required"] is True
-    assert payload["internal_dns"]["resolver_enabled"] is True
     assert payload["internal_dns"]["blocklist_enabled"] is True
     assert payload["internal_dns"]["effective_reasons"] == [
-        "resolver_enabled",
+        "server_enabled",
         "blocklist_enabled",
     ]
     assert payload["internal_dns"]["client_dns"] == ["10.10.10.2"]
@@ -101,8 +100,6 @@ def test_internal_dns_settings_enable_switches_client_dns(tmp_path: Path) -> Non
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["server"]["dns"] == ["9.9.9.9"]
-    assert saved["routing"]["split"] == {"tunnel_dns": False}
-    assert saved["internal_dns"]["resolver_enabled"] is True
     assert saved["internal_dns"]["listen"] == "10.10.10.2"
     assert saved["internal_dns"]["port"] == 5353
     assert saved["internal_dns"]["blocklist_enabled"] is True
@@ -128,7 +125,6 @@ def test_internal_dns_settings_saves_cache_size_log_queries_and_local_records(
         "/api/internal-dns/settings",
         auth=("admin", "secret"),
         json={
-            "resolver_enabled": False,
             "blocklist_enabled": False,
             "local_records_enabled": True,
             "cache_size": 1000,
@@ -151,20 +147,12 @@ def test_internal_dns_settings_saves_cache_size_log_queries_and_local_records(
 
 def test_local_record_change_does_not_reconnect_clients(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    client = _client(
-        config_path,
-        tmp_path,
-        extra="""
-internal_dns:
-  resolver_enabled: true
-""",
-    )
+    client = _client(config_path, tmp_path)
 
     response = client.post(
         "/api/internal-dns/settings",
         auth=("admin", "secret"),
         json={
-            "resolver_enabled": True,
             "local_records_enabled": True,
             "local_records": ["nas.corp.local 10.11.11.5"],
         },
@@ -176,9 +164,9 @@ internal_dns:
     assert payload["internal_dns"]["local_records"] == ["nas.corp.local 10.11.11.5"]
 
 
-def test_default_upstreams_saved_and_does_not_reconnect_clients(tmp_path: Path) -> None:
-    # default_upstreams only changes what the built-in resolver forwards to,
-    # not what's pushed to connected VPN clients -- same category as
+def test_upstreams_saved_and_does_not_reconnect_clients(tmp_path: Path) -> None:
+    # upstreams only changes what the built-in resolver forwards to, not
+    # what's pushed to connected VPN clients -- same category as
     # local_records above, so it must not force a reconnect either.
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
@@ -186,16 +174,16 @@ def test_default_upstreams_saved_and_does_not_reconnect_clients(tmp_path: Path) 
     response = client.post(
         "/api/internal-dns/settings",
         auth=("admin", "secret"),
-        json={"default_upstreams": ["9.9.9.9", "149.112.112.112"]},
+        json={"upstreams": ["9.9.9.9", "149.112.112.112"]},
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["reconnect_required"] is False
-    assert payload["internal_dns"]["default_upstreams"] == ["9.9.9.9", "149.112.112.112"]
+    assert payload["internal_dns"]["upstreams"] == ["9.9.9.9", "149.112.112.112"]
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["internal_dns"]["default_upstreams"] == ["9.9.9.9", "149.112.112.112"]
+    assert saved["internal_dns"]["upstreams"] == ["9.9.9.9", "149.112.112.112"]
 
 
 def test_forward_domains_change_reconnects_clients_and_feeds_split_dns(
@@ -216,7 +204,7 @@ def test_forward_domains_change_reconnects_clients_and_feeds_split_dns(
     assert response.status_code == 200
     payload = response.json()
     assert payload["reconnect_required"] is True
-    assert payload["internal_dns"]["effective_reasons"] == ["forward_domains"]
+    assert payload["internal_dns"]["effective_reasons"] == ["server_enabled", "forward_domains"]
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["internal_dns"]["forward_upstreams"] == ["127.207.207.1"]

@@ -468,7 +468,6 @@ routing:
   table_id: 1201
   nft_prefix: kornode
   split:
-    tunnel_dns: true
     routes_file: /var/lib/kornode/routes.txt
     domains_file: /var/lib/kornode/domains.txt
     routes:
@@ -479,7 +478,6 @@ routing:
       - corp.example.com
 
 internal_dns:
-  resolver_enabled: true
   listen: 10.10.10.1
   port: 53
   blocklist_enabled: true
@@ -947,7 +945,6 @@ routing:
   table_id: 1201
   nft_prefix: kornode
   split:
-    tunnel_dns: true
     routes:
       - 192.168.25.0/24
       - 10.20.0.0/16
@@ -1089,7 +1086,6 @@ routing:
   table_id: 1201
   nft_prefix: kornode
   split:
-    tunnel_dns: true
     routes:
       - 192.168.25.0/24
       - 10.20.0.0/16

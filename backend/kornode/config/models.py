@@ -713,7 +713,23 @@ class UpstreamConfig(StrictModel):
 
 
 class RoutingSplitConfig(StrictModel):
-    tunnel_dns: bool = False
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_tunnel_dns(cls, data: Any) -> Any:
+        # tunnel_dns used to gate whether split-mode domains were resolved
+        # through the built-in resolver at all. The resolver is mandatory
+        # now whenever the VPN server is enabled, so there is nothing left
+        # for this flag to gate -- domains below are always resolved when
+        # routing.client_policy is "split".
+        if isinstance(data, dict) and "tunnel_dns" in data:
+            data = dict(data)
+            data.pop("tunnel_dns")
+            _LOGGER.warning(
+                "routing.split.tunnel_dns no longer has an effect and was ignored; "
+                "split-mode domains are resolved whenever routing.client_policy is 'split'"
+            )
+        return data
+
     routes_file: Path = Path("/var/lib/kornode/routes.txt")
     domains_file: Path = Path("/var/lib/kornode/domains.txt")
     routes: list[str] = Field(default_factory=list)
@@ -762,11 +778,11 @@ class HostSplitConfig(StrictModel):
     runtime-editable file, static files, URLs), but for the HOST's own
     traffic under routing.host_policy: split -- deliberately a separate list
     from routing.split's, not shared, since an admin may want the host to
-    follow entirely different routes/domains than clients do. No
-    tunnel_dns or internal DNS listen/port fields here: those are about
-    clients picking this server as their DNS, which has no host equivalent -- host
-    domains are just resolved via whatever DNS the host itself already
-    uses (see RoutingService.list_host_domains()).
+    follow entirely different routes/domains than clients do. No internal
+    DNS listen/port fields here: those are about clients picking this
+    server as their DNS, which has no host equivalent -- host domains are
+    just resolved via whatever DNS the host itself already uses (see
+    RoutingService.list_host_domains()).
     """
 
     routes_file: Path = Path("/var/lib/kornode/host-routes.txt")
@@ -899,7 +915,6 @@ class RoutingConfig(StrictModel):
 
 
 class InternalDnsConfig(StrictModel):
-    resolver_enabled: bool = False
     listen: str = "10.10.10.1"
     port: int = Field(default=53, ge=1, le=65535)
     blocklist_enabled: bool = False
@@ -910,12 +925,11 @@ class InternalDnsConfig(StrictModel):
     cache_size: int = Field(default=150, ge=0, le=10000)
     log_queries: bool = False
     local_records: list[str] = Field(default_factory=list)
-    # What the built-in resolver forwards unmatched queries to. Falls back to
-    # server.dns when empty -- see DnsmasqConfigRenderer. Distinct from
-    # server.dns's other job (DNS pushed straight to VPN clients when the
-    # resolver isn't in play, AppConfig.client_dns_servers()), which stays
-    # tied to server.dns regardless of this field.
-    default_upstreams: list[str] = Field(default_factory=list)
+    # What the built-in resolver forwards unmatched queries to. Unlike the
+    # legacy default_upstreams this replaced, there is no fallback to
+    # server.dns: the resolver always runs while server.enabled (see
+    # AppConfig.client_dns_servers()), so it needs its own real default.
+    upstreams: list[str] = Field(default_factory=lambda: ["1.1.1.1", "8.8.8.8"])
     forward_upstreams: list[str] = Field(default_factory=list)
     forward_domains: list[str] = Field(default_factory=list)
 
@@ -944,9 +958,9 @@ class InternalDnsConfig(StrictModel):
     def validate_local_records(cls, value: list[str]) -> list[str]:
         return [_validate_local_record(item) for item in value]
 
-    @field_validator("default_upstreams")
+    @field_validator("upstreams")
     @classmethod
-    def validate_default_upstreams(cls, value: list[str]) -> list[str]:
+    def validate_upstreams(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(_validate_ip(resolver) for resolver in value))
 
     @field_validator("forward_upstreams")
@@ -1133,6 +1147,69 @@ class AdvancedConfig(StrictModel):
 
 
 class AppConfig(StrictModel):
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_dns_keys(cls, data: Any) -> Any:
+        # Needs both internal_dns and server in the same pass (unlike the
+        # self-contained migrations on RoutingConfig/RoutingSplitConfig), so
+        # it has to run here, before AppConfig's nested models are built --
+        # and on the raw dict passed to model_validate(), not a merged
+        # config.loader.py dict: that's what lets this see "listen was never
+        # set" regardless of whether the caller is the loader, a config
+        # PATCH, or a test building an AppConfig directly. That's also why
+        # config/defaults.py deliberately leaves internal_dns.listen out.
+        if not isinstance(data, dict):
+            return data
+        raw_internal_dns = data.get("internal_dns")
+        if raw_internal_dns is not None and not isinstance(raw_internal_dns, dict):
+            return data
+        internal_dns = dict(raw_internal_dns) if raw_internal_dns else {}
+        warnings: list[str] = []
+        if "resolver_enabled" in internal_dns:
+            internal_dns.pop("resolver_enabled")
+            warnings.append("internal_dns.resolver_enabled")
+        if "default_upstreams" in internal_dns:
+            legacy_value = internal_dns.pop("default_upstreams")
+            if "upstreams" not in internal_dns:
+                if legacy_value:
+                    internal_dns["upstreams"] = legacy_value
+                else:
+                    # The old fallback: an empty default_upstreams meant
+                    # "use server.dns". Snapshot that here, once, since the
+                    # fallback itself is gone -- upstreams is independent of
+                    # server.dns from now on.
+                    server = data.get("server")
+                    fallback = server.get("dns") if isinstance(server, dict) else None
+                    if fallback:
+                        internal_dns["upstreams"] = fallback
+            warnings.append("internal_dns.default_upstreams")
+        if warnings:
+            _LOGGER.warning(
+                "config: migrated legacy keys %s; the built-in resolver now runs "
+                "automatically whenever the VPN server is enabled",
+                ", ".join(warnings),
+            )
+        # internal_dns.listen must be reachable from server.ipv4_network --
+        # the resolver is mandatory, not opt-in, while server.enabled (see
+        # client_dns_servers()). The model default (10.10.10.1) only matches
+        # the model default ipv4_network (10.10.10.0/24); a deployment that
+        # customizes ipv4_network without separately customizing listen
+        # would otherwise fail validation for an unrelated-looking reason.
+        # An explicit listen always wins -- this only fills the gap.
+        if "listen" not in internal_dns:
+            server = data.get("server")
+            ipv4_network = server.get("ipv4_network") if isinstance(server, dict) else None
+            if ipv4_network:
+                try:
+                    network = ipaddress.ip_network(ipv4_network, strict=False)
+                    internal_dns["listen"] = str(next(network.hosts()))
+                except (ValueError, StopIteration):
+                    pass  # let the normal field/cross-field validators raise
+        if internal_dns:
+            data = dict(data)
+            data["internal_dns"] = internal_dns
+        return data
+
     system: SystemConfig = Field(default_factory=SystemConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     certificates: CertificatesConfig = Field(default_factory=CertificatesConfig)
@@ -1187,21 +1264,17 @@ class AppConfig(StrictModel):
                     derived_table_id,
                     field_name=f"upstream.profiles[{target_profile.name!r}]'s derived table_id",
                 )
-        # client_dns_reasons() (not the broader dns_tunnel_active()) is the
-        # precise signal here: dnsmasq can be active for host-only reasons
-        # (host_split_domains, profile_host_domains, profile_server_routes)
-        # that never get pushed to a VPN client at all -- client_dns_servers()
-        # itself only returns internal_dns.listen when client_dns_reasons()
-        # is non-empty, falling back to server.dns otherwise (renderers/
-        # ocserv.py). Gating on server.enabled too covers the same
-        # client-only case as above.
-        if self.server.enabled and self.client_dns_reasons():
+        # client_dns_servers() always returns internal_dns.listen while
+        # server.enabled (the resolver is mandatory then -- see
+        # dnsmasq_active_reasons()/client_dns_servers() below), so that's the
+        # precise condition for requiring listen to be reachable from the
+        # VPN client subnet, independent of any other dnsmasq-active reason.
+        if self.server.enabled:
             listen_ip = ipaddress.ip_address(self.internal_dns.listen)
             if listen_ip not in vpn_network:
                 raise ValueError(
                     "internal_dns.listen must be inside server.ipv4_network "
-                    "when internal_dns or split-mode DNS tunneling is enabled "
-                    "so VPN clients can reach the DNS server"
+                    "so VPN clients can reach the built-in DNS resolver"
                 )
         return self
 
@@ -1209,15 +1282,17 @@ class AppConfig(StrictModel):
         """Return the configured features that require project-owned dnsmasq."""
         reasons: list[str] = []
         settings = self.internal_dns
-        if settings.resolver_enabled:
-            reasons.append("resolver_enabled")
+        # The resolver is mandatory, not opt-in, whenever the VPN server
+        # itself is enabled -- see client_dns_servers().
+        if self.server.enabled:
+            reasons.append("server_enabled")
         if settings.blocklist_enabled:
             reasons.append("blocklist_enabled")
         if settings.local_records_enabled:
             reasons.append("local_records_enabled")
         if settings.forward_domains:
             reasons.append("forward_domains")
-        if self.routing.client_policy == "split" and self.routing.split.tunnel_dns:
+        if self.routing.client_policy == "split":
             reasons.append("split_dns")
         if self.upstream.enabled and any(
             profile.enabled and profile.route_clients_enabled and profile.domains
@@ -1249,24 +1324,19 @@ class AppConfig(StrictModel):
             reasons.append("profile_server_routes")
         return reasons
 
-    def client_dns_reasons(self) -> list[str]:
-        """Return active reasons for which VPN clients must query dnsmasq."""
-        client_relevant = {
-            "resolver_enabled",
-            "blocklist_enabled",
-            "local_records_enabled",
-            "split_dns",
-            "profile_domains",
-        }
-        return [reason for reason in self.dnsmasq_active_reasons() if reason in client_relevant]
-
     def dns_tunnel_active(self) -> bool:
         """Whether the project-owned dnsmasq instance must run."""
         return bool(self.dnsmasq_active_reasons())
 
     def client_dns_servers(self) -> list[str]:
-        """DNS servers pushed to VPN clients by ocserv."""
-        if self.client_dns_reasons():
+        """DNS servers pushed to VPN clients by ocserv.
+
+        Always the built-in resolver while the VPN server is enabled --
+        there is no opt-out, see dnsmasq_active_reasons(). server.dns only
+        still applies in a client-only/middle-server deployment that has no
+        VPN clients of its own to push DNS to in the first place.
+        """
+        if self.server.enabled:
             return [self.internal_dns.listen]
         return self.server.dns
 

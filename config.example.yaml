@@ -151,27 +151,25 @@ routing:
   table_id: 1201
   nft_prefix: kornode
   split:
-    tunnel_dns: false
     routes_file: /var/lib/kornode/routes.txt
     domains_file: /var/lib/kornode/domains.txt
     routes: []
     domains: []
 
-# Internal DNS features use the project-owned dnsmasq instance at listen:port.
-# Any enabled feature makes dnsmasq active and causes VPN clients to use it.
+# The project-owned dnsmasq instance (listen:port below) is mandatory, not
+# opt-in, whenever server.enabled -- VPN clients always use it, no opt-out
+# (see AppConfig.client_dns_servers()). blocklist/local_records/forwarding
+# below stay opt-in on top of it.
 internal_dns:
-  resolver_enabled: false
   listen: 10.10.10.1
   port: 53
   blocklist_enabled: false
   local_records_enabled: false
-  # What the resolver forwards unmatched queries to. Empty falls back to
-  # server.dns -- set this instead of server.dns when you want the resolver's
-  # upstream to differ from what's pushed directly to VPN clients (or when
-  # the VPN server itself is disabled and server.dns isn't otherwise
-  # meaningful).
-  # Example: default_upstreams: [1.1.1.1, 8.8.8.8]
-  default_upstreams: []
+  # What the resolver forwards unmatched queries to -- independent of
+  # server.dns, which only still matters when server.enabled is false (no
+  # VPN clients to push this resolver to in the first place).
+  # Example: upstreams: [1.1.1.1, 8.8.8.8]
+  upstreams: [1.1.1.1, 8.8.8.8]
   # Optional forwarding for selected domain zones. Clients still use this
   # resolver; the shared upstream list applies to every domain below.
   forward_upstreams: []

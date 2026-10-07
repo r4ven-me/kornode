@@ -17,7 +17,10 @@ def _config(tmp_path: Path, host_dns: str, *, dnsmasq: bool = True, port: int = 
                 "secrets_dir": tmp_path / "secrets",
             },
             "routing": {"host_dns": host_dns},
-            "internal_dns": {"resolver_enabled": dnsmasq, "port": port},
+            # dnsmasq now runs automatically whenever server.enabled -- there
+            # is no separate opt-in switch left, see AppConfig.dns_tunnel_active().
+            "server": {"enabled": dnsmasq},
+            "internal_dns": {"port": port},
         }
     )
 

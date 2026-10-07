@@ -973,7 +973,6 @@ export function saveRoutingSettings(
   token: string,
   payload: {
     client_policy: string;
-    tunnel_dns: boolean;
     host_policy: string;
     host_dns: string;
     main_interface: string;
@@ -1042,7 +1041,9 @@ export type InternalDnsBlocklistUrlStatus = {
 };
 
 export type InternalDnsStatus = {
-  enabled: boolean;
+  // Purely informational now: the resolver is mandatory, not opt-in, while
+  // the VPN server is enabled -- see AppConfig.client_dns_servers().
+  resolver_active: boolean;
   blocklist_enabled?: boolean;
   local_records_enabled?: boolean;
   listen: string;
@@ -1050,8 +1051,7 @@ export type InternalDnsStatus = {
   client_dns: string[];
   server_dns?: string[];
   search_domains?: string[];
-  tunnel_dns?: boolean;
-  default_upstreams: string[];
+  upstreams: string[];
   forward_upstreams: string[];
   forward_domains: string[];
   blocklist_domains: string[];
@@ -1064,15 +1064,13 @@ export type InternalDnsStatus = {
 };
 
 export type InternalDnsSettingsRequest = {
-  resolver_enabled: boolean;
   listen: string;
   port: number;
   blocklist_enabled: boolean;
   local_records_enabled: boolean;
   server_dns: string[];
   search_domains: string[];
-  tunnel_dns: boolean;
-  default_upstreams: string[];
+  upstreams: string[];
   forward_upstreams: string[];
   forward_domains: string[];
   blocklist_domains: string[];

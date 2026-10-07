@@ -38,7 +38,7 @@ Nested keys are joined with `__`:
 ```text
 server.port -> KORNODE_SERVER__PORT
 web.enabled -> KORNODE_WEB__ENABLED
-routing.split.tunnel_dns -> KORNODE_ROUTING__SPLIT__TUNNEL_DNS
+routing.client_policy -> KORNODE_ROUTING__CLIENT_POLICY
 ```
 
 Lists can be overridden as JSON:

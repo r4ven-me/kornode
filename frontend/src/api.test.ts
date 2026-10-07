@@ -268,15 +268,13 @@ describe("internal DNS settings API", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const payload = {
-      resolver_enabled: true,
       listen: "10.10.10.1",
       port: 53,
       blocklist_enabled: true,
       local_records_enabled: true,
       server_dns: ["9.9.9.9"],
       search_domains: ["corp.example"],
-      tunnel_dns: true,
-      default_upstreams: ["9.9.9.9"],
+      upstreams: ["9.9.9.9"],
       forward_upstreams: ["1.1.1.1"],
       forward_domains: ["example.com"],
       blocklist_domains: ["ads.example"],
@@ -324,7 +322,6 @@ describe("saveRoutingSettings", () => {
 
     await saveRoutingSettings("session", {
       client_policy: "split",
-      tunnel_dns: true,
       host_policy: "split",
       host_dns: "resolv_conf",
       main_interface: "auto",

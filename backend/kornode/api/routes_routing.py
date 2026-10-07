@@ -37,7 +37,6 @@ class ListUrlRefreshRequest(BaseModel):
 
 class RoutingSettingsRequest(BaseModel):
     client_policy: Literal["off", "full", "split"] = "full"
-    tunnel_dns: bool = False
     host_policy: Literal["off", "full", "split"] = "off"
     host_dns: str | None = None
     main_interface: str | None = None
@@ -249,7 +248,6 @@ def save_routing_settings(
     background_tasks: BackgroundTasks,
 ) -> dict[str, object]:
     split: dict[str, object] = {
-        "tunnel_dns": payload.tunnel_dns,
         "routes_files": payload.routes_files,
         "routes_urls": payload.routes_urls,
         "domains_files": payload.domains_files,

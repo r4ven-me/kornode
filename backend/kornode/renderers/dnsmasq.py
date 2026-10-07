@@ -16,21 +16,17 @@ class DnsmasqConfigRenderer(TemplateRenderer):
         # marks client traffic through Upstream at all (see nftables.nft.j2),
         # so resolving domains into its set / overriding their DNS server
         # would just be a silent, pointless DNS behavior change.
-        split_dns_active = (
-            config.routing.client_policy == "split" and config.routing.split.tunnel_dns
-        )
+        split_dns_active = config.routing.client_policy == "split"
         listen = config.internal_dns.listen
-        # internal_dns.default_upstreams is what the resolver itself forwards
-        # unmatched queries to; empty falls back to server.dns (which has its
-        # own separate job -- DNS pushed straight to VPN clients, see
-        # client_dns_servers() -- regardless of default_upstreams). When
-        # tunnel_dns is on, configs often list the dnsmasq address itself in
-        # one of these (that IS the client DNS then). dnsmasq silently
+        # internal_dns.upstreams is what the resolver itself forwards
+        # unmatched queries to -- independent of server.dns, which has its
+        # own separate job (DNS pushed straight to VPN clients when the
+        # resolver isn't in play, see client_dns_servers()). Configs often
+        # list the dnsmasq address itself in here too; dnsmasq silently
         # ignores upstreams on a local interface, which would leave
         # split-domain masks pointing at a dropped server -- so keep only
         # real upstreams.
-        upstream_dns_source = config.internal_dns.default_upstreams or config.server.dns
-        upstream_dns = [dns for dns in upstream_dns_source if dns != listen]
+        upstream_dns = [dns for dns in config.internal_dns.upstreams if dns != listen]
         local_records = (
             [
                 {"host": host, "ip": ip}
@@ -44,8 +40,8 @@ class DnsmasqConfigRenderer(TemplateRenderer):
         routing_service = RoutingService(config)
         # Named per-profile targets: resolved via the normal upstream DNS
         # (no server=/domain/... override, unlike split_dns_active below --
-        # that override is specifically for routing.split's own tunnel_dns
-        # toggle), just fed into that target's own nftables set so matching
+        # that override is specifically for routing.split's own domains),
+        # just fed into that target's own nftables set so matching
         # traffic gets marked and routed to its assigned profile.
         targets = routing_service.list_targets(default_interface=config.routing.main_interface)
         named_targets_with_domains = [

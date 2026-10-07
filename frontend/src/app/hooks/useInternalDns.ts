@@ -3,24 +3,18 @@ import { refreshInternalDnsBlocklist, saveInternalDnsSettings } from "../../api"
 import { syntheticCommand, urlRefreshSample } from "../../lib/commands";
 import { type ServerSettingsDraft, splitLines } from "../../lib/drafts";
 import type { InternalDnsDraft } from "../../views/InternalDnsView";
-import type { RoutingDraft } from "../../views/upstream/RoutingListSourcesPanel";
 import type { PanelCore } from "../core";
 
-// The DNS page also edits the server's client DNS list and routing's
-// tunnel_dns flag, so saving it sends parts of those two drafts along.
-export function useInternalDns(
-  core: PanelCore,
-  routingDraft: RoutingDraft,
-  serverSettingsDraft: ServerSettingsDraft
-) {
+// The DNS page also edits the server's client DNS list, so saving it sends
+// part of that draft along too.
+export function useInternalDns(core: PanelCore, serverSettingsDraft: ServerSettingsDraft) {
   const { recordCommand, runAction, setNotice } = core;
   const [internalDnsDraft, setInternalDnsDraft] = useState<InternalDnsDraft>({
-    enabled: false,
     listen: "10.10.10.1",
     port: 53,
     blocklistEnabled: false,
     localRecordsEnabled: false,
-    defaultUpstreamsText: "",
+    upstreamsText: "",
     forwardUpstreamsText: "",
     forwardDomainsText: "",
     domainsText: "",
@@ -36,7 +30,6 @@ export function useInternalDns(
       return;
     }
     setInternalDnsDraft({
-      enabled: internalDns.enabled,
       listen: internalDns.listen,
       port: internalDns.port,
       blocklistEnabled:
@@ -46,7 +39,7 @@ export function useInternalDns(
           internalDns.blocklist_urls.length > 0),
       localRecordsEnabled:
         internalDns.local_records_enabled ?? internalDns.local_records.length > 0,
-      defaultUpstreamsText: internalDns.default_upstreams.join("\n"),
+      upstreamsText: internalDns.upstreams.join("\n"),
       forwardUpstreamsText: internalDns.forward_upstreams.join("\n"),
       forwardDomainsText: internalDns.forward_domains.join("\n"),
       domainsText: internalDns.blocklist_domains.join("\n"),
@@ -64,15 +57,13 @@ export function useInternalDns(
       "DNS settings saved and applied",
       (token) =>
         saveInternalDnsSettings(token, {
-          resolver_enabled: internalDnsDraft.enabled,
           listen: internalDnsDraft.listen,
           port: internalDnsDraft.port,
           blocklist_enabled: internalDnsDraft.blocklistEnabled,
           local_records_enabled: internalDnsDraft.localRecordsEnabled,
           server_dns: splitLines(serverSettingsDraft.dns),
           search_domains: splitLines(serverSettingsDraft.searchDomains),
-          tunnel_dns: routingDraft.tunnelDns,
-          default_upstreams: splitLines(internalDnsDraft.defaultUpstreamsText),
+          upstreams: splitLines(internalDnsDraft.upstreamsText),
           forward_upstreams: splitLines(internalDnsDraft.forwardUpstreamsText),
           forward_domains: splitLines(internalDnsDraft.forwardDomainsText),
           blocklist_domains: splitLines(internalDnsDraft.domainsText),

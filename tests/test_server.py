@@ -92,7 +92,12 @@ def test_server_reload_signals_hup(tmp_path: Path) -> None:
 
 
 def test_server_processes_report_managed_processes_only(tmp_path: Path) -> None:
-    config = AppConfig.model_validate({"system": {"generated_dir": tmp_path}})
+    # server.enabled off: otherwise dnsmasq is expected to run (the resolver
+    # is mandatory while server.enabled) and would show "UNKNOWN" rather
+    # than "DISABLED" for not being reported by the fake supervisor.
+    config = AppConfig.model_validate(
+        {"system": {"generated_dir": tmp_path}, "server": {"enabled": False}}
+    )
     rpc = FakeRpcClient()
     rpc.all_process_info = [
         {"name": "api", "statename": "RUNNING", "description": "pid 1, uptime 0:00:01"},
