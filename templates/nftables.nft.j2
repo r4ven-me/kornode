@@ -158,10 +158,13 @@ table inet {{ filter_table }} {
   }
 
   chain prerouting_protected {
-    # Reverse DNAT runs at priority dstnat (-100), after the mangle chain
+    # Reverse NAT runs at priority dstnat (-100), after the mangle chain
     # above. Clear an upstream mark again at -50, when a reply destination
-    # has already been restored from the tunnel NAT address to a VPN client.
+    # has already been restored to a local VPN client or a masqueraded
+    # container. Otherwise the policy table's default route sends the reply
+    # back into the upstream tunnel instead of the local client interface.
     type filter hook prerouting priority -50; policy accept;
+    ct direction reply ct status snat counter meta mark set 0
     ip daddr {{ config.server.ipv4_network }} counter meta mark set 0
   }
 

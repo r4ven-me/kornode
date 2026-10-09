@@ -455,6 +455,7 @@ def test_active_upstream_routes_local_service_replies_without_host_routing(
     )
     assert rendered.count(protected_clear) == 3
     assert "type filter hook prerouting priority -50" in rendered
+    assert "ct direction reply ct status snat counter meta mark set 0" in rendered
     # No ordinary host-originated packet is selected for the tunnel.
     assert "ct direction original ip daddr" not in rendered
 
