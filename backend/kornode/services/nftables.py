@@ -246,13 +246,19 @@ class NftablesService:
                 # default bucket's route to point at. Named targets (below)
                 # are independent of this and still get reasserted.
                 continue
+            # A default target may use routing.main_interface for ordinary
+            # client NAT when client_policy is off. Its fwmark still belongs
+            # to the active upstream (symmetric replies/local host routing),
+            # so policy routing must use the renderer's resolved tunnel, not
+            # the target's NAT interface -- which may literally be "auto".
+            policy_interface = default_interface if target.name == "default" else target.interface
             results.extend(
                 PolicyRoutingService(
                     self.config,
                     runner=self.runner,
                     fwmark=target.fwmark,
                     table_id=target.table_id,
-                ).apply(target.interface, dry_run=dry_run)
+                ).apply(policy_interface, dry_run=dry_run)
             )
         return results
 

@@ -17,6 +17,7 @@ from kornode.config.models import AppConfig, UpstreamProfileConfig
 from kornode.services import upstream as upstream_module
 from kornode.services.command import CommandError, CommandResult
 from kornode.services.upstream import UpstreamService
+from kornode.services.upstream_pushed import PushedRouting
 
 
 class FakeRunner:
@@ -981,6 +982,52 @@ def test_connect_active_applies_policy_routing_after_successful_connect(
 
     ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
     assert ["ip", "route", "replace", "default", "dev", "oc-middle0", "table", "1201"] in ip_calls
+
+
+def test_connect_restores_persisted_pushed_host_routes_after_restart(tmp_path: Path) -> None:
+    """A persisted fingerprint describes a previous process' runtime state.
+
+    After a restart it must not suppress the post-connect NFT restore once
+    the tunnel exists again.
+    """
+    config = _config(tmp_path)
+    profile = _profile()
+    profile.route_host_enabled = True
+    profile.accept_server_routes = True
+    config.upstream.profiles.append(profile)
+    config.upstream.enabled = True
+    config.upstream.active_profile = profile.name
+    runner = FakeRunner(tmp_path)
+    service = UpstreamService(config, runner=runner)
+    service.pushed.save(profile, PushedRouting(routes=["10.90.0.0/16"]))
+    service.pushed.mark_applied(service.pushed.fingerprint())
+
+    try:
+        service.connect_active()
+    finally:
+        runner.close()
+
+    openconnect_index = next(
+        index for index, call in enumerate(runner.calls) if call["argv"][0] == "openconnect"
+    )
+    post_connect_nft_loads = [
+        call
+        for call in runner.calls[openconnect_index + 1 :]
+        if call["argv"][:2] == ["nft", "-f"]
+    ]
+    assert len(post_connect_nft_loads) == 1
+    rendered = config.generated_path("nftables.nft").read_text(encoding="utf-8")
+    assert "10.90.0.0/16" in rendered
+    assert [
+        "ip",
+        "route",
+        "replace",
+        "default",
+        "dev",
+        "oc-middle0",
+        "table",
+        "1202",
+    ] in [call["argv"] for call in runner.calls]
 
 
 def test_disconnect_cleans_up_policy_routing(tmp_path: Path) -> None:

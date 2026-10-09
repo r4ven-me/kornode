@@ -632,6 +632,13 @@ class UpstreamService:
                 )
             selected = self.selected_profile()
             is_active = selected is not None and selected.name == profile.name
+            # The applied marker is persisted, unlike kernel/NFT runtime
+            # state.  Remember whether it could suppress the post-connect
+            # restore after a service/container restart.
+            pushed_fingerprint = self.pushed.fingerprint()
+            pushed_was_marked_applied = bool(pushed_fingerprint) and (
+                pushed_fingerprint == self.pushed.applied_fingerprint()
+            )
             if not dry_run:
                 self._repair_stale_resolv_conf()
                 # Load the split/full-mode kill-switch rules before dialing,
@@ -677,7 +684,7 @@ class UpstreamService:
                 # split-DNS domains the server pushed in this handshake
                 # (openconnect runs it before backgrounding); apply them now
                 # rather than on the watchdog's next tick.
-                self.apply_server_routing_if_changed()
+                self.apply_server_routing_if_changed(force=pushed_was_marked_applied)
             return result
 
     def _verify_backgrounded(self, profile: UpstreamProfileConfig, result: CommandResult) -> None:

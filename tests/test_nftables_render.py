@@ -678,6 +678,32 @@ def test_nft_apply_reasserts_policy_routing_when_upstream_active(tmp_path: Path)
     ] in runner.calls
 
 
+def test_nft_apply_never_uses_literal_auto_as_policy_route_device(tmp_path: Path) -> None:
+    config = AppConfig.model_validate(
+        {
+            "system": {"generated_dir": tmp_path},
+            "routing": {"client_policy": "off", "main_interface": "auto"},
+            "upstream": {"enabled": True, "profiles": [_upstream_profile()]},
+        }
+    )
+    runner = RecordingRunner()
+
+    NftablesService(config, runner=runner).apply()
+
+    route_calls = [call for call in runner.calls if call[:3] == ["ip", "route", "replace"]]
+    assert [
+        "ip",
+        "route",
+        "replace",
+        "default",
+        "dev",
+        "oc-middle0",
+        "table",
+        "1201",
+    ] in route_calls
+    assert not any(call[4:6] == ["dev", "auto"] for call in route_calls)
+
+
 def test_nft_apply_reasserts_named_target_policy_routing_too(tmp_path: Path) -> None:
     # Regression test: _reassert_policy_routing() used to only reassert the
     # DEFAULT target's ip rule/route on a manual reload (panel Reload,
