@@ -24,6 +24,9 @@ the listed fallback and update this file and the affected spec.
 | D-14 | Agent has no web panel; local CLI only. Remote diagnostics through hub commands. | Minimal attack surface and code size. |
 | D-15 | Per-node addressing derived from `node.id` (1–254). Hub is node 1. | Prevents overlap by construction. |
 | D-16 | Secrets for agents are sealed per agent: ephemeral X25519 + HKDF-SHA256 + ChaCha20-Poly1305. | Bundle bodies may be logged/cached; secrets stay unreadable to other agents. |
+| D-17 | P0's `rp_filter=2` is set unconditionally on `all`/`default`/tunnel ifaces, not the "2 if currently 1, else unchanged" nuance in `03-kernel-dataplane.md`. | That nuance is P2's `kornode.net` kernel module's job; P0 only patches the existing services on the current codebase (ROADMAP's own scoping), not the new core. |
+| D-18 | `korctl doctor` is a new, separate command/service from `korctl diagnose`/`DiagnosticsService`, not merged into it. | Different purpose (network-sanity assertions vs. raw software/interface info dumps); avoids changing `diagnose`'s existing contract. |
+| D-19 | P0 is verified by unit tests (`FakeRunner`/golden-template pattern) only; the ROADMAP P0 "Done when" criteria that call for netlab evidence are left unverified until P1's `tests/netlab/` framework exists. | P1 (the netlab harness) was out of scope for the P0 implementation session; conservative choice was to ship P0 on the existing unit-test convention rather than block on building P1 first. |
 
 ## Spikes
 

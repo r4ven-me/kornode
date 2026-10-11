@@ -1,4 +1,4 @@
-import type { CertificateInfo, CertificateStatus, CommandResult, ConfigSource, DiagnosticResult, GroupConfigRecord, Health, IdentityStatus, InternalDnsStatus, LogFile, OtpRecord, ProcessStatus, RevokedCertificate, RoutingListStatus, SessionRecord, SoftwareVersion, UpstreamProfile, UpstreamStatus, UserConfig, UserRecord } from "../api";
+import type { CertificateInfo, CertificateStatus, CommandResult, ConfigSource, DiagnosticResult, DoctorResult, GroupConfigRecord, Health, IdentityStatus, InternalDnsStatus, LogFile, OtpRecord, ProcessStatus, RevokedCertificate, RoutingListStatus, SessionRecord, SoftwareVersion, UpstreamProfile, UpstreamStatus, UserConfig, UserRecord } from "../api";
 
 export type Tab =
   | "dashboard"
@@ -146,6 +146,7 @@ export type AppState = {
   configSource: ConfigSource | null;
   renderedConfig: Record<string, string>;
   diagnostics: DiagnosticResult | null;
+  doctor: DoctorResult | null;
   logFiles: LogFile[];
   certificateStatus: CertificateStatus | null;
   softwareVersions: SoftwareVersion[];

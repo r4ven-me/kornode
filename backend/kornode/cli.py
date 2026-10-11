@@ -25,6 +25,7 @@ from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
 from kornode.services.diagnostics import DiagnosticsService
+from kornode.services.doctor import DoctorService
 from kornode.services.domain_resolver import DomainResolverService
 from kornode.services.files import FileManager
 from kornode.services.groups import GroupConfigService
@@ -1218,6 +1219,25 @@ def diagnose(
     for name, result in DiagnosticsService(get_config()).run(dry_run=dry_run).items():
         typer.echo(f"## {name}")
         echo_result(result)
+
+
+@app.command("doctor")
+def doctor() -> None:
+    """Network-sanity checks: sysctls, overlapping subnets, policy-table
+    health, nft/kernel versions, carrier exclusions. Unlike `diagnose`,
+    prints every check before exiting, so one failing check doesn't hide
+    the rest."""
+    results = DoctorService(get_config()).run()
+    failed = False
+    for name, result in results.items():
+        typer.echo(f"## {name}")
+        if result.stdout:
+            typer.echo(result.stdout.rstrip())
+        if result.stderr:
+            typer.echo(result.stderr.rstrip(), err=True)
+        failed = failed or not result.ok
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command("logs")

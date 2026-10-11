@@ -376,6 +376,17 @@ class UpstreamService:
         pid = self._read_pid(profile)
         return pid is not None and self._is_running(pid)
 
+    def is_profile_connected(self, profile: UpstreamProfileConfig) -> bool:
+        """Public alias of _profile_connected, for callers outside this
+        service (e.g. DoctorService) that only need the read-only check."""
+        return self._profile_connected(profile)
+
+    def resolved_carrier_addresses(self, profile: UpstreamProfileConfig) -> list[str]:
+        """Public alias of _resolve_carrier_addresses, for callers outside
+        this service (e.g. DoctorService) that only need the read-only
+        resolution, not the install/remove side effects."""
+        return self._resolve_carrier_addresses(profile)
+
     def _interface_link_up(self, interface: str) -> bool:
         """Whether a pre-existing interface (kind='external_interface')
         currently exists and reports link-up, via `ip -j link show`.

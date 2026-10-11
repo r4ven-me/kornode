@@ -29,6 +29,7 @@ export const emptyState: AppState = {
   configSource: null,
   renderedConfig: {},
   diagnostics: null,
+  doctor: null,
   logFiles: [],
   certificateStatus: null,
   softwareVersions: []

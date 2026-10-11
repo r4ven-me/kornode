@@ -4,6 +4,11 @@
 
 ### Added
 
+- `korctl doctor` (+ `GET /api/diagnostics/doctor` + a "Doctor" panel card on the Diagnostics
+  page): checks required sysctls, overlapping subnets (VPN pool vs. host/Docker routes and
+  upstream-pushed routes), policy-table health, `nft`/kernel versions, and that every connected
+  upstream profile has its carrier-exclusion rule. Prints every check before exiting, unlike
+  `diagnose`, so one failing check doesn't hide the rest.
 - Apply required IPv4 forwarding and rp_filter sysctls at startup and on new upstream/server tunnel interfaces; ocserv now installs a kornode connect-script by default.
 
 ### Fixed

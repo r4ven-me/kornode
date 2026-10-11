@@ -6,6 +6,7 @@ import {
   fetchConfig,
   fetchConfigSource,
   fetchDiagnostics,
+  fetchDoctor,
   fetchDomains,
   fetchDomainsStatus,
   fetchGroups,
@@ -139,7 +140,11 @@ export function usePanelCore() {
             fetchLogRotationSettings(token)
           ]),
           includeExtras
-            ? Promise.allSettled([fetchDiagnostics(token), fetchSoftwareVersions(token)])
+            ? Promise.allSettled([
+                fetchDiagnostics(token),
+                fetchSoftwareVersions(token),
+                fetchDoctor(token)
+              ])
             : Promise.resolve(null)
         ]);
         const authFailure = [...results, ...(extraResults ?? [])].find(
@@ -205,7 +210,10 @@ export function usePanelCore() {
             : current.diagnostics,
           softwareVersions: extraResults
             ? settledValue(extraResults[1], current.softwareVersions)
-            : current.softwareVersions
+            : current.softwareVersions,
+          doctor: extraResults
+            ? settledValue(extraResults[2], current.doctor)
+            : current.doctor
         }));
         const snapshot: LoadSnapshot = {};
         if (sessions.status === "fulfilled") snapshot.sessions = sessions.value;

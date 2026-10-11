@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from kornode.api.auth import require_admin
 from kornode.config.models import AppConfig
 from kornode.services.diagnostics import DiagnosticsService
+from kornode.services.doctor import DoctorService
 from kornode.services.network_stats import NetworkStatsService
 from kornode.services.software_versions import SoftwareVersionService
 
@@ -23,6 +24,21 @@ def diagnostics(request: Request) -> dict[str, dict[str, object]]:
             "dry_run": result.dry_run,
         }
         for name, result in DiagnosticsService(config).run().items()
+    }
+
+
+@router.get("/doctor")
+def doctor(request: Request) -> dict[str, dict[str, object]]:
+    config: AppConfig = request.app.state.config
+    return {
+        name: {
+            "argv": result.argv,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "ok": result.ok,
+        }
+        for name, result in DoctorService(config).run().items()
     }
 
 

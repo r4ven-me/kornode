@@ -22,6 +22,7 @@ import { IconButton, RavenMark } from "./components/ui";
 import { readBoolean, readRecord } from "./lib/read";
 import { DashboardView } from "./views/DashboardView";
 import { DiagnosticsView } from "./views/DiagnosticsView";
+import { DoctorView } from "./views/DoctorView";
 import { IdentityView } from "./views/IdentityView";
 import { InternalDnsView } from "./views/InternalDnsView";
 import { LoginScreen } from "./views/LoginScreen";
@@ -524,7 +525,12 @@ export function App() {
           />
         )}
 
-        {tab === "diagnostics" && <DiagnosticsView diagnostics={state.diagnostics} />}
+        {tab === "diagnostics" && (
+          <>
+            <DiagnosticsView diagnostics={state.diagnostics} />
+            <DoctorView doctor={state.doctor} />
+          </>
+        )}
 
         {tab === "logs" && (
           <LogsView

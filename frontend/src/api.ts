@@ -303,6 +303,16 @@ export type CertificateStatus = {
 
 export type DiagnosticResult = Record<string, CommandResult>;
 
+export type DoctorCheck = {
+  argv: string[];
+  returncode: number;
+  stdout: string;
+  stderr: string;
+  ok: boolean;
+};
+
+export type DoctorResult = Record<string, DoctorCheck>;
+
 export type SoftwareVersion = {
   name: string;
   version: string;
@@ -1529,6 +1539,10 @@ export function restartServer(token: string, dryRun: boolean): Promise<CommandRe
 
 export function fetchDiagnostics(token: string): Promise<DiagnosticResult> {
   return requestJson<DiagnosticResult>("/api/diagnostics", token);
+}
+
+export function fetchDoctor(token: string): Promise<DoctorResult> {
+  return requestJson<DoctorResult>("/api/diagnostics/doctor", token);
 }
 
 export function fetchSoftwareVersions(token: string): Promise<SoftwareVersion[]> {
