@@ -174,12 +174,16 @@ egress:
 
 Цель — убрать причины 4–8 без смены модели.
 
-- [ ] Модуль `sysctl` в старте: `ip_forward`, `src_valid_mark`, `rp_filter=2` для `oc-*`, `vpns*`; при неудаче — понятная ошибка в `korctl doctor`.
-- [ ] MSS clamping в `forward` и `output` для всех туннельных интерфейсов.
-- [ ] `ip rule ... lookup main suppress_prefixlength 0` перед fwmark-правилами.
-- [ ] `unreachable default metric 4096` в каждой таблице цели.
-- [ ] Автоисключение адресов upstream-серверов (`ip rule to <ip> lookup main`), адреса берутся из разрешения `profile.server` при connect.
-- [ ] `korctl doctor`: проверка sysctl, пересечений подсетей, наличия маршрутов в таблицах, совпадения версии nft.
+- [x] Модуль `sysctl` в старте: `ip_forward`, `src_valid_mark`, `rp_filter=2` для `oc-*`, `vpns*`; при неудаче — понятная ошибка в `korctl doctor`.
+- [x] MSS clamping в `forward` и `output` для всех туннельных интерфейсов.
+- [x] `ip rule ... lookup main suppress_prefixlength 0` перед fwmark-правилами.
+- [x] `unreachable default metric 4096` в каждой таблице цели.
+- [x] Автоисключение адресов upstream-серверов (`ip rule to <ip> lookup main`), адреса берутся из разрешения `profile.server` при connect.
+- [x] `korctl doctor`: проверка sysctl, пересечений подсетей, наличия маршрутов в таблицах, совпадения версии nft.
+
+Реализовано и покрыто юнит-тестами (`FakeRunner`/golden-template); netlab-подтверждение
+критерия ниже ожидает фазу P1 (`tests/netlab/`), которая в этом проходе не делалась — см. D-19
+в `DECISIONS.md`.
 
 Готово, когда: агент на хосте ноды в режиме `full` достаёт до docker-сервиса на этой же ноде, перезапуск туннеля не даёт ни одного пакета мимо туннеля, HTTPS через upstream не зависает.
 
