@@ -59,7 +59,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cert_user_oid": "2.5.4.3",
         "tls_priorities": None,
         "camouflage": {"enabled": False, "secret": None, "realm": "Hidden service"},
-        "connect_script": None,
+        "connect_script": "/var/lib/kornode/generated/ocserv-connect-script-kornode",
         "disconnect_script": None,
         "debug_level": 2,
     },

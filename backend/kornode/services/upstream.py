@@ -21,6 +21,7 @@ from kornode.services.command import CommandError, CommandResult, CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.nftables import NftablesService
 from kornode.services.policy_routing import PolicyRoutingService
+from kornode.services.sysctl import SysctlService
 from kornode.services.upstream_pushed import (
     PushedRouting,
     PushedRoutingStore,
@@ -62,12 +63,14 @@ class UpstreamService:
         files: FileManager | None = None,
         nftables: NftablesService | None = None,
         policy_routing: PolicyRoutingService | None = None,
+        sysctl: SysctlService | None = None,
     ) -> None:
         self.config = config
         self.runner = runner or CommandRunner()
         self.files = files or FileManager()
         self.nftables = nftables or NftablesService(config, runner=self.runner)
         self.policy_routing = policy_routing or PolicyRoutingService(config, runner=self.runner)
+        self.sysctl = sysctl or SysctlService(config, runner=self.runner)
         self.pushed = PushedRoutingStore(config, self.files)
         self.active_profile_file = config.system.generated_dir / "active-upstream"
         self.log_file = config.system.log_dir / "upstream.log"
@@ -1074,6 +1077,7 @@ class UpstreamService:
         profile = self.profile_for_interface(env.get("TUNDEV", ""))
         if profile is None:
             return None
+        self.sysctl.apply_interface(self.profile_interface(profile))
         self.pushed.save_handshake(profile, parse_vpnc_environment(env))
         return profile
 

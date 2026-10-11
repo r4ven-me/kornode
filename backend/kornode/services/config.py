@@ -11,6 +11,7 @@ from kornode.renderers import (
     OcservConfigRenderer,
     SupervisorConfigRenderer,
 )
+from kornode.renderers.base import default_template_dir
 from kornode.services.files import FileManager
 from kornode.services.secrets import collect_config_secrets, mask_text
 
@@ -32,6 +33,13 @@ class ConfigService:
 
     def render_files(self, config: AppConfig) -> list[RenderedFile]:
         files = [
+            RenderedFile(
+                config.generated_path("ocserv-connect-script-kornode"),
+                (default_template_dir() / "ocserv-connect-script-kornode").read_text(
+                    encoding="utf-8"
+                ),
+                mode=0o755,
+            ),
             RenderedFile(
                 self.ocserv_renderer.target_path(config),
                 self.ocserv_renderer.render(config),

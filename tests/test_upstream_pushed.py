@@ -55,6 +55,16 @@ class FakeRunner:
         return CommandResult(tuple(argv), 0, "", "")
 
 
+class FakeSysctl:
+    def __init__(self) -> None:
+        self.interfaces: list[str] = []
+
+    def apply_interface(self, iface: str, *, dry_run: bool = False) -> list[CommandResult]:
+        del dry_run
+        self.interfaces.append(iface)
+        return [CommandResult(("sysctl", "-w", f"net.ipv4.conf.{iface}.rp_filter=2"), 0, "", "")]
+
+
 def _config(tmp_path: Path, **profile: object) -> AppConfig:
     return AppConfig.model_validate(
         {
@@ -269,12 +279,25 @@ def test_accepting_server_routes_keeps_dnsmasq_running(tmp_path: Path) -> None:
 
 def test_record_vpnc_event_stores_handshake_for_the_matching_profile(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    service = UpstreamService(config, runner=FakeRunner())
+    sysctl = FakeSysctl()
+    service = UpstreamService(config, runner=FakeRunner(), sysctl=sysctl)
 
     profile = service.record_vpnc_event("connect", HANDSHAKE_ENV)
 
     assert profile is not None and profile.name == "office"
+    assert sysctl.interfaces == ["oc-middle0"]
     assert service.pushed.load(profile).domains == ["corp.example.com", "git.example.org"]
+
+
+def test_record_vpnc_event_sets_interface_sysctl_on_reconnect(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    sysctl = FakeSysctl()
+    service = UpstreamService(config, runner=FakeRunner(), sysctl=sysctl)
+
+    profile = service.record_vpnc_event("reconnect", HANDSHAKE_ENV)
+
+    assert profile is not None and profile.name == "office"
+    assert sysctl.interfaces == ["oc-middle0"]
 
 
 @pytest.mark.parametrize(
@@ -285,9 +308,11 @@ def test_record_vpnc_event_ignores_other_events_and_interfaces(
     tmp_path: Path, reason: str, tundev: str
 ) -> None:
     config = _config(tmp_path)
-    service = UpstreamService(config, runner=FakeRunner())
+    sysctl = FakeSysctl()
+    service = UpstreamService(config, runner=FakeRunner(), sysctl=sysctl)
 
     assert service.record_vpnc_event(reason, {**HANDSHAKE_ENV, "TUNDEV": tundev}) is None
+    assert sysctl.interfaces == []
     assert service.pushed.load(config.upstream.profiles[0]) == PushedRouting()
 
 

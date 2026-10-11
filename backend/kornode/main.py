@@ -14,6 +14,7 @@ from kornode.services.config import ConfigService
 from kornode.services.files import FileManager
 from kornode.services.nftables import NftablesService
 from kornode.services.server_certificates import ServerCertificateService
+from kornode.services.sysctl import SysctlService
 
 
 def unlink_stale_runtime_sockets(generated_dir: Path) -> None:
@@ -30,6 +31,7 @@ def unlink_stale_runtime_sockets(generated_dir: Path) -> None:
 def initialize_runtime(config_path: Path | None = None) -> None:
     resolved_config_path = config_path or DEFAULT_CONFIG_PATH
     config = load_config(resolved_config_path)
+    _require_startup_sysctls(config)
     files = FileManager()
     files.ensure_dir(config.system.data_dir)
     files.ensure_dir(config.system.log_dir)
@@ -49,6 +51,18 @@ def initialize_runtime(config_path: Path | None = None) -> None:
         server_cert_missing = not config.cert_path("server.crt").exists()
         if server_key_missing or server_cert_missing:
             certs.create_server_certificate()
+
+
+def _require_startup_sysctls(config: AppConfig) -> None:
+    failed = [result for result in SysctlService(config).apply_global() if not result.ok]
+    if not failed:
+        return
+    details = "\n".join(
+        f"{' '.join(result.argv)} -> exit {result.returncode}: "
+        f"{result.stderr or result.stdout}".rstrip()
+        for result in failed
+    )
+    raise SystemExit(f"failed to apply required sysctl settings:\n{details}")
 
 
 def prepare_startup_letsencrypt(

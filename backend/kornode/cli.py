@@ -39,6 +39,7 @@ from kornode.services.secrets import collect_config_secrets, mask_text
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificateService
 from kornode.services.sessions import SessionService
+from kornode.services.sysctl import SysctlService
 from kornode.services.upstream import UpstreamService
 from kornode.services.users import UserConfig, UserService
 
@@ -191,6 +192,22 @@ def server_restart(
 @server_app.command("status")
 def server_status() -> None:
     echo_result(ServerService(get_config()).status())
+
+
+@server_app.command("hook")
+def server_hook() -> None:
+    """Internal: called by ocserv-connect-script-kornode on client connect.
+
+    ocserv does not pass positional arguments to connect-script; it only sets
+    environment variables (DEVICE, USERNAME, ...), per its documented
+    connect-script interface.
+    """
+    device = os.environ.get("DEVICE", "")
+    if not device:
+        typer.echo("server hook failed: DEVICE is not set", err=True)
+        raise typer.Exit(1)
+    for result in SysctlService(get_config()).apply_interface(device):
+        echo_result(result)
 
 
 @server_process_app.command("list")
