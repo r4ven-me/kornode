@@ -8,4 +8,5 @@
 
 ### Fixed
 
+- Clamp TCP MSS to path MTU for forwarded VPN traffic and host-originated traffic leaving upstream tunnel interfaces to prevent nested-tunnel HTTPS hangs.
 - Preserve symmetric policy routing for local services reached through an upstream tunnel by recording the ingress target in conntrack and restoring its fwmark on reply packets.

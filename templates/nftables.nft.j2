@@ -239,6 +239,14 @@ table inet {{ filter_table }} {
     ct direction original ip6 daddr @{{ target.host_set_v6_static }} counter meta mark set {{ target.fwmark }}
     ct direction original ip6 daddr @{{ target.host_set_v6_dynamic }} counter meta mark set {{ target.fwmark }}
 {% endfor %}
+    # Host-originated TCP crossing an upstream tunnel needs MSS clamped to
+    # the routed path MTU; keep ordinary host-uplink traffic untouched.
+{% if upstream_killswitch %}
+    oifname "{{ outbound_interface }}" tcp flags syn / syn,rst tcp option maxseg size set rt mtu
+{% endif %}
+{% for target in host_targets %}
+    oifname "{{ target.interface }}" tcp flags syn / syn,rst tcp option maxseg size set rt mtu
+{% endfor %}
     # Keep locally generated replies to VPN clients on their per-session
     # routes even if another rule restored or supplied an upstream mark.
     ip daddr {{ config.server.ipv4_network }} counter meta mark set 0
@@ -248,6 +256,7 @@ table inet {{ filter_table }} {
 {% if targets | selectattr("killswitch") | list %}
   chain forward {
     type filter hook forward priority filter; policy accept;
+    tcp flags syn / syn,rst tcp option maxseg size set rt mtu
     # Marked traffic (default: full = all client traffic, split = the
     # configured routes/ips/domains; named targets: always their own
     # explicit routes/ips/domains) must leave via its target's own upstream

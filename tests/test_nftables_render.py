@@ -246,6 +246,11 @@ def test_full_mode_with_upstream_adds_killswitch_drop(tmp_path: Path) -> None:
         f'ip saddr {config.server.ipv4_network} meta mark {config.routing.fwmark} '
         'oifname "oc-middle0" masquerade' in rendered
     )
+    assert "tcp flags syn / syn,rst tcp option maxseg size set rt mtu" in rendered
+    assert (
+        'oifname "oc-middle0" tcp flags syn / syn,rst '
+        "tcp option maxseg size set rt mtu" in rendered
+    )
 
 
 def test_killswitch_absent_when_upstream_disabled(tmp_path: Path) -> None:
@@ -1080,6 +1085,10 @@ def test_profile_host_routing_gets_its_own_set_marking_and_killswitch(tmp_path: 
     assert (
         f"ct direction original ip daddr != {config.server.ipv4_network} "
         "ip daddr @host_v4_finance_dynamic counter meta mark set 0x0c02" in rendered
+    )
+    assert (
+        'oifname "oc-finance" tcp flags syn / syn,rst '
+        "tcp option maxseg size set rt mtu" in rendered
     )
     assert 'meta mark 0x0c02 oifname != "oc-finance" counter drop' in rendered
     assert 'meta mark 0x0c02 oifname "oc-finance" counter masquerade' in rendered
