@@ -8,6 +8,10 @@
 
 ### Fixed
 
+- Exclude each upstream profile's resolved carrier address from policy routing (`ip rule priority
+  95 to <addr>/32 lookup main`) so `host_policy: full` can no longer route openconnect's own
+  connection to the VPN server back into the tunnel it is dialing; refreshed on every connect to
+  track DNS changes and removed on disconnect.
 - Keep marked policy-routed traffic fail-closed during upstream tunnel device loss by adding a
   persistent unreachable default route to each managed policy table.
 - Preserve directly-connected local routes ahead of host full-tunnel policy routing by installing

@@ -1111,6 +1111,112 @@ def test_disconnect_cleans_up_named_target_policy_routing(tmp_path: Path) -> Non
     assert ["ip", "route", "flush", "table", "1203"] in ip_calls
 
 
+def test_install_carrier_exclusion_adds_rule_for_literal_ip(tmp_path: Path) -> None:
+    # A literal IP in `server` must not trigger a DNS lookup -- these are
+    # unit tests, no real network resolution.
+    profile = _profile(server="203.0.113.10")
+    runner = FakeRunner()
+    service = UpstreamService(_config(tmp_path), runner=runner)
+
+    service.install_carrier_exclusion(profile)
+
+    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
+    assert [
+        "ip", "rule", "add", "priority", "95", "to", "203.0.113.10/32", "lookup", "main",
+    ] in ip_calls
+
+
+def test_install_carrier_exclusion_is_idempotent(tmp_path: Path) -> None:
+    profile = _profile(server="203.0.113.10")
+    runner = FakeRunner()
+    service = UpstreamService(_config(tmp_path), runner=runner)
+
+    service.install_carrier_exclusion(profile)
+    service.install_carrier_exclusion(profile)
+
+    add_calls = [
+        call["argv"]
+        for call in runner.calls
+        if call["argv"][:3] == ["ip", "rule", "add"]
+    ]
+    assert len(add_calls) == 1
+
+
+def test_install_carrier_exclusion_refreshes_on_address_change(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    service = UpstreamService(_config(tmp_path), runner=runner)
+
+    service.install_carrier_exclusion(_profile(server="203.0.113.10"))
+    service.install_carrier_exclusion(_profile(server="203.0.113.20"))
+
+    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
+    assert [
+        "ip", "rule", "del", "priority", "95", "to", "203.0.113.10/32", "lookup", "main",
+    ] in ip_calls
+    assert [
+        "ip", "rule", "add", "priority", "95", "to", "203.0.113.20/32", "lookup", "main",
+    ] in ip_calls
+
+
+def test_remove_carrier_exclusion_deletes_installed_rule_and_state(tmp_path: Path) -> None:
+    profile = _profile(server="203.0.113.10")
+    runner = FakeRunner()
+    service = UpstreamService(_config(tmp_path), runner=runner)
+    service.install_carrier_exclusion(profile)
+    state_path = service._carrier_exclusion_state_path(profile)
+    assert state_path.exists()
+
+    service.remove_carrier_exclusion(profile)
+
+    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
+    assert [
+        "ip", "rule", "del", "priority", "95", "to", "203.0.113.10/32", "lookup", "main",
+    ] in ip_calls
+    assert not state_path.exists()
+
+
+def test_connect_installs_carrier_exclusion_before_dialing(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    runner = FakeRunner(tmp_path)
+    service = UpstreamService(config, runner=runner)
+    try:
+        service.connect()
+    finally:
+        runner.close()
+
+    programs = [call["argv"][0] for call in runner.calls]
+    carrier_rule_index = next(
+        index
+        for index, call in enumerate(runner.calls)
+        if call["argv"][:3] == ["ip", "rule", "add"] and "203.0.113.10/32" in call["argv"]
+    )
+    dial_index = programs.index("openconnect")
+    assert carrier_rule_index < dial_index
+
+
+def test_disconnect_removes_carrier_exclusion(tmp_path: Path) -> None:
+    process = _spawn_fake_openconnect(tmp_path)
+    runner = FakeRunner()
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    service = UpstreamService(config, runner=runner)
+    profile = config.upstream.profiles[0]
+    service.install_carrier_exclusion(profile)
+    _write_pid(service, process.pid)
+
+    service.disconnect()
+    process.wait(timeout=2)
+
+    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
+    assert [
+        "ip", "rule", "del", "priority", "95", "to", "203.0.113.10/32", "lookup", "main",
+    ] in ip_calls
+    assert not service._carrier_exclusion_state_path(profile).exists()
+
+
 def test_ensure_policy_routing_covers_connected_named_targets(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile("primary"))

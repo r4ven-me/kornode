@@ -9,6 +9,7 @@ import json
 import os
 import re
 import signal
+import socket
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -42,6 +43,7 @@ SYNC_TIMEOUT_SECONDS = 20
 SYNC_MAX_BYTES = 1024 * 1024
 SYNC_USER_AGENT = "kornode-client-sync/1.0"
 VPNC_CONNECT_REASONS = {"connect", "reconnect"}
+CARRIER_EXCLUSION_PRIORITY = 95
 
 
 @dataclass(frozen=True)
@@ -185,6 +187,115 @@ class UpstreamService:
 
     def profile_interface(self, profile: UpstreamProfileConfig) -> str:
         return self.config.upstream.profile_interface(profile)
+
+    def _carrier_exclusion_state_path(self, profile: UpstreamProfileConfig) -> Path:
+        return self.config.system.generated_dir / "upstream-carrier" / f"{profile.name}.addrs"
+
+    def _resolve_carrier_addresses(self, profile: UpstreamProfileConfig) -> list[str]:
+        """The literal IPv4 address(es) this profile's carrier connection
+        actually dials, so they can be excluded from policy routing (see
+        install_carrier_exclusion). A literal IP in `server` is returned
+        as-is; a hostname is resolved via DNS on every call, since it may
+        change between connects. Resolution failure yields an empty list
+        rather than raising -- callers must tolerate "nothing to exclude
+        yet", not block a connection attempt on a DNS hiccup.
+        """
+        server = profile.server
+        if not server:
+            return []
+        try:
+            ipaddress.ip_address(server)
+            return [server]
+        except ValueError:
+            pass
+        try:
+            infos = socket.getaddrinfo(server, None, family=socket.AF_INET)
+        except OSError:
+            return []
+        addresses: list[str] = []
+        seen: set[str] = set()
+        for info in infos:
+            addr = str(info[4][0])
+            if addr not in seen:
+                seen.add(addr)
+                addresses.append(addr)
+        return addresses
+
+    def _add_carrier_rule(self, addr: str, *, dry_run: bool) -> CommandResult:
+        return self.runner.run(
+            [
+                "ip",
+                "rule",
+                "add",
+                "priority",
+                str(CARRIER_EXCLUSION_PRIORITY),
+                "to",
+                f"{addr}/32",
+                "lookup",
+                "main",
+            ],
+            check=False,
+            dry_run=dry_run,
+        )
+
+    def _delete_carrier_rule(self, addr: str, *, dry_run: bool) -> CommandResult:
+        return self.runner.run(
+            [
+                "ip",
+                "rule",
+                "del",
+                "priority",
+                str(CARRIER_EXCLUSION_PRIORITY),
+                "to",
+                f"{addr}/32",
+                "lookup",
+                "main",
+            ],
+            check=False,
+            dry_run=dry_run,
+        )
+
+    def install_carrier_exclusion(
+        self, profile: UpstreamProfileConfig, *, dry_run: bool = False
+    ) -> list[CommandResult]:
+        """Keep this profile's own carrier connection out of its policy
+        table: without this, host_policy: full can route openconnect's (or
+        the cert-pin probe's) TCP session to the server back into a tunnel,
+        looping or mis-routing the carrier connection (root cause 7).
+
+        Resolves `profile.server` fresh every call and reconciles against
+        whatever was installed last time (persisted per-profile, since
+        nothing else tracks it across process restarts): a changed address
+        is excluded promptly, a no-longer-current one doesn't linger as
+        dead `ip rule` cruft. Must run before dialing, not after -- the
+        rule has to exist before the carrier's own handshake, not once the
+        tunnel is already up.
+        """
+        state_path = self._carrier_exclusion_state_path(profile)
+        previous = set(self.files.read_lines(state_path))
+        current = self._resolve_carrier_addresses(profile)
+        results: list[CommandResult] = []
+        for addr in sorted(previous - set(current)):
+            results.append(self._delete_carrier_rule(addr, dry_run=dry_run))
+        for addr in current:
+            if addr not in previous:
+                results.append(self._add_carrier_rule(addr, dry_run=dry_run))
+        if not dry_run:
+            if current:
+                self.files.write_unique_lines(state_path, current)
+            else:
+                state_path.unlink(missing_ok=True)
+        return results
+
+    def remove_carrier_exclusion(
+        self, profile: UpstreamProfileConfig, *, dry_run: bool = False
+    ) -> list[CommandResult]:
+        state_path = self._carrier_exclusion_state_path(profile)
+        addresses = self.files.read_lines(state_path)
+        results = [self._delete_carrier_rule(addr, dry_run=dry_run) for addr in addresses]
+        if not dry_run:
+            state_path.unlink(missing_ok=True)
+        return results
 
     def active_interface(self) -> str:
         selected = self.selected_profile()
@@ -650,6 +761,9 @@ class UpstreamService:
                 # connecting. Rules always point at the ACTIVE profile's
                 # interface, even when dialing a standby.
                 self.nftables.apply(outbound_interface=self.active_interface())
+            # Must happen before any TCP to the server -- including the
+            # cert-pin probe right below -- not just before dialing.
+            self.install_carrier_exclusion(profile, dry_run=dry_run)
             accepted_pin = self._accepted_server_pin(profile, dry_run=dry_run)
             result = self.runner.run(
                 self.openconnect_argv(profile, accepted_pin=accepted_pin),
@@ -832,6 +946,7 @@ class UpstreamService:
             for target_profile, routing in self._named_target_routing():
                 if target_profile.name == profile.name:
                     routing.cleanup()
+            self.remove_carrier_exclusion(profile)
             self._append_log(f"'{profile.name}' disconnected")
             return CommandResult(argv=argv, returncode=0, stdout="disconnected", stderr="")
 
