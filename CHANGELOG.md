@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Keep marked policy-routed traffic fail-closed during upstream tunnel device loss by adding a
+  persistent unreachable default route to each managed policy table.
 - Preserve directly-connected local routes ahead of host full-tunnel policy routing by installing
   the global `main suppress_prefixlength 0` rule before kornode fwmark rules.
 - Clamp TCP MSS to path MTU for forwarded VPN traffic and host-originated traffic leaving upstream tunnel interfaces to prevent nested-tunnel HTTPS hangs.

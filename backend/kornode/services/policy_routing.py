@@ -9,6 +9,7 @@ from kornode.services.routing import RoutingService
 RULE_PRIORITY = 100
 SUPPRESS_RULE_PRIORITY = 90
 SUPPRESS_PREFIX_LENGTH = 0
+UNREACHABLE_DEFAULT_METRIC = 4096
 
 
 class PolicyRoutingService:
@@ -86,6 +87,8 @@ class PolicyRoutingService:
                 ),
             ]
         )
+        if not self._unreachable_default_route_present():
+            results.append(self._add_unreachable_default_route(dry_run=dry_run))
         return results
 
     def _add_suppress_rule(self, *, dry_run: bool) -> CommandResult:
@@ -218,6 +221,8 @@ class PolicyRoutingService:
                 dry_run=dry_run,
             )
         )
+        if not self._unreachable_default_route_present():
+            results.append(self._add_unreachable_default_route(dry_run=dry_run))
         return results
 
     def _rule_present(self) -> bool:
@@ -233,6 +238,49 @@ class PolicyRoutingService:
             if mark_value == expected_mark and table == self.table:
                 return True
         return False
+
+    def _routes(self) -> list[str]:
+        result = self.runner.run(
+            ["ip", "route", "show", "table", self.table], check=False, timeout=5
+        )
+        if not result.ok:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    def _unreachable_default_route_present(self) -> bool:
+        for route in self._routes():
+            tokens = route.split()
+            if tokens[:2] != ["unreachable", "default"]:
+                continue
+            if "metric" not in tokens:
+                continue
+            metric_index = tokens.index("metric") + 1
+            if metric_index >= len(tokens):
+                continue
+            try:
+                metric = int(tokens[metric_index], 0)
+            except ValueError:
+                continue
+            if metric == UNREACHABLE_DEFAULT_METRIC:
+                return True
+        return False
+
+    def _add_unreachable_default_route(self, *, dry_run: bool) -> CommandResult:
+        return self.runner.run(
+            [
+                "ip",
+                "route",
+                "add",
+                "unreachable",
+                "default",
+                "metric",
+                str(UNREACHABLE_DEFAULT_METRIC),
+                "table",
+                self.table,
+            ],
+            check=False,
+            dry_run=dry_run,
+        )
 
     def cleanup(self, *, dry_run: bool = False) -> list[CommandResult]:
         results = [

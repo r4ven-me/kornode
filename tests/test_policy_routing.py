@@ -68,7 +68,38 @@ def test_apply_installs_suppress_rule_when_absent_then_replaces_profile_rule() -
         ["ip", "rule", "del", "fwmark", "0x0c01", "table", "1201", "priority", "100"],
         ["ip", "rule", "add", "fwmark", "0x0c01", "table", "1201", "priority", "100"],
         ["ip", "route", "replace", "default", "dev", "oc-middle0", "table", "1201"],
+        ["ip", "route", "show", "table", "1201"],
+        [
+            "ip",
+            "route",
+            "add",
+            "unreachable",
+            "default",
+            "metric",
+            "4096",
+            "table",
+            "1201",
+        ],
     ]
+
+
+def test_apply_adds_unreachable_default_route_on_first_apply() -> None:
+    runner = PolicyRoutingRunner(rules=[], routes=[])
+
+    PolicyRoutingService(_config(), runner=runner).apply()
+
+    assert [
+        "ip",
+        "route",
+        "add",
+        "unreachable",
+        "default",
+        "metric",
+        "4096",
+        "table",
+        "1201",
+    ] in runner.calls
+    assert "unreachable default metric 4096" in runner.routes
 
 
 def test_cleanup_deletes_the_rule_and_flushes_the_table() -> None:
@@ -171,6 +202,39 @@ class StatefulRuleRunner(FakeRunner):
         return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
 
 
+class PolicyRoutingRunner(StatefulRuleRunner):
+    """Stateful rule and route-table fake for PolicyRoutingService drift tests."""
+
+    def __init__(self, rules: list[dict[str, object]], routes: list[str]) -> None:
+        super().__init__(rules)
+        self.routes = routes
+
+    def run(self, argv: list[str], **kwargs: Any) -> CommandResult:
+        if argv[:5] == ["ip", "route", "show", "table", "1201"]:
+            self.calls.append(list(argv))
+            return CommandResult(
+                argv=tuple(argv), returncode=0, stdout="\n".join(self.routes), stderr=""
+            )
+        if argv[:3] == ["ip", "route", "replace"] and argv[3:5] == ["default", "dev"]:
+            self.calls.append(list(argv))
+            route = f"default dev {argv[5]}"
+            self.routes = [existing for existing in self.routes if not existing.startswith(route)]
+            self.routes.insert(0, route)
+            return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
+        if argv[:4] == ["ip", "route", "add", "unreachable"]:
+            self.calls.append(list(argv))
+            route = "unreachable default metric 4096"
+            if route not in self.routes:
+                self.routes.append(route)
+            return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
+        if argv[:4] == ["ip", "route", "flush", "table"]:
+            self.calls.append(list(argv))
+            if argv[4] == "1201":
+                self.routes = []
+            return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
+        return super().run(argv, **kwargs)
+
+
 def test_ensure_reinstalls_missing_rule_and_route() -> None:
     runner = RuleShowRunner("[]")
 
@@ -192,6 +256,18 @@ def test_ensure_reinstalls_missing_rule_and_route() -> None:
         ["ip", "-j", "rule", "show"],
         ["ip", "rule", "add", "fwmark", "0x0c01", "table", "1201", "priority", "100"],
         ["ip", "route", "replace", "default", "dev", "oc-middle0", "table", "1201"],
+        ["ip", "route", "show", "table", "1201"],
+        [
+            "ip",
+            "route",
+            "add",
+            "unreachable",
+            "default",
+            "metric",
+            "4096",
+            "table",
+            "1201",
+        ],
     ]
 
 
@@ -230,13 +306,82 @@ def test_ensure_skips_rule_add_when_suppress_and_profile_rules_already_present()
         "priority",
         "100",
     ] not in runner.calls
+    # RuleShowRunner fakes no route-table state, so the route table looks
+    # empty from ensure()'s perspective and it (correctly) restores the
+    # missing unreachable-default route as its last action.
     assert runner.calls[-1] == [
         "ip",
         "route",
-        "replace",
+        "add",
+        "unreachable",
         "default",
-        "dev",
-        "oc-middle0",
+        "metric",
+        "4096",
         "table",
         "1201",
     ]
+
+
+def test_ensure_leaves_existing_unreachable_route_untouched() -> None:
+    runner = PolicyRoutingRunner(
+        rules=[
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
+        ],
+        routes=["default dev oc-middle0", "unreachable default metric 4096"],
+    )
+
+    PolicyRoutingService(_config("split"), runner=runner).ensure("oc-middle0")
+
+    assert [
+        "ip",
+        "route",
+        "add",
+        "unreachable",
+        "default",
+        "metric",
+        "4096",
+        "table",
+        "1201",
+    ] not in runner.calls
+    assert runner.routes == ["default dev oc-middle0", "unreachable default metric 4096"]
+
+
+def test_ensure_restores_missing_unreachable_route() -> None:
+    runner = PolicyRoutingRunner(
+        rules=[
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
+        ],
+        routes=["default dev oc-middle0"],
+    )
+
+    PolicyRoutingService(_config("split"), runner=runner).ensure("oc-middle0")
+
+    assert runner.calls[-1] == [
+        "ip",
+        "route",
+        "add",
+        "unreachable",
+        "default",
+        "metric",
+        "4096",
+        "table",
+        "1201",
+    ]
+    assert runner.routes == ["default dev oc-middle0", "unreachable default metric 4096"]
+
+
+def test_cleanup_removes_unreachable_route_by_flushing_table() -> None:
+    runner = PolicyRoutingRunner(
+        rules=[
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
+        ],
+        routes=["default dev oc-middle0", "unreachable default metric 4096"],
+    )
+
+    PolicyRoutingService(_config(), runner=runner).cleanup()
+
+    assert ["ip", "route", "flush", "table", "1201"] in runner.calls
+    assert runner.routes == []
