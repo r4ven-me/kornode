@@ -16,6 +16,7 @@ from tests.netlab.helpers import tcp_check
 from tests.netlab.lab import Lab, Namespace
 from tests.netlab.topology import HUB_ADDR, INET_HTTP_ADDR, Topology
 
+from kornode.renderers.base import default_template_dir
 from kornode.services.command import CommandResult
 
 VPN_USERNAME = "netlab"
@@ -79,6 +80,15 @@ class UpstreamHandle:
         _kill_openconnect(self.root.generated_dir / f"upstream-{self.profile}.pid")
 
 
+def _hub_connect_script(tmp: Path) -> str | None:
+    """The hub is only a test server, so its config must work on any kornode
+    version under test: kornode before P0-01 has no connect-script template,
+    and pointing ocserv at a missing script makes it refuse every login."""
+    if not (default_template_dir() / "ocserv-connect-script-kornode").exists():
+        return None
+    return str(tmp / "hub" / "generated" / "ocserv-connect-script-kornode")
+
+
 def korctl(ns: Namespace, cfg_path: Path, *args: str, check: bool = True) -> CommandResult:
     bin_dir = Path(sys.executable).absolute().parent
     env = dict(os.environ)
@@ -108,7 +118,7 @@ def start_hub_server(lab: Lab, topology: Topology, tmp: Path) -> HubServerHandle
                 "dns": [INET_HTTP_ADDR],
                 "routes": [],  # no route lines = ocserv pushes a default route
                 "debug_level": 3,
-                "connect_script": str(tmp / "hub" / "generated" / "ocserv-connect-script-kornode"),
+                "connect_script": _hub_connect_script(tmp),
             },
             "auth": {
                 "password": {"enabled": True},

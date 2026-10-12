@@ -57,6 +57,34 @@ Scenario list (must all exist by the end of P4; each maps to a task "Done when")
 | NL-17 | two-host topology: source `wgusers` on hub, `via: exit:2` by set, rest `local` | listed destinations leave via node2's uplink with node2's address, others via hub; node2 offline → listed destinations get ICMP unreachable, never hub uplink |
 | NL-18 | same topology, full tunnel (`to: any via exit:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real fabric address |
 
+### Regression baseline (P1-06)
+
+The P0 scenarios (`tests/netlab/test_p0_upstream.py`) must fail on code
+before P0 and pass after it. There is no `v1.1.5` tag; the pre-P0 baseline
+is the `raven` tag. Procedure (root on a disposable machine):
+
+```bash
+git worktree add /tmp/kornode-baseline raven
+cp -r tests/netlab /tmp/kornode-baseline/tests/
+cd /tmp/kornode-baseline
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # own venv: korctl
+sudo .venv/bin/python -m pytest tests/netlab -v                # inside netns must be baseline code
+```
+
+The harness itself (hub server, topology) has to stay version-agnostic, so
+a red baseline points at the routing bugs and not at test setup.
+
+Recorded result (2026-10-12, Debian 13 VM, ocserv 1.3.0, nft 1.1.3):
+
+| Scenario | `raven` (pre-P0) | `main` (P0 + netlab fixes) |
+| --- | --- | --- |
+| carrier exclusion, full host tunnel | fail: host traffic leaves from node3's own address | pass |
+| kill-switch after tunnel loss | fail: no `unreachable default` in the policy table | pass |
+| suppress rule / local networks in `full` | fail: internet traffic leaks past the tunnel | pass |
+| sysctls on the tunnel | fail: `src_valid_mark`/`ip_forward` not managed | pass |
+| MSS clamp for host traffic | fail: no ruleset loaded at all | pass |
+| framework, topology, artifacts (6) | pass | pass |
+
 ## E2E (VMs)
 
 Inventory (repository variables/secrets, never committed): `E2E_HUB_HOST`,

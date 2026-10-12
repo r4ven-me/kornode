@@ -8,6 +8,8 @@ incidents, without changing the model itself.
 
 ### Testing
 
+- Regression baseline: the P0 netlab scenarios fail on `raven` (pre-P0) for the root causes
+  P0 fixes and pass on `main`; procedure and results in `docs/spec/09-testing.md`.
 - Added P1-03 netlab scenarios that run real kornode-rendered ocserv/openconnect
   inside namespaces to cover the P0 routing fixes.
 - CI: new `netlab` job runs `sudo make netlab` on ubuntu-latest and uploads
