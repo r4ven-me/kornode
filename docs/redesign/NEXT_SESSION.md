@@ -27,7 +27,8 @@ Paste everything below the line into a fresh Claude Code session started in
 - **Скажи мне, когда переключиться на Opus** (см. ниже), не переключайся молча и не проси без причины.
 
 ## Состояние (на момент передачи)
-Локальный `main` содержит P0+P1 (всё проверено netlab на VM). Ветка `redesign/p2-08c-cutover` (стек P2-01…06, 07, 10(1/2), 11(wip), 08(1-3))
+Локальный `main` содержит P0, P1 и почти весь P2 (всё проверено netlab на VM, 22/22; 755 юнит-тестов). Остался только P2-08/P2-09 (см. ниже). Старый текст ниже про ветку/worktree можно игнорировать: всё уже влито в `main`, worktree удалены.
+(устар.) Ветка `redesign/p2-08c-cutover` (стек P2-01…06, 07, 10(1/2), 11(wip), 08(1-3))
 ещё не влита в `main`. Если codex-worktree `/home/lans/Cloud/Projects/kornode-wt-ui` (ветка `redesign/p2-ui`) закончил — смержи его в стек
 (он расставляет `data-capability` в `frontend/src` и добавляет вкладку Network); если нет — проверь `git worktree list` и `/tmp/codex_ui.*`.
 Готово в `backend/kornode/net/`: `state`, `diff`, `addressing`, `model`, `compile`, `nftgen`, `kernel` (pyroute2+nft, DOCKER-USER compat),
