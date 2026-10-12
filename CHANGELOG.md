@@ -6,6 +6,11 @@ Phase P0 of the [routing redesign](docs/redesign/PLAN.ru.md) (`docs/redesign/ROA
 stabilises the current routing model by fixing the root causes behind the most common
 incidents, without changing the model itself.
 
+### Testing
+
+- Added the `tests/netlab/` network-namespace framework for real-kernel packet-level
+  integration tests, plus `make netlab` to run tests marked with `@pytest.mark.netlab`.
+
 ### Added
 
 - `korctl doctor` (+ `GET /api/diagnostics/doctor` + a "Doctor" panel card on the Diagnostics

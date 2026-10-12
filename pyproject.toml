@@ -51,6 +51,7 @@ kornode = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["backend"]
+markers = ["netlab: real-kernel namespace integration tests, needs root"]
 filterwarnings = [
   # starlette's own TestClient still references this alias internally as of
   # 1.6.0 (the latest release) -- not kornode code, nothing to fix on our
