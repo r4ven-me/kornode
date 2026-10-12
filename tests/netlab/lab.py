@@ -5,6 +5,7 @@ import signal
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from types import FrameType
 from typing import Any, Self
 
@@ -28,6 +29,7 @@ class Lab:
         self.runner = runner or CommandRunner()
         self.prefix = uuid.uuid4().hex[:8]
         self.namespaces: list[Namespace] = []
+        self.log_dirs: list[Path] = []
         self.veths: list[tuple[str, str]] = []
         self._veth_index = 0
         self._closed = False

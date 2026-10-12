@@ -8,6 +8,8 @@ incidents, without changing the model itself.
 
 ### Testing
 
+- Added failure artifact capture for netlab tests, including per-namespace kernel network
+  state dumps under `artifacts/netlab/`.
 - Added the `tests/netlab/` network-namespace framework for real-kernel packet-level
   integration tests, plus `make netlab` to run tests marked with `@pytest.mark.netlab`.
 - Added the default netlab topology fixture with routed hub/node/cli namespaces and HTTP/DNS
