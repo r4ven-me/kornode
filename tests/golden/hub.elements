@@ -1,6 +1,6 @@
 ('inet', 'kornode', 'carrier_v4'): ['198.51.100.9/32']
 ('inet', 'kornode', 'carrier_v6'): []
-('inet', 'kornode', 'corp_v4'): ['10.60.0.0/16', '10.60.5.5/32']
+('inet', 'kornode', 'corp_v4'): ['10.60.0.0/16']
 ('inet', 'kornode', 'corp_v6'): []
 ('inet', 'kornode', 'fabric_ifaces'): ['vpns0']
 ('inet', 'kornode', 'fabric_v4'): ['10.100.2.0/24', '192.168.2.0/24']

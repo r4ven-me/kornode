@@ -66,7 +66,8 @@ table inet kornode {
   chain postrouting  { type filter hook postrouting priority filter; policy accept;
                        oifname "lo" accept
                        tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-                       <same exit_ok check for host traffic> }
+                       <same check for host traffic, with drop: the kernel
+                        refuses reject in postrouting> }
 }
 table ip kornode_nat {
   chain postrouting { type nat hook postrouting priority srcnat; policy accept;

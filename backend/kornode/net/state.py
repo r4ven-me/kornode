@@ -117,12 +117,31 @@ def schema_hash_of(script: str) -> str:
     return hashlib.sha256(script.encode("utf-8")).hexdigest()
 
 
+def normalize_elements(elements: frozenset[str]) -> frozenset[str]:
+    """Collapse address elements into the minimal CIDR set. nft's
+    auto-merge stores adjacent prefixes as ranges and hosts as bare
+    addresses, so both sides of a diff must be compared in this canonical
+    form or a set would look different forever. Non-address elements
+    (interface names) are returned unchanged."""
+    try:
+        networks = [ipaddress.ip_network(item, strict=False) for item in elements]
+    except ValueError:
+        return elements
+    v4 = [net for net in networks if isinstance(net, ipaddress.IPv4Network)]
+    v6 = [net for net in networks if isinstance(net, ipaddress.IPv6Network)]
+    collapsed = [*ipaddress.collapse_addresses(v4), *ipaddress.collapse_addresses(v6)]
+    return frozenset(str(net) for net in collapsed)
+
+
 @dataclass(frozen=True, slots=True)
 class NftElements:
     family: str
     table: str
     set_name: str
     elements: frozenset[str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "elements", normalize_elements(frozenset(self.elements)))
 
     @property
     def set_key(self) -> tuple[str, str, str]:

@@ -61,7 +61,7 @@ def _classify_lines(rule: ClassifyRule) -> list[str]:
     return lines
 
 
-def _kill_switch(exits: tuple[Exit, ...], uplink: str | None) -> list[str]:
+def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> list[str]:
     guarded = [exit_ for exit_ in exits if exit_.kill_switch]
     if not guarded:
         return []
@@ -69,10 +69,10 @@ def _kill_switch(exits: tuple[Exit, ...], uplink: str | None) -> list[str]:
         # D-21: marked traffic must never leave via the uplink; traffic that
         # routing sends to a connected LAN/docker/client network is fine.
         marks = ", ".join(_hex(exit_.mark) for exit_ in guarded)
-        return [f'    meta mark & {MARK_MASK} {{ {marks} }} oifname "{uplink}" {REJECT}']
+        return [f'    meta mark & {MARK_MASK} {{ {marks} }} oifname "{uplink}" {action}']
     # Uplink unknown: fall back to the strict per-exit form (fail closed).
     return [
-        f'    meta mark & {MARK_MASK} == {_hex(exit_.mark)} oifname != "{exit_.interface}" {REJECT}'
+        f'    meta mark & {MARK_MASK} == {_hex(exit_.mark)} oifname != "{exit_.interface}" {action}'
         for exit_ in guarded
         if exit_.interface
     ]
@@ -134,19 +134,23 @@ def render_script(
             lines.append(
                 f'    ct state new iifname "{exit_.interface}" ct mark set {_hex(exit_.mark)}'
             )
-    kill = _kill_switch(exits, facts.uplink)
+    # `reject` is only valid in input/forward/output hooks; the kernel refuses
+    # it in postrouting (nft -c does not catch this), so host traffic is
+    # dropped there (D-28).
+    kill_forward = _kill_switch(exits, facts.uplink, REJECT)
+    kill_postrouting = _kill_switch(exits, facts.uplink, "drop")
     lines += [
         "  }",
         "  chain forward {",
         "    type filter hook forward priority filter; policy accept;",
         f"    {MSS_CLAMP}",
-        *kill,
+        *kill_forward,
         "  }",
         "  chain postrouting {",
         "    type filter hook postrouting priority filter; policy accept;",
         '    oifname "lo" accept',
         f"    {MSS_CLAMP}",
-        *kill,
+        *kill_postrouting,
         "  }",
         "}",
         "table ip kornode_nat {",

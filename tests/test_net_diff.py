@@ -159,7 +159,12 @@ def test_unchanged_schema_with_new_elements_only_updates_elements() -> None:
 
     assert plan.ops == (
         UpdateElements(
-            "inet", "kornode", "corp_v4", frozenset({"10.61.0.0/16"}), frozenset({"10.60.0.0/16"})
+            "inet",
+            "kornode",
+            "corp_v4",
+            frozenset({"10.61.0.0/16"}),
+            frozenset({"10.60.0.0/16"}),
+            frozenset({"10.61.0.0/16"}),
         ),
     )
 
@@ -171,7 +176,14 @@ def test_changed_schema_reloads_then_refills_sets() -> None:
 
     assert plan.ops == (
         NftLoad(NftRuleset(SCRIPT_V2)),
-        UpdateElements("inet", "kornode", "corp_v4", frozenset({"10.60.0.0/16"}), frozenset()),
+        UpdateElements(
+            "inet",
+            "kornode",
+            "corp_v4",
+            frozenset({"10.60.0.0/16"}),
+            frozenset(),
+            frozenset({"10.60.0.0/16"}),
+        ),
     )
 
 
@@ -227,3 +239,13 @@ def test_invalid_states_are_rejected(build: object, message: str) -> None:
 def test_prefixes_are_normalised() -> None:
     assert IpRule(priority=95, table="main", to="203.0.113.2").to == "203.0.113.2/32"
     assert Route(table=12001, dst="10.60.1.0/16").dst == "10.60.0.0/16"
+
+
+def test_elements_are_compared_in_canonical_form() -> None:
+    merged = NftElements(
+        "inet", "kornode", "corp_v4", frozenset({"10.0.0.0/24", "10.0.1.0/24", "192.168.1.5"})
+    )
+
+    assert merged.elements == {"10.0.0.0/23", "192.168.1.5/32"}
+    ifaces = NftElements("inet", "kornode", "fabric_ifaces", frozenset({"vpns0", "oc-hub0"}))
+    assert ifaces.elements == {"vpns0", "oc-hub0"}

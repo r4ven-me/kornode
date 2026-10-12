@@ -23,6 +23,8 @@ incidents, without changing the model itself.
 
 ### Added
 
+- `kornode.net.kernel`: reads kernel state (pyroute2, /proc, `nft -j`) and applies a plan --
+  netlink for rules/routes, one `nft -f` transaction for kornode's tables and set contents.
 - `kornode.net` egress model and compiler: an ordered first-match egress policy compiles
   deterministically into ip rules, per-exit tables (kill-switch route included), sysctls and one
   nft ruleset; dead (shadowed) rules are reported. Golden tests for the spec examples.

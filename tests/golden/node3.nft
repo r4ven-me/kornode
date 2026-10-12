@@ -93,7 +93,7 @@ table inet kornode {
     type filter hook postrouting priority filter; policy accept;
     oifname "lo" accept
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-    meta mark & 0xffffff00 { 0x0c000100, 0x0c000200 } oifname "ens3" reject with icmpx admin-prohibited
+    meta mark & 0xffffff00 { 0x0c000100, 0x0c000200 } oifname "ens3" drop
   }
 }
 table ip kornode_nat {

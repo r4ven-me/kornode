@@ -59,11 +59,17 @@ class NftLoad:
 
 @dataclass(frozen=True, slots=True)
 class UpdateElements:
+    """Bring one set to `target`. `add`/`delete` describe the change for
+    display; the kernel adapter replaces the whole set content in one
+    transaction (deleting a sub-range out of an auto-merged interval is not
+    reliable in nft)."""
+
     family: str
     table: str
     set_name: str
     add: frozenset[str]
     delete: frozenset[str]
+    target: frozenset[str] = frozenset()
 
 
 Op = SetSysctl | AddRule | DelRule | ReplaceRoute | DelRoute | NftLoad | UpdateElements
@@ -130,7 +136,9 @@ def _nft_ops(actual: ActualState, desired: DesiredState) -> list[Op]:
         add = item.elements - have
         delete = have - item.elements
         if add or delete:
-            ops.append(UpdateElements(item.family, item.table, item.set_name, add, delete))
+            ops.append(
+                UpdateElements(item.family, item.table, item.set_name, add, delete, item.elements)
+            )
     return ops
 
 
