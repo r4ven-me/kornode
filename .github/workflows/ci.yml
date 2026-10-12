@@ -25,6 +25,31 @@ jobs:
       - run: make test PYTHON=python
       - run: make render PYTHON=python
 
+  netlab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install namespace test tooling
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          iproute2 nftables tcpdump ocserv openconnect gnutls-bin
+      # A venv rather than setup-python's interpreter directly: `sudo` resets
+      # PATH, and the Makefile picks .venv/bin/python up by path.
+      - run: python -m venv .venv && .venv/bin/python -m pip install -e '.[dev]'
+      - run: sudo make netlab
+      - name: Upload netlab failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: netlab-artifacts
+          path: artifacts/netlab/
+          if-no-files-found: ignore
+
   frontend:
     runs-on: ubuntu-latest
     steps:

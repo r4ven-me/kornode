@@ -8,6 +8,8 @@ incidents, without changing the model itself.
 
 ### Testing
 
+- CI: new `netlab` job runs `sudo make netlab` on ubuntu-latest and uploads
+  `artifacts/netlab/` when it fails.
 - Added failure artifact capture for netlab tests, including per-namespace kernel network
   state dumps under `artifacts/netlab/`.
 - Added the `tests/netlab/` network-namespace framework for real-kernel packet-level
