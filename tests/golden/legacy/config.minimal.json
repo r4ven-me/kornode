@@ -1,0 +1,12 @@
+{
+  "egress": [
+    {
+      "from": [
+        "clients"
+      ],
+      "id": "clients-local",
+      "to": "any",
+      "via": "local"
+    }
+  ]
+}

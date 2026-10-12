@@ -23,6 +23,9 @@ incidents, without changing the model itself.
 
 ### Added
 
+- `kornode.config.legacy`: v1 routing keys (`client_policy`, `host_policy`, split lists,
+  per-profile client/host routing) translate into an egress policy; named profiles win over the
+  defaults by coming first. Golden translation for every file in `examples/`.
 - `kornode.net.explain`: why a packet from `src` to `dst` goes where it goes (implicit rule or
   matched egress rule, mark, table, route, NAT), cross-checked against the kernel's own route lookup.
 - `kornode.net.reconciler`: converges the kernel on input changes, netlink events and a 10 s

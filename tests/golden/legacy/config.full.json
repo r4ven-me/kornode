@@ -1,0 +1,52 @@
+{
+  "egress": [
+    {
+      "from": [
+        "host"
+      ],
+      "id": "p-site_b_wireguard-host",
+      "to": {
+        "set": "p_site_b_wireguard_host"
+      },
+      "via": "upstream:site_b_wireguard"
+    },
+    {
+      "from": [
+        "clients"
+      ],
+      "id": "clients-split",
+      "to": {
+        "set": "split"
+      },
+      "via": "upstream:private_main"
+    },
+    {
+      "from": [
+        "clients"
+      ],
+      "id": "clients-local",
+      "to": "any",
+      "via": "local"
+    }
+  ],
+  "sets": {
+    "p_site_b_wireguard_host": {
+      "domains": [
+        "site-b.example.com"
+      ],
+      "routes": [
+        "10.30.0.0/16"
+      ]
+    },
+    "split": {
+      "domains": [
+        "example.com",
+        "corp.example.com"
+      ],
+      "routes": [
+        "192.168.25.0/24",
+        "10.20.0.0/16"
+      ]
+    }
+  }
+}

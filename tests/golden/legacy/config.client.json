@@ -1,0 +1,32 @@
+{
+  "egress": [
+    {
+      "from": [
+        "host"
+      ],
+      "id": "p-office-host",
+      "to": {
+        "set": "p_office_host"
+      },
+      "via": "upstream:office"
+    },
+    {
+      "from": [
+        "clients"
+      ],
+      "id": "clients-full",
+      "to": "any",
+      "via": "upstream:office"
+    }
+  ],
+  "sets": {
+    "p_office_host": {
+      "domains": [
+        "internal.example.com"
+      ],
+      "routes": [
+        "10.60.0.0/16"
+      ]
+    }
+  }
+}
