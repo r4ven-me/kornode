@@ -23,6 +23,9 @@ incidents, without changing the model itself.
 
 ### Added
 
+- `kornode.net` egress model and compiler: an ordered first-match egress policy compiles
+  deterministically into ip rules, per-exit tables (kill-switch route included), sysctls and one
+  nft ruleset; dead (shadowed) rules are reported. Golden tests for the spec examples.
 - `kornode.net.state`/`diff`: kernel networking state as data and `diff(actual, desired)` into an
   ordered, idempotent plan that only ever touches kornode-owned rules, routes and nft tables.
 - New `kornode.net` package (routing redesign P2): the future single owner of kernel

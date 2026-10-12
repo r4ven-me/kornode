@@ -1,0 +1,5 @@
+Route(table=12001, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=4)
+Route(table=12001, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=6)
+Route(table=12002, dst='default', type='unicast', dev='oc-office0', gateway=None, metric=0, family=4)
+Route(table=12002, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=4)
+Route(table=12002, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=6)
