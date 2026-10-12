@@ -4,7 +4,7 @@ import type { DoctorResult } from "../api";
 
 export function DoctorView({ doctor }: { doctor: DoctorResult | null }) {
   return (
-    <section className="panel" data-capability="doctor">
+    <section className="panel" data-capability="net.doctor">
       <h3>Doctor</h3>
       <Table columns={["Check", "Status", "Details"]} empty="No doctor results">
         {Object.entries(doctor ?? {}).map(([name, check]) => (
