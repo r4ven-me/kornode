@@ -303,3 +303,14 @@ def test_via_parsing() -> None:
     assert Via.parse("upstream:office").name == "upstream:office"
     with pytest.raises(ValueError):
         Via.parse("exit:0")
+
+
+def test_no_per_interface_sysctl_for_a_down_tunnel() -> None:
+    policy, facts = hub_case()
+    facts = dataclasses.replace(
+        facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)}
+    )
+
+    keys = {sysctl.key for sysctl in compile_policy(policy, facts).desired.sysctls}
+
+    assert "net.ipv4.conf.oc-office0.rp_filter" not in keys

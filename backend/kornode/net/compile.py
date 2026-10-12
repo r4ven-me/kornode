@@ -349,7 +349,14 @@ def _sysctls(exits: tuple[Exit, ...], policy: EgressPolicy, facts: NodeFacts) ->
     # tighten a host that is already looser (spec 03).
     if facts.all_rp_filter == "1":
         items.add(Sysctl("net.ipv4.conf.all.rp_filter", "2"))
-    ifaces = {exit_.interface for exit_ in exits if exit_.interface and exit_.kind != "local"}
+    # Only interfaces that exist right now: a per-interface key for a down
+    # tunnel cannot be written and would fail every pass until it is back
+    # (the reconciler re-runs on RTM_NEWLINK, so it's set as soon as it is).
+    ifaces = {
+        exit_.interface
+        for exit_ in exits
+        if exit_.interface and exit_.up and exit_.kind != "local"
+    }
     ifaces |= {
         source.interface
         for source in policy.sources
