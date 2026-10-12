@@ -65,7 +65,7 @@ export function UsersView({
   const otpEnabled = new Set(otpRecords.map((record) => record.username));
   return (
     <div className="view-stack">
-      <section className="panel user-create-panel">
+      <section className="panel user-create-panel" data-capability="user.create">
         <div className="panel-header">
           <div>
             <h2>Add user</h2>
@@ -95,7 +95,7 @@ export function UsersView({
               onApply={(password) => onNewUserChange({ ...newUser, password })}
             />
           </div>
-          <button className="primary-button" disabled={busy === "create-user"} type="submit">
+          <button className="primary-button" disabled={busy === "create-user"} type="submit" data-capability="user.create">
             <Plus size={18} aria-hidden="true" />
             <span>Create</span>
           </button>
@@ -107,7 +107,8 @@ export function UsersView({
           <EmptyState text="No users" />
         </section>
       ) : (
-        <section className="panel users-panel">
+        <section className="panel users-panel" data-capability="user.list">
+          <div data-capability="user.otp.list">
           <div className="panel-header">
             <div>
               <h2>User accounts</h2>
@@ -137,9 +138,9 @@ export function UsersView({
                     <span className="user-card-disclosure">Manage</span>
                   </summary>
                   <div className="user-card-body">
-                    <section className="user-management-section user-account-section">
+                    <section className="user-management-section user-account-section" data-capability="user.enable">
                       <h3>Account</h3>
-                      <div className="user-action-row">
+                      <div className="user-action-row" data-capability="user.disable">
                         <ActionButton
                           label={user.disabled ? "Enable user" : "Disable user"}
                           icon={user.disabled ? Power : Ban}
@@ -151,12 +152,14 @@ export function UsersView({
                           icon={Users}
                           busy={busy === `user-groups-load-${user.username}`}
                           onClick={() => onOpenGroups(user.username)}
+                          data-capability="user.groups"
                         />
                         <ActionButton
                           label="Per-user config"
                           icon={FileSliders}
                           busy={busy === `user-config-load-${user.username}`}
                           onClick={() => onOpenConfig(user.username)}
+                          data-capability="user.config"
                         />
                         <ActionButton
                           label="Delete user"
@@ -164,6 +167,7 @@ export function UsersView({
                           danger
                           busy={busy === `delete-${user.username}`}
                           onClick={() => onDelete(user.username)}
+                          data-capability="user.delete"
                         />
                       </div>
                     </section>
@@ -191,6 +195,7 @@ export function UsersView({
                           disabled={!passwordDrafts[user.username]}
                           busy={busy === `password-${user.username}`}
                           onClick={() => onChangePassword(user.username)}
+                          data-capability="user.passwd"
                         />
                       </div>
                     </section>
@@ -207,6 +212,7 @@ export function UsersView({
                           disabled={hasOtp}
                           busy={busy === `otp-on-${user.username}`}
                           onClick={() => onOtp(user.username, true)}
+                          data-capability="user.otp.enable"
                         />
                         <ActionButton
                           label="Disable OTP"
@@ -214,6 +220,7 @@ export function UsersView({
                           disabled={!hasOtp}
                           busy={busy === `otp-off-${user.username}`}
                           onClick={() => onOtp(user.username, false)}
+                          data-capability="user.otp.disable"
                         />
                         <ActionButton
                           label="Show OTP QR"
@@ -221,6 +228,7 @@ export function UsersView({
                           disabled={!hasOtp}
                           busy={busy === `otp-qr-${user.username}`}
                           onClick={() => onOtpQr(user.username)}
+                          data-capability="user.otp.show_qr"
                         />
                       </div>
                     </section>
@@ -239,6 +247,7 @@ export function UsersView({
                           disabled={user.certificate_exists}
                           busy={busy === `cert-${user.username}`}
                           onClick={() => onCert(user.username)}
+                          data-capability="user.cert.create"
                         />
                         <ActionButton
                           label="Revoke certificate"
@@ -247,6 +256,7 @@ export function UsersView({
                           disabled={!user.certificate_exists}
                           busy={busy === `revoke-cert-${user.username}`}
                           onClick={() => onRevokeCert(user.username)}
+                          data-capability="user.cert.revoke"
                         />
                         <ActionButton
                           label="Download certificate"
@@ -254,6 +264,7 @@ export function UsersView({
                           disabled={!user.certificate_exists}
                           busy={busy === `download-cert-${user.username}`}
                           onClick={() => onDownloadCert(user.username)}
+                          data-capability="user.cert.download"
                         />
                         <ActionButton
                           label="Download private key"
@@ -261,6 +272,7 @@ export function UsersView({
                           disabled={!user.certificate_exists}
                           busy={busy === `download-key-${user.username}`}
                           onClick={() => onDownloadKey(user.username)}
+                          data-capability="user.key.download"
                         />
                       </div>
                     </section>
@@ -313,6 +325,7 @@ export function UsersView({
                           disabled={!user.certificate_exists}
                           busy={busy === `p12-${user.username}`}
                           onClick={() => onP12(user.username)}
+                          data-capability="user.p12.create"
                         />
                         <ActionButton
                           label="Download PKCS#12"
@@ -320,6 +333,7 @@ export function UsersView({
                           disabled={!user.p12_exists}
                           busy={busy === `download-p12-${user.username}`}
                           onClick={() => onDownloadP12(user.username)}
+                          data-capability="user.p12.download"
                         />
                         <ActionButton
                           label="View as Base64"
@@ -334,6 +348,7 @@ export function UsersView({
                 </details>
               );
             })}
+          </div>
           </div>
         </section>
       )}

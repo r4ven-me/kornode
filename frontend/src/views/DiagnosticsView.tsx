@@ -5,7 +5,7 @@ import type { DiagnosticResult } from "../api";
 
 export function DiagnosticsView({ diagnostics }: { diagnostics: DiagnosticResult | null }) {
   return (
-    <section className="panel">
+    <section className="panel" data-capability="diagnostics.run">
       <Table columns={["Probe", "Status", "Stdout", "Stderr"]} empty="No diagnostics">
         {Object.entries(diagnostics ?? {}).map(([name, result]) => (
           <tr key={name}>

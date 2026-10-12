@@ -75,12 +75,12 @@ export function UpstreamProfilesView({
   const sortedProfiles = [...profiles].sort((a, b) => rank(a) - rank(b));
 
   return (
-    <section className="panel upstream-profiles-panel">
+    <section className="panel upstream-profiles-panel" data-capability="upstream.status">
       <div className="panel-header">
         <h2>Upstream profiles</h2>
         <div className="toolbar">
           <Pill kind={enabled ? "ok" : "muted"}>{enabled ? "Profiles enabled" : "Profiles disabled"}</Pill>
-          <ActionButton label="Settings" icon={Settings} onClick={onOpenSettings} />
+          <ActionButton label="Settings" icon={Settings} onClick={onOpenSettings} data-capability="upstream.settings" />
           <ActionButton
             label={enabled ? "Disable" : "Enable"}
             icon={Power}
@@ -89,8 +89,9 @@ export function UpstreamProfilesView({
             disabled={!enabled && !hasProfile}
             busy={busy === "upstream-settings"}
             onClick={() => onSetEnabled(!enabled)}
+            data-capability={enabled ? "upstream.disconnect" : "upstream.connect"}
           />
-          <ActionButton label="Add profile" icon={Plus} onClick={onCreateProfile} />
+          <ActionButton label="Add profile" icon={Plus} onClick={onCreateProfile} data-capability="upstream.profile.save" />
         </div>
       </div>
       <p className="muted-line">
@@ -99,6 +100,7 @@ export function UpstreamProfilesView({
         split-DNS domains the server pushes) and serve as the default target for the Routing
         tab&rsquo;s relay.
       </p>
+      <div data-capability="upstream.list">
       <Table
         columns={["Name", "Server", "Interface", "Status", "Server lists", "Actions"]}
         empty="No profiles yet"
@@ -170,6 +172,7 @@ export function UpstreamProfilesView({
                       icon={profile.kind === "external_interface" ? RadioTower : Unplug}
                       busy={busy === `upstream-profile-disconnect-${profile.name}`}
                       onClick={() => onDisconnectProfile(profile.name)}
+                      data-capability="upstream.profile.disconnect"
                     />
                   ) : (
                     <IconButton
@@ -182,6 +185,7 @@ export function UpstreamProfilesView({
                       disabled={!profile.enabled}
                       busy={busy === `upstream-profile-connect-${profile.name}`}
                       onClick={() => onConnectProfile(profile.name)}
+                      data-capability="upstream.profile.connect"
                     />
                   )}
                   <IconButton
@@ -190,7 +194,10 @@ export function UpstreamProfilesView({
                     disabled={isDefault || !profile.enabled}
                     busy={busy === `switch-${profile.name}`}
                     onClick={() => onSwitch(profile.name)}
+                    data-capability="upstream.switch"
                   />
+                  <span data-capability="upstream.profile.enable">
+                  <span data-capability="upstream.profile.disable">
                   <IconButton
                     label={
                       profile.enabled
@@ -201,7 +208,10 @@ export function UpstreamProfilesView({
                     danger={profile.enabled}
                     busy={busy === `upstream-profile-enabled-${profile.name}`}
                     onClick={() => onSetProfileEnabled(profile.name, !profile.enabled)}
+                    data-capability={profile.enabled ? "upstream.profile.disable" : "upstream.profile.enable"}
                   />
+                  </span>
+                  </span>
                   <IconButton
                     label="Edit profile"
                     icon={Pencil}
@@ -213,6 +223,7 @@ export function UpstreamProfilesView({
                     danger
                     busy={busy === `upstream-profile-delete-${profile.name}`}
                     onClick={() => onDeleteProfile(profile.name)}
+                    data-capability="upstream.profile.delete"
                   />
                 </div>
               </td>
@@ -220,6 +231,7 @@ export function UpstreamProfilesView({
           );
         })}
       </Table>
+      </div>
       {commandOutput && (
         <LastCommandPanel
           title="Last upstream profile command"
@@ -247,7 +259,7 @@ function ServerRoutingCell({
   }
   const received = routing.routes.length + routing.domains.length > 0;
   return (
-    <div className="upstream-status-cell">
+    <div className="upstream-status-cell" data-capability="upstream.server_routes">
       {!routing.active ? (
         <Pill kind="warning">host routing off</Pill>
       ) : received ? (
@@ -272,7 +284,7 @@ function ServerRoutingCell({
         </span>
       ))}
       {canSync && (
-        <IconButton label="Sync server lists now" icon={RefreshCw} busy={busy} onClick={onSync} />
+        <IconButton label="Sync server lists now" icon={RefreshCw} busy={busy} onClick={onSync} data-capability="upstream.sync" />
       )}
     </div>
   );

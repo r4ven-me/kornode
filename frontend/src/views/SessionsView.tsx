@@ -24,7 +24,7 @@ export function SessionsView({
 }) {
   return (
     <div className="view-stack">
-      <section className="panel">
+      <section className="panel" data-capability="sessions.list">
         <Table
           columns={[
             "Username",
@@ -61,6 +61,7 @@ export function SessionsView({
                     danger
                     busy={busy === `kick-${session.username}`}
                     onClick={() => onKick(session.username)}
+                    data-capability="sessions.kick"
                   />
                 </td>
               </tr>

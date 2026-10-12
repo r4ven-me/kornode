@@ -36,7 +36,7 @@ export function LogsView({
   const families = useMemo(() => groupLogFiles(files), [files]);
   return (
     <div className="view-stack">
-      <section className="panel">
+      <section className="panel" data-capability="logs.files">
         <div className="panel-header">
           <h2>Log files</h2>
         </div>
@@ -103,13 +103,13 @@ export function LogsView({
             />
             <span>Live</span>
           </label>
-          <button className="primary-button" disabled={busy === "fetch-log"} type="submit">
+          <button className="primary-button" disabled={busy === "fetch-log"} type="submit" data-capability="logs.tail">
             <ScrollText size={18} aria-hidden="true" />
             <span>Load</span>
           </button>
         </form>
       </section>
-      <section className="panel">
+      <section className="panel" data-capability="logs.rotation">
         <div className="panel-header">
           <h2>Log rotation</h2>
           <Pill kind={rotation.enabled ? "ok" : "muted"}>
@@ -207,6 +207,7 @@ export function LogsView({
             title="Rotate every non-empty log immediately, regardless of thresholds"
             busy={busy === "log-rotation-run"}
             onClick={onRotateNow}
+            data-capability="logs.rotate"
           />
           <ActionButton
             label="Save"
@@ -215,6 +216,7 @@ export function LogsView({
             title="Save log rotation settings to persistent YAML"
             busy={busy === "log-rotation-save"}
             onClick={onSaveRotation}
+            data-capability="logs.rotation"
           />
         </div>
       </section>

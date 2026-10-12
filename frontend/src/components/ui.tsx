@@ -22,7 +22,8 @@ export function ActionButton({
   disabled,
   danger,
   primary,
-  title
+  title,
+  ...props
 }: {
   label: string;
   icon: LucideIcon;
@@ -32,6 +33,7 @@ export function ActionButton({
   danger?: boolean;
   primary?: boolean;
   title?: string;
+  "data-capability"?: string;
 }) {
   const className = [
     "action-button",
@@ -45,6 +47,7 @@ export function ActionButton({
       onClick={onClick}
       title={title ?? label}
       type="button"
+      {...props}
     >
       <Icon size={17} aria-hidden="true" />
       <span>{busy ? "Working" : label}</span>
@@ -59,7 +62,8 @@ export function IconButton({
   busy,
   disabled,
   danger,
-  extraClassName
+  extraClassName,
+  ...props
 }: {
   label: string;
   icon: LucideIcon;
@@ -68,6 +72,7 @@ export function IconButton({
   disabled?: boolean;
   danger?: boolean;
   extraClassName?: string;
+  "data-capability"?: string;
 }) {
   const className = [
     "icon-button",
@@ -81,6 +86,7 @@ export function IconButton({
       onClick={onClick}
       title={label}
       type="button"
+      {...props}
     >
       <Icon size={17} aria-hidden="true" />
     </button>

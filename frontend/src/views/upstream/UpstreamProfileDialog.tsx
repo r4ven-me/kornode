@@ -276,6 +276,7 @@ export function UpstreamProfileDialog({
                           disabled={!draft.server.trim()}
                           title="Read the certificate the server presents and pin it after you confirm"
                           onClick={onFetchPin}
+                          data-capability="upstream.fetch_pin"
                         />
                       </div>
                       <p className="field-help">
@@ -442,6 +443,7 @@ export function UpstreamProfileDialog({
               className="primary-button"
               disabled={busy === "upstream-profile"}
               type="submit"
+              data-capability="upstream.profile.save"
             >
               <Save size={18} aria-hidden="true" />
               <span>Save profile</span>
@@ -456,7 +458,7 @@ export function UpstreamProfileDialog({
 function PushedRoutingSummary({ routing }: { routing: ServerRouting }) {
   const received = routing.routes.length + routing.domains.length + routing.dns.length > 0;
   return (
-    <div className="field-label field-full-width">
+    <div className="field-label field-full-width" data-capability="upstream.server_routes">
       <span>Pushed by the server</span>
       <div>
         {!routing.active ? (

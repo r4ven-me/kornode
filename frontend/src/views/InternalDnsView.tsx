@@ -53,7 +53,7 @@ export function InternalDnsView({
   const resolverActive = status ? status.resolver_active : true;
   return (
     <div className="view-stack dns-view">
-      <section className="panel">
+      <section className="panel" data-capability="internal_dns.status">
         <div className="panel-header">
           <div>
             <h2>DNS</h2>
@@ -184,7 +184,7 @@ export function InternalDnsView({
         </details>
 
         <details>
-          <summary>Blocklist</summary>
+          <summary data-capability="internal_dns.blocklist">Blocklist</summary>
           <div className="panel-header"><h2>Blocklist sources</h2>{status && <Pill kind="muted">{status.total} domains</Pill>}</div>
           <div className="settings-grid internal-dns-grid">
             <label className="blocklist-domains"><span>Blocked domains</span><textarea disabled={!resolverActive || !draft.blocklistEnabled} rows={5} value={draft.domainsText} onChange={(event) => onDraftChange({ ...draft, domainsText: event.target.value })} /></label>
@@ -193,7 +193,7 @@ export function InternalDnsView({
           </div>
           {status && status.blocklist_urls.length > 0 && (
             <ul className="blocklist-url-status">{status.blocklist_urls.map((entry) => (
-              <li key={entry.url} className="blocklist-url-entry"><code>{entry.url}</code><div className="toolbar blocklist-url-actions"><ActionButton label="Validate URL" icon={Eye} busy={busy === `internal-dns-preview-${entry.url}`} onClick={() => onPreviewUrl(entry.url)} /><ActionButton label="Download & apply" icon={Download} busy={busy === `internal-dns-refresh-${entry.url}`} onClick={() => onRefreshUrl(entry.url)} /></div></li>
+              <li key={entry.url} className="blocklist-url-entry"><code>{entry.url}</code><div className="toolbar blocklist-url-actions"><ActionButton label="Validate URL" icon={Eye} busy={busy === `internal-dns-preview-${entry.url}`} onClick={() => onPreviewUrl(entry.url)} data-capability="internal_dns.refresh" /><ActionButton label="Download & apply" icon={Download} busy={busy === `internal-dns-refresh-${entry.url}`} onClick={() => onRefreshUrl(entry.url)} data-capability="internal_dns.refresh" /></div></li>
             ))}</ul>
           )}
           {!draft.blocklistEnabled && <p className="config-disabled-note">Enable the blocklist above to edit its sources.</p>}
@@ -209,10 +209,10 @@ export function InternalDnsView({
         </details>
       </SettingsTabs>
 
-      <section className="panel dns-actions">
+      <section className="panel dns-actions" data-capability="internal_dns.apply">
         <div><strong>Save and apply DNS settings.</strong><p className="muted-line">VPN clients are reconnected automatically only when client-facing DNS parameters change.</p></div>
         <div className="toolbar">
-          <ActionButton label="Save" icon={Save} primary busy={busy === "internal-dns-settings" || busy === "internal-dns-apply"} onClick={onSave} />
+          <ActionButton label="Save" icon={Save} primary busy={busy === "internal-dns-settings" || busy === "internal-dns-apply"} onClick={onSave} data-capability="internal_dns.settings" />
         </div>
       </section>
       {commandOutput && (

@@ -368,6 +368,54 @@ export type TerminalSession = {
   cols: number;
 };
 
+export type NetExit = {
+  name: string;
+  mark: string;
+  table: number | null;
+  interface: string;
+  up: boolean;
+  kill_switch: boolean;
+};
+
+export type NetPlanOp = {
+  op: string;
+  text: string;
+};
+
+export type NetPlan = {
+  exits: NetExit[];
+  warnings: string[];
+  ops: NetPlanOp[];
+  schema_hash: string | null;
+};
+
+export type NetApplyResult = NetPlan & {
+  applied: boolean;
+  dry_run?: boolean;
+  via?: string;
+  status?: NetStatus;
+};
+
+export type NetExplainResult = {
+  from_class: string;
+  matched_rule: Record<string, unknown> | null;
+  implicit: string | null;
+  mark: string | null;
+  table: number | null;
+  route: string | null;
+  nat: string | null;
+  kernel_check: string | null;
+  warnings: string[];
+};
+
+export type NetStatus = {
+  running: boolean;
+  passes?: number;
+  last_error?: string | null;
+  drift?: Record<string, number>;
+  [key: string]: unknown;
+};
+
 let csrfToken: string | null = null;
 
 export function setCsrfToken(value: string | null): void {
@@ -575,6 +623,32 @@ export function fetchConfigDiff(token: string): Promise<{ diff: string }> {
 
 export function fetchRenderedConfig(token: string): Promise<Record<string, string>> {
   return requestJson<Record<string, string>>("/api/config/render", token);
+}
+
+export function fetchNetPlan(token: string): Promise<NetPlan> {
+  return requestJson<NetPlan>("/api/net/plan", token);
+}
+
+export function applyNetPlan(token: string, dryRun: boolean): Promise<NetApplyResult> {
+  return requestJson<NetApplyResult>("/api/net/apply", token, {
+    method: "POST",
+    body: body({ dry_run: dryRun })
+  });
+}
+
+export function explainNetPolicy(
+  token: string,
+  src: string,
+  dst: string
+): Promise<NetExplainResult> {
+  return requestJson<NetExplainResult>("/api/net/explain", token, {
+    method: "POST",
+    body: body({ src, dst })
+  });
+}
+
+export function fetchNetStatus(token: string): Promise<NetStatus> {
+  return requestJson<NetStatus>("/api/net/status", token);
 }
 
 export function writeRenderedConfig(token: string): Promise<{ written: string[] }> {

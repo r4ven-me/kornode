@@ -110,7 +110,7 @@ export function CertificatesView({
         <details>
           <summary>Certificate authority</summary>
           <div className="view-stack">
-      <section className="panel">
+      <section className="panel" data-capability="certificates.status">
         <div className="panel-header">
           <h2>Authority certificates</h2>
           <Pill
@@ -172,6 +172,7 @@ export function CertificatesView({
             disabled={!status?.authority.ca_cert_exists}
             busy={busy === "authority-cert-info"}
             onClick={onShowAuthorityCertificateContent}
+            data-capability="certificates.ca.info"
           />
           <ActionButton
             label="Regenerate CA"
@@ -179,6 +180,7 @@ export function CertificatesView({
             danger
             busy={busy === "ca-regenerate"}
             onClick={onRegenerateCa}
+            data-capability="certificates.ca.regenerate"
           />
           <ActionButton
             label="Save"
@@ -186,12 +188,13 @@ export function CertificatesView({
             primary
             busy={busy === "certificate-settings"}
             onClick={onSaveCertificateSettings}
+            data-capability="certificates.settings"
           />
         </div>
       </section>
 
       <div className="split">
-        <section className="panel">
+        <section className="panel" data-capability="certificates.ca.revoke_pem">
           <div className="panel-header">
             <h2>Upload custom CA</h2>
           </div>
@@ -229,6 +232,7 @@ export function CertificatesView({
               disabled={!caFiles.caCert || !caFiles.caKey}
               busy={busy === "ca-upload"}
               onClick={onUploadCa}
+              data-capability="certificates.ca.upload"
             />
           </div>
         </section>
@@ -268,7 +272,7 @@ export function CertificatesView({
             </div>
           </div>
           <div className="panel-footer">
-            <ActionButton label="View revoked" icon={Eye} onClick={onShowRevokedCerts} />
+            <ActionButton label="View revoked" icon={Eye} onClick={onShowRevokedCerts} data-capability="certificates.ca.revoked" />
             <ActionButton
               label={dryRun ? "Dry-run revoke" : "Revoke"}
               icon={Ban}
@@ -276,6 +280,7 @@ export function CertificatesView({
               disabled={!caRevokeDraft.certificateB64.trim() && !caRevokeDraft.certificateFile}
               busy={busy === "ca-revoke"}
               onClick={onRevokeCaCert}
+              data-capability="certificates.ca.revoke_b64"
             />
           </div>
         </section>
@@ -286,7 +291,7 @@ export function CertificatesView({
         <details>
           <summary>Server certificate</summary>
           <div className="view-stack">
-      <section className="panel">
+      <section className="panel" data-capability="certificates.status">
         <div className="panel-header">
           <h2>Active certificate</h2>
           <Pill kind={activeReady ? "ok" : "warning"}>{activeReady ? "Ready" : "Incomplete"}</Pill>
@@ -304,6 +309,7 @@ export function CertificatesView({
               busy={busy === "server-cert-info"}
               disabled={!activeReady}
               onClick={onShowServerCertificateContent}
+              data-capability="certificates.server_info"
             />
             <ActionButton
               label="Show connection pin"
@@ -312,6 +318,7 @@ export function CertificatesView({
               disabled={!activeReady}
               title="Pin other OpenConnect clients use to trust this server's certificate"
               onClick={onShowServerPin}
+              data-capability="certificates.pin"
             />
           </div>
           {serverPin && (
@@ -329,7 +336,7 @@ export function CertificatesView({
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel" data-capability="certificates.external">
         <div className="panel-header">
           <h2>Manual upload</h2>
           <Pill kind={status?.mode === "external" && !status.letsencrypt.enabled ? "ok" : "muted"}>
@@ -402,6 +409,7 @@ export function CertificatesView({
               }
               title="Install uploaded certificates and optionally reload Korvus Node"
               type="submit"
+              data-capability="certificates.external"
             >
               <Upload size={18} aria-hidden="true" />
               <span>{busy === "cert-upload" ? "Working" : "Install"}</span>
@@ -414,7 +422,7 @@ export function CertificatesView({
 
         <details>
           <summary>Let's Encrypt</summary>
-      <section className="panel">
+      <section className="panel" data-capability="certificates.letsencrypt.settings">
         <div className="panel-header">
           <h2>Let's Encrypt</h2>
           <div className="toolbar">
@@ -557,6 +565,7 @@ export function CertificatesView({
               primary={!leEnabled}
               busy={busy === "le-settings"}
               onClick={() => onSetLetsEncryptEnabled(!leEnabled)}
+              data-capability="certificates.letsencrypt.settings"
             />
             <ActionButton
               label="Save"
@@ -565,6 +574,7 @@ export function CertificatesView({
               busy={busy === "le-settings"}
               disabled={!leEnabled}
               onClick={onSaveLetsEncryptSettings}
+              data-capability="certificates.letsencrypt.settings"
             />
             <button
               className="primary-button"
@@ -577,6 +587,7 @@ export function CertificatesView({
               }
               title="Request a new Let's Encrypt certificate for the listed domains"
               type="submit"
+              data-capability="certificates.letsencrypt.issue"
             >
               <CheckCircle2 size={18} aria-hidden="true" />
               <span>{busy === "le-issue" ? "Working" : dryRun ? "Dry-run issue" : "Issue"}</span>
@@ -588,6 +599,7 @@ export function CertificatesView({
               disabled={!leEnabled || !status?.certbot_available}
               busy={busy === "le-renew"}
               onClick={onRenewLetsEncrypt}
+              data-capability="certificates.letsencrypt.renew"
             />
             <ActionButton
               label="View certificate"
@@ -595,6 +607,7 @@ export function CertificatesView({
               disabled={!status?.letsencrypt.paths?.server_cert_exists}
               busy={busy === "letsencrypt-cert-info"}
               onClick={onShowLetsEncryptCertificateContent}
+              data-capability="certificates.letsencrypt.info"
             />
           </div>
         </form>

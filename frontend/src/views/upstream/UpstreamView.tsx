@@ -155,7 +155,7 @@ export function UpstreamView({
 
       {activeTab === "routing" && (
         <>
-          <section className="panel">
+          <section className="panel" data-capability="routing.settings">
             <div className="panel-header">
               <h2>Routing</h2>
               <div className="toolbar">
@@ -224,6 +224,10 @@ export function UpstreamView({
                       settings).
                     </p>
                     <section className="split">
+                      <div data-capability="routes.list">
+                      <div data-capability="routes.set">
+                      <div data-capability="routes.add">
+                      <div data-capability="routes.delete">
                       <BulkListEditor
                         title="Routes"
                         items={routes}
@@ -232,6 +236,14 @@ export function UpstreamView({
                         disabled={inert}
                         onSave={onSaveRoutes}
                       />
+                      </div>
+                      </div>
+                      </div>
+                      </div>
+                      <div data-capability="domains.list">
+                      <div data-capability="domains.set">
+                      <div data-capability="domains.add">
+                      <div data-capability="domains.delete">
                       <BulkListEditor
                         title="Domains"
                         items={domains}
@@ -240,8 +252,14 @@ export function UpstreamView({
                         disabled={inert}
                         onSave={onSaveDomains}
                       />
+                      </div>
+                      </div>
+                      </div>
+                      </div>
                     </section>
                     <section className="split">
+                      <div data-capability="routes.sources">
+                      <div data-capability="routes.sources.refresh">
                       <RoutingListSourcesPanel
                         title="Route sources"
                         urlsLabel="Route URLs (one per line)"
@@ -257,6 +275,10 @@ export function UpstreamView({
                         onPreviewUrl={onPreviewRoutesUrl}
                         onRefreshUrl={onRefreshRoutesUrl}
                       />
+                      </div>
+                      </div>
+                      <div data-capability="domains.sources">
+                      <div data-capability="domains.sources.refresh">
                       <RoutingListSourcesPanel
                         title="Domain sources"
                         urlsLabel="Domain URLs (one per line)"
@@ -272,6 +294,8 @@ export function UpstreamView({
                         onPreviewUrl={onPreviewDomainsUrl}
                         onRefreshUrl={onRefreshDomainsUrl}
                       />
+                      </div>
+                      </div>
                     </section>
                     <p className="muted-line">
                       Route/domain sources are saved with the button below -- fill these in, click
@@ -284,6 +308,7 @@ export function UpstreamView({
                     className="primary-button"
                     disabled={busy === "routing-settings"}
                     type="submit"
+                    data-capability="routing.settings"
                   >
                     <Save size={18} aria-hidden="true" />
                     <span>Save</span>

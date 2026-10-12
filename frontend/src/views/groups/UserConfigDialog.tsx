@@ -45,13 +45,14 @@ export function UserConfigDialog({
   const deleting = busy === (deleteBusyKey ?? `user-config-delete-${username}`);
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel user-config-dialog" role="dialog" aria-modal="true">
+      <section className="modal-panel user-config-dialog" role="dialog" aria-modal="true" data-capability="user.config">
         <div className="panel-header">
           <h2>{title ?? `${username} config`}</h2>
           <IconButton label="Close" icon={X} onClick={onClose} />
         </div>
         <form
           className="user-config-form"
+          data-capability="groups.config"
           onSubmit={(event) => {
             event.preventDefault();
             onSave();
@@ -131,14 +132,17 @@ export function UserConfigDialog({
           </section>
 
           <div className="modal-actions">
-            <ActionButton
-              label="Clear"
-              icon={Trash2}
-              danger
-              busy={deleting}
-              onClick={onDelete}
-            />
-            <button className="primary-button" disabled={saving} type="submit">
+            <span data-capability="groups.config.delete">
+              <ActionButton
+                label="Clear"
+                icon={Trash2}
+                danger
+                busy={deleting}
+                onClick={onDelete}
+                data-capability="user.config.delete"
+              />
+            </span>
+            <button className="primary-button" disabled={saving} type="submit" data-capability="groups.config">
               <Save size={18} aria-hidden="true" />
               <span>{saving ? "Working" : "Save"}</span>
             </button>
