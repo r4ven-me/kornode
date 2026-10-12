@@ -146,7 +146,9 @@ class PolicyRoutingService:
             if priority != SUPPRESS_RULE_PRIORITY:
                 continue
             table = str(rule.get("table", ""))
-            suppress_prefixlength = rule.get("suppress_prefixlength")
+            # iproute2's JSON key is "suppress_prefixlen" (the CLI keyword is
+            # "suppress_prefixlength"); verified against iproute2 6.15.
+            suppress_prefixlength = rule.get("suppress_prefixlen")
             try:
                 prefix_length = (
                     int(str(suppress_prefixlength), 0)

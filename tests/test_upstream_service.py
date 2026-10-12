@@ -1194,6 +1194,10 @@ def test_connect_installs_carrier_exclusion_before_dialing(tmp_path: Path) -> No
     )
     dial_index = programs.index("openconnect")
     assert carrier_rule_index < dial_index
+    # ...and before nftables is loaded, which exempts the recorded carrier
+    # addresses from marking (otherwise the kill-switch drops the carrier).
+    nft_index = programs.index("nft")
+    assert carrier_rule_index < nft_index
 
 
 def test_disconnect_removes_carrier_exclusion(tmp_path: Path) -> None:

@@ -105,7 +105,7 @@ def test_apply_adds_unreachable_default_route_on_first_apply() -> None:
 def test_cleanup_deletes_the_rule_and_flushes_the_table() -> None:
     runner = StatefulRuleRunner(
         [
-            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlen": 0},
             {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
         ]
     )
@@ -133,7 +133,7 @@ def test_cleanup_deletes_the_rule_and_flushes_the_table() -> None:
 def test_cleanup_keeps_suppress_rule_while_another_configured_policy_rule_exists() -> None:
     runner = StatefulRuleRunner(
         [
-            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlen": 0},
             {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
             {"priority": 100, "src": "all", "fwmark": "0xc02", "table": "1202"},
         ]
@@ -277,7 +277,7 @@ def test_ensure_skips_rule_add_when_suppress_and_profile_rules_already_present()
     # instead of piling up duplicate rules on every watchdog tick.
     runner = RuleShowRunner(
         "["
-        '{"priority":90,"src":"all","table":"main","suppress_prefixlength":0},'
+        '{"priority":90,"src":"all","table":"main","suppress_prefixlen":0},'
         '{"priority":100,"src":"all","fwmark":"0xc01","table":"1201"}'
         "]"
     )
@@ -325,7 +325,7 @@ def test_ensure_skips_rule_add_when_suppress_and_profile_rules_already_present()
 def test_ensure_leaves_existing_unreachable_route_untouched() -> None:
     runner = PolicyRoutingRunner(
         rules=[
-            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlen": 0},
             {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
         ],
         routes=["default dev oc-middle0", "unreachable default metric 4096"],
@@ -350,7 +350,7 @@ def test_ensure_leaves_existing_unreachable_route_untouched() -> None:
 def test_ensure_restores_missing_unreachable_route() -> None:
     runner = PolicyRoutingRunner(
         rules=[
-            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlen": 0},
             {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
         ],
         routes=["default dev oc-middle0"],
@@ -375,7 +375,7 @@ def test_ensure_restores_missing_unreachable_route() -> None:
 def test_cleanup_removes_unreachable_route_by_flushing_table() -> None:
     runner = PolicyRoutingRunner(
         rules=[
-            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlength": 0},
+            {"priority": 90, "src": "all", "table": "main", "suppress_prefixlen": 0},
             {"priority": 100, "src": "all", "fwmark": "0xc01", "table": "1201"},
         ],
         routes=["default dev oc-middle0", "unreachable default metric 4096"],

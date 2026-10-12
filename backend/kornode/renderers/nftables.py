@@ -13,6 +13,24 @@ if TYPE_CHECKING:
     from kornode.services.domain_resolver import ResolvedSet
 
 
+def carrier_state_dir(config: AppConfig) -> Path:
+    """Where UpstreamService records each profile's resolved carrier
+    addresses (one `<profile>.addrs` file per profile)."""
+    return config.system.generated_dir / "upstream-carrier"
+
+
+def carrier_addresses(config: AppConfig) -> list[str]:
+    directory = carrier_state_dir(config)
+    if not directory.is_dir():
+        return []
+    addresses: set[str] = set()
+    for path in sorted(directory.glob("*.addrs")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                addresses.add(line.strip())
+    return sorted(addresses)
+
+
 class NftablesConfigRenderer(TemplateRenderer):
     def resolve_targets(
         self, config: AppConfig, outbound_interface: str | None = None
@@ -76,6 +94,7 @@ class NftablesConfigRenderer(TemplateRenderer):
             # client-facing default target's set.
             "host_traffic_enabled": config.routing.host_policy != "off",
             "host_mode": config.routing.host_policy,
+            "carrier_addresses": carrier_addresses(config),
             "host_split_routes": routing_service.list_host_routes() if host_split_active else [],
             "host_split_domains": (
                 routing_service.list_host_domains() if host_split_active else []

@@ -8,6 +8,8 @@ incidents, without changing the model itself.
 
 ### Testing
 
+- Added P1-03 netlab scenarios that run real kornode-rendered ocserv/openconnect
+  inside namespaces to cover the P0 routing fixes.
 - CI: new `netlab` job runs `sudo make netlab` on ubuntu-latest and uploads
   `artifacts/netlab/` when it fails.
 - Added failure artifact capture for netlab tests, including per-namespace kernel network
@@ -32,6 +34,15 @@ incidents, without changing the model itself.
 
 ### Fixed
 
+- `host_policy: full` loaded no nftables rules at all: the template emitted `ip6 counter ...`
+  (a bare `ip6` is a syntax error for nft, incl. the 1.1.3 shipped in the image), so the whole
+  ruleset failed to apply -- no marking, no kill-switch, no MSS clamp -- while `upstream connect`
+  still reported success. Now `meta nfproto ipv6`.
+- Carrier connections are now also exempted from nft marking; previously, once the ruleset did
+  load, the postrouting kill-switch dropped openconnect's own connection to the server.
+- The global `suppress_prefixlength` rule was never recognised as already installed (iproute2's
+  JSON key is `suppress_prefixlen`), so the second `apply()` failed with "File exists" and
+  aborted `upstream connect`.
 - Carrier connections no longer loop into their own tunnel: each upstream profile's resolved
   server address is excluded from policy routing (`ip rule priority 95 to <addr>/32 lookup
   main`) before any TCP to it, refreshed on every connect to track DNS changes, and removed on

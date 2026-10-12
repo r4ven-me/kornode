@@ -512,7 +512,14 @@ def test_host_mode_full_marks_all_host_traffic_unconditionally(tmp_path: Path) -
         f"ct direction original ip daddr != {config.server.ipv4_network} "
         f"counter meta mark set {config.routing.fwmark}" in rendered
     )
-    assert f"ct direction original ip6 counter meta mark set {config.routing.fwmark}" in rendered
+    # "any IPv6" must be `meta nfproto ipv6`: a bare `ip6` with no selector is a
+    # syntax error in nft, which made the WHOLE ruleset fail to load under
+    # host_policy: full (found by tests/netlab/test_p0_upstream.py).
+    assert (
+        f"ct direction original meta nfproto ipv6 counter meta mark set {config.routing.fwmark}"
+        in rendered
+    )
+    assert "original ip6 counter" not in rendered
     # Full mode must not also emit the split-set-scoped rule.
     assert "@split_v4_static counter meta mark" not in rendered
     assert "@split_v4_dynamic counter meta mark" not in rendered
@@ -1399,3 +1406,36 @@ def test_nft_apply_stays_surgical_when_only_route_lists_changed(tmp_path: Path) 
     calls = _nft_f_calls(runner.calls)
     assert len(calls) == 1
     assert calls[0][2].endswith("nftables-static-refresh.nft")
+
+
+def test_recorded_carrier_addresses_are_exempt_from_output_marking(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {"generated_dir": str(tmp_path / "generated")},
+            "routing": {"mode": "full", "host_traffic": True, "host_mode": "full"},
+        },
+        environ={},
+    )
+    state = tmp_path / "generated" / "upstream-carrier"
+    state.mkdir(parents=True)
+    (state / "hub.addrs").write_text("203.0.113.2\n", encoding="utf-8")
+    (state / "backup.addrs").write_text("198.51.100.7\n203.0.113.2\n", encoding="utf-8")
+
+    rendered = NftablesConfigRenderer().render(config)
+
+    output_chain = rendered.split("chain output {", 1)[1]
+    exempt = "ip daddr { 198.51.100.7, 203.0.113.2 } counter return"
+    # The exemption must precede every marking rule in the chain.
+    assert exempt in output_chain
+    assert output_chain.index(exempt) < output_chain.index("meta mark set")
+
+
+def test_no_carrier_exemption_without_recorded_addresses(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"system": {"generated_dir": str(tmp_path / "generated")}},
+        environ={},
+    )
+
+    assert "counter return" not in NftablesConfigRenderer().render(config)

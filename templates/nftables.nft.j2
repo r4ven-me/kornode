@@ -192,6 +192,13 @@ table inet {{ filter_table }} {
     # "route" type: the mark must trigger a fresh route lookup so the
     # packet actually moves to the fwmark policy table.
     type route hook output priority mangle; policy accept;
+{% if carrier_addresses %}
+    # Upstream carrier connections (openconnect, cert-pin probe) are never
+    # marked: under host_policy: full they would otherwise be pulled into
+    # policy routing, and the postrouting kill-switch drops marked traffic
+    # leaving via the uplink -- the tunnel could never come up.
+    ip daddr { {{ carrier_addresses | join(", ") }} } counter return
+{% endif %}
     # Restore marks only for replies to connections recorded by our input
     # chain above. Restricting the accepted ct marks to this renderer's own
     # targets avoids importing unrelated conntrack marks from other tools.
@@ -220,7 +227,7 @@ table inet {{ filter_table }} {
     # Prefer host_policy: split with a curated route list when precision
     # matters.
     ct direction original ip daddr != {{ config.server.ipv4_network }} counter meta mark set {{ config.routing.fwmark }}
-    ct direction original ip6 counter meta mark set {{ config.routing.fwmark }}
+    ct direction original meta nfproto ipv6 counter meta mark set {{ config.routing.fwmark }}
 {% else %}
     ct direction original ip daddr != {{ config.server.ipv4_network }} ip daddr @host_split_v4_static counter meta mark set {{ config.routing.fwmark }}
     ct direction original ip daddr != {{ config.server.ipv4_network }} ip daddr @host_split_v4_dynamic counter meta mark set {{ config.routing.fwmark }}

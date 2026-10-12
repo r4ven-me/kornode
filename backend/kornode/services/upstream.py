@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kornode.config.models import AppConfig, UpstreamProfileConfig
+from kornode.renderers.nftables import carrier_state_dir
 from kornode.services.cert_pin import fetch_server_pin
 from kornode.services.command import CommandError, CommandResult, CommandRunner
 from kornode.services.files import FileManager
@@ -189,7 +190,7 @@ class UpstreamService:
         return self.config.upstream.profile_interface(profile)
 
     def _carrier_exclusion_state_path(self, profile: UpstreamProfileConfig) -> Path:
-        return self.config.system.generated_dir / "upstream-carrier" / f"{profile.name}.addrs"
+        return carrier_state_dir(self.config) / f"{profile.name}.addrs"
 
     def _resolve_carrier_addresses(self, profile: UpstreamProfileConfig) -> list[str]:
         """The literal IPv4 address(es) this profile's carrier connection
@@ -764,6 +765,11 @@ class UpstreamService:
             pushed_was_marked_applied = bool(pushed_fingerprint) and (
                 pushed_fingerprint == self.pushed.applied_fingerprint()
             )
+            # Must happen before any TCP to the server -- including the
+            # cert-pin probe below -- and before the nftables apply right
+            # after, which reads the recorded carrier addresses to exempt
+            # them from marking.
+            self.install_carrier_exclusion(profile, dry_run=dry_run)
             if not dry_run:
                 self._repair_stale_resolv_conf()
                 # Load the split/full-mode kill-switch rules before dialing,
@@ -772,9 +778,6 @@ class UpstreamService:
                 # connecting. Rules always point at the ACTIVE profile's
                 # interface, even when dialing a standby.
                 self.nftables.apply(outbound_interface=self.active_interface())
-            # Must happen before any TCP to the server -- including the
-            # cert-pin probe right below -- not just before dialing.
-            self.install_carrier_exclusion(profile, dry_run=dry_run)
             accepted_pin = self._accepted_server_pin(profile, dry_run=dry_run)
             result = self.runner.run(
                 self.openconnect_argv(profile, accepted_pin=accepted_pin),
