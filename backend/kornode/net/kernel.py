@@ -151,6 +151,45 @@ class Kernel:
                     found.add(ForeignNftRule(family, table, chain, expr))
         return frozenset(present), frozenset(found)
 
+    def _read_sysctls(self, keys: Iterable[str]) -> list[Sysctl]:
+        found = []
+        for key in keys:
+            try:
+                value = _sysctl_path(self.proc_sys, key).read_text(encoding="utf-8").strip()
+            except OSError:
+                continue  # e.g. a per-interface key for an interface not there yet
+            found.append(Sysctl(key, value))
+        return found
+
+    def _read_nft(self) -> tuple[str | None, frozenset[NftElements]]:
+        """Schema hash from the comment on `inet kornode` (written at load
+        time), plus the elements of every set in kornode's tables."""
+        schema_hash: str | None = None
+        elements: set[NftElements] = set()
+        for family, table in sorted(OWNED_NFT_TABLES):
+            result = subprocess.run(
+                [self.nft, "-j", "list", "table", family, table],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                if (family, table) == ("inet", "kornode"):
+                    return None, frozenset()
+                continue
+            for item in json.loads(result.stdout).get("nftables", []):
+                if "table" in item and (family, table) == ("inet", "kornode"):
+                    comment = item["table"].get("comment", "")
+                    if comment.startswith(SCHEMA_COMMENT_PREFIX):
+                        schema_hash = comment[len(SCHEMA_COMMENT_PREFIX) :]
+                if "set" in item:
+                    data = item["set"]
+                    members = frozenset(
+                        text for elem in data.get("elem", []) for text in _element_texts(elem)
+                    )
+                    elements.add(NftElements(family, table, data["name"], members))
+        return schema_hash, frozenset(elements)
+
     def route_get(self, dst: str, mark: int | None, src: str | None = None) -> str | None:
         """Output device the kernel picks for `dst` with `mark` (like `ip
         route get <dst> mark <mark>`), or None if it is unreachable/rejected.
