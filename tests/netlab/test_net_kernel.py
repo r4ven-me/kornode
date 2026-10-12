@@ -222,34 +222,3 @@ def test_docker_user_compat_rules_are_tagged_and_idempotent(node: Namespace) -> 
 def test_no_docker_user_chain_means_no_compat_rules(node: Namespace) -> None:
     assert drive(node, "converge")["after"] == []
     assert not node.run(["nft", "list", "table", "ip", "filter"], check=False).ok
-
-
-@pytest.mark.netlab
-def test_v1_state_is_removed_once_and_only_v1_state(node: Namespace) -> None:
-    v1 = (
-        "table inet kornode_filter {\n"
-        "  chain forward { type filter hook forward priority filter; policy accept; }\n"
-        "}\n"
-        "table ip filter {\n"
-        "  chain DOCKER-USER {\n"
-        "    ip saddr 10.100.3.0/24 accept\n"
-        "    ip daddr 10.100.3.0/24 accept\n"
-        "    ip saddr 172.17.0.0/16 counter return\n"
-        "  }\n"
-        "}\n"
-    )
-    node.run(["nft", "-f", "-"], input_text=v1)
-    node.run(["ip", "route", "add", "default", "dev", "ktun1", "table", "1201"])
-    node.run(["ip", "route", "add", "unreachable", "default", "table", "1201", "metric", "4096"])
-    node.run(["ip", "route", "add", "10.9.0.0/16", "dev", "kup0", "table", "300"])
-
-    drive(node, "cleanup")
-
-    assert not node.run(["nft", "list", "table", "inet", "kornode_filter"], check=False).ok
-    tables = node.run(["ip", "route", "show", "table", "1201"], check=False)
-    assert tables.stdout.strip() == ""
-    assert "10.9.0.0/16" in node.run(["ip", "route", "show", "table", "300"]).stdout
-    chain = _docker_user(node)
-    assert "ip saddr 10.100.3.0/24 accept" not in chain
-    assert "ip saddr 172.17.0.0/16 counter" in chain
-    drive(node, "cleanup")  # idempotent

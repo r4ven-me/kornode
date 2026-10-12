@@ -84,14 +84,6 @@ def main() -> None:
     corp = ["10.60.0.0/16"]
     if "--corp" in sys.argv:
         corp = sys.argv[sys.argv.index("--corp") + 1].split(",")
-    if sys.argv[1] == "cleanup":
-        Kernel().remove_v1_state(
-            filter_table="kornode_filter",
-            route_tables=[1201, 1202],
-            docker_exprs=["ip saddr 10.100.3.0/24 accept", "ip daddr 10.100.3.0/24 accept"],
-        )
-        print(json.dumps({"ok": True}))
-        return
     want = desired(corp)
     kernel = Kernel()
     keys = [sysctl.key for sysctl in want.sysctls]

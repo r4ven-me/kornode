@@ -151,79 +151,6 @@ class Kernel:
                     found.add(ForeignNftRule(family, table, chain, expr))
         return frozenset(present), frozenset(found)
 
-    def remove_v1_state(
-        self,
-        *,
-        filter_table: str,
-        route_tables: Iterable[int],
-        docker_exprs: Iterable[str],
-    ) -> None:
-        """One-shot migration from v1 (P2-08): v1's `inet <prefix>_filter`
-        table, the routes in its policy tables (1201+), and its untagged
-        DOCKER-USER accept rules. v1's ip rules (priorities 90-199) and its
-        `ip <prefix>_nat` table are owned ranges/names and get reconciled
-        away/replaced by the normal diff. Safe to run when nothing is there."""
-        subprocess.run(
-            [self.nft, "delete", "table", "inet", filter_table],
-            capture_output=True,
-            check=False,
-        )
-        with IPRoute() as ipr:
-            for table in route_tables:
-                for af in _AF.values():
-                    for message in ipr.get_routes(family=af, table=table):
-                        try:
-                            ipr.route("del", **_raw_route_del_args(message, table))
-                        except NetlinkError:
-                            continue
-        wanted = set(docker_exprs)
-        for text, handle in self._list_chain("ip", "filter", "DOCKER-USER") or []:
-            if text in wanted:
-                subprocess.run(
-                    [self.nft, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", handle],
-                    capture_output=True,
-                    check=False,
-                )
-
-    def _read_sysctls(self, keys: Iterable[str]) -> list[Sysctl]:
-        found = []
-        for key in keys:
-            try:
-                value = _sysctl_path(self.proc_sys, key).read_text(encoding="utf-8").strip()
-            except OSError:
-                continue  # e.g. a per-interface key for an interface not there yet
-            found.append(Sysctl(key, value))
-        return found
-
-    def _read_nft(self) -> tuple[str | None, frozenset[NftElements]]:
-        """Schema hash from the comment on `inet kornode` (written at load
-        time), plus the elements of every set in kornode's tables."""
-        schema_hash: str | None = None
-        elements: set[NftElements] = set()
-        for family, table in sorted(OWNED_NFT_TABLES):
-            result = subprocess.run(
-                [self.nft, "-j", "list", "table", family, table],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                if (family, table) == ("inet", "kornode"):
-                    return None, frozenset()
-                continue
-            for item in json.loads(result.stdout).get("nftables", []):
-                if "table" in item and (family, table) == ("inet", "kornode"):
-                    comment = item["table"].get("comment", "")
-                    if comment.startswith(SCHEMA_COMMENT_PREFIX):
-                        schema_hash = comment[len(SCHEMA_COMMENT_PREFIX) :]
-                if "set" in item:
-                    data = item["set"]
-                    members = frozenset(
-                        text for elem in data.get("elem", []) for text in _element_texts(elem)
-                    )
-                    elements.add(NftElements(family, table, data["name"], members))
-        return schema_hash, frozenset(elements)
-
     def route_get(self, dst: str, mark: int | None, src: str | None = None) -> str | None:
         """Output device the kernel picks for `dst` with `mark` (like `ip
         route get <dst> mark <mark>`), or None if it is unreachable/rejected.
@@ -444,20 +371,4 @@ def _route_args(route: Route, ipr: Any, *, for_delete: bool = False) -> dict[str
             args["oif"] = matches[0]
         if route.gateway is not None:
             args["gateway"] = route.gateway
-    return args
-
-
-def _raw_route_del_args(message: Any, table: int) -> dict[str, Any]:
-    attrs = dict(message["attrs"])
-    args: dict[str, Any] = {
-        "family": message["family"],
-        "table": table,
-        "type": message["type"],
-        "scope": 255,
-        "proto": 0,
-        "priority": attrs.get("RTA_PRIORITY", 0),
-    }
-    dst = attrs.get("RTA_DST")
-    zero = "0.0.0.0" if message["family"] == socket.AF_INET else "::"
-    args["dst"] = f"{dst or zero}/{message['dst_len']}"
     return args
