@@ -23,6 +23,8 @@ incidents, without changing the model itself.
 
 ### Added
 
+- New `kornode.net` package (routing redesign P2): the future single owner of kernel
+  networking state; import-restricted to stdlib/pydantic/pyroute2. New dependency: `pyroute2`.
 - `korctl doctor` (+ `GET /api/diagnostics/doctor` + a "Doctor" panel card on the Diagnostics
   page): checks required sysctls, overlapping subnets (VPN pool vs. host/Docker routes and
   upstream-pushed routes), policy-table health, `nft`/kernel versions, and that every connected
