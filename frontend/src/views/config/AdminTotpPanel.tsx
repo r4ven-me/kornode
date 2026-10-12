@@ -69,7 +69,7 @@ export function AdminTotpPanel({
   };
 
   return (
-    <section className="panel">
+    <section className="panel" data-capability="web.totp.status">
       <div className="panel-header">
         <h2>Admin two-factor authentication</h2>
         {enabled !== null && <Pill kind={enabled ? "ok" : "muted"}>{enabled ? "Enabled" : "Disabled"}</Pill>}
@@ -80,7 +80,7 @@ export function AdminTotpPanel({
       </p>
       {!enabled && !setup && (
         <div className="panel-footer">
-          <ActionButton label="Enable" icon={ShieldCheck} primary busy={busy === "totp-setup"} onClick={handleEnable} />
+          <ActionButton label="Enable" icon={ShieldCheck} primary busy={busy === "totp-setup"} onClick={handleEnable} data-capability="web.totp.setup" />
         </div>
       )}
       {setup && (
@@ -116,6 +116,7 @@ export function AdminTotpPanel({
               busy={busy === "totp-confirm"}
               disabled={code.trim().length !== 6}
               onClick={() => void handleConfirm()}
+              data-capability="web.totp.confirm"
             />
           </div>
         </div>
@@ -128,6 +129,7 @@ export function AdminTotpPanel({
             danger
             busy={busy === "totp-disable"}
             onClick={handleDisable}
+            data-capability="web.totp.disable"
           />
         </div>
       )}

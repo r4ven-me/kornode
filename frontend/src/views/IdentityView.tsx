@@ -58,7 +58,7 @@ export function IdentityView({
 }) {
   return (
     <div className="view-stack">
-      <section className="panel experimental-notice" role="note">
+      <section className="panel experimental-notice" role="note" data-capability="identity.status">
         <div>
           <strong>Experimental feature</strong>
           <p className="muted-line">
@@ -73,7 +73,7 @@ export function IdentityView({
       <SettingsTabs ariaLabel="Identity settings">
         <details>
           <summary>Group selection</summary>
-      <section className="panel">
+      <section className="panel" data-capability="identity.settings">
         <div className="panel-header">
           <h2>Group routing</h2>
           <div className="toolbar">
@@ -137,6 +137,7 @@ export function IdentityView({
             primary
             busy={busy === "identity-settings"}
             onClick={onSaveIdentitySettings}
+            data-capability="identity.settings"
           />
         </div>
       </section>
@@ -144,7 +145,7 @@ export function IdentityView({
 
         <details>
           <summary>OIDC connector</summary>
-      <section className="panel">
+      <section className="panel" data-capability="identity.oidc.settings">
         <div className="panel-header">
           <h2>OIDC connector</h2>
         </div>
@@ -238,6 +239,7 @@ export function IdentityView({
             primary
             busy={busy === "oidc-settings"}
             onClick={onSaveOidcSettings}
+            data-capability="identity.oidc.settings"
           />
         </div>
       </section>
@@ -251,7 +253,7 @@ export function IdentityView({
           <div className="panel-header">
             <h2>OIDC provider</h2>
           </div>
-          <form onSubmit={onSaveProvider}>
+          <form onSubmit={onSaveProvider} data-capability="identity.oidc.provider_set">
           <div className="settings-grid">
             <label>
               <span>Name</span>
@@ -336,7 +338,7 @@ export function IdentityView({
             </label>
           </div>
             <div className="panel-footer">
-              <button className="primary-button" disabled={busy === "oidc-provider"} type="submit">
+              <button className="primary-button" disabled={busy === "oidc-provider"} type="submit" data-capability="identity.oidc.provider_set">
                 <Save size={18} aria-hidden="true" />
                 <span>Save</span>
               </button>
@@ -351,7 +353,7 @@ export function IdentityView({
               <KorclientHint text="Routes and Split DNS below reach any client over the standard AnyConnect handshake, and are also synced live to connected Korvus clients (Config → Upstream, Profiles tab, on the other server: “Use routes and domains pushed by the server” with a sync URL) via GET /api/client/routing — changes apply without reconnecting." />
             </h2>
           </div>
-          <form onSubmit={onSaveGroup}>
+          <form onSubmit={onSaveGroup} data-capability="identity.group.set">
           <div className="settings-grid">
             <label>
               <span>Name</span>
@@ -459,7 +461,7 @@ export function IdentityView({
             </label>
           </div>
             <div className="panel-footer">
-              <button className="primary-button" disabled={busy === "group-policy"} type="submit">
+              <button className="primary-button" disabled={busy === "group-policy"} type="submit" data-capability="identity.group.set">
                 <Save size={18} aria-hidden="true" />
                 <span>Save</span>
               </button>
@@ -484,6 +486,7 @@ export function IdentityView({
                     danger
                     busy={busy === `oidc-provider-delete-${provider.name}`}
                     onClick={() => onDeleteProvider(provider.name)}
+                    data-capability="identity.oidc.provider_delete"
                   />
                 </td>
               </tr>
@@ -504,6 +507,7 @@ export function IdentityView({
                     danger
                     busy={busy === `group-policy-delete-${group.name}`}
                     onClick={() => onDeleteGroup(group.name)}
+                    data-capability="identity.group.delete"
                   />
                 </td>
               </tr>

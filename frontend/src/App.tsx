@@ -27,6 +27,7 @@ import { IdentityView } from "./views/IdentityView";
 import { InternalDnsView } from "./views/InternalDnsView";
 import { LoginScreen } from "./views/LoginScreen";
 import { LogsView } from "./views/LogsView";
+import { NetworkView } from "./views/NetworkView";
 import { SessionsView } from "./views/SessionsView";
 import { CertificatesView } from "./views/certificates/CertificatesView";
 import { ConfigSubnav } from "./views/config/ConfigSubnav";
@@ -297,6 +298,8 @@ export function App() {
             onKick={sessions.kick}
           />
         )}
+
+        {tab === "network" && <NetworkView token={authToken} />}
 
         {tab === "config" && (
           <ConfigSubnav active={configSection} onSelect={setConfigSection} />

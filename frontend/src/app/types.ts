@@ -5,6 +5,7 @@ export type Tab =
   | "users"
   | "groups"
   | "sessions"
+  | "network"
   | "config"
   | "diagnostics"
   | "logs"

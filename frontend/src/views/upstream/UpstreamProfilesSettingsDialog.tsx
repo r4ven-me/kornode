@@ -80,7 +80,7 @@ export function UpstreamProfilesSettingsDialog({
         </div>
         <form className="upstream-settings-form" onSubmit={onSave}>
           <SettingsTabs ariaLabel="Upstream profiles settings">
-          <details className="settings-details upstream-settings-section">
+          <details className="settings-details upstream-settings-section" data-capability="routing.host_dns.status">
             <summary>Connection &amp; health</summary>
             <div className="settings-grid settings-details-body">
               <label>
@@ -214,6 +214,8 @@ export function UpstreamProfilesSettingsDialog({
                         follows these routes/domains, not the VPN users&rsquo;.
                       </p>
                       <section className="split">
+                        <div data-capability="host_routes.list">
+                        <div data-capability="host_routes.set">
                         <BulkListEditor
                           title="Host routes"
                           items={hostRoutes}
@@ -222,6 +224,10 @@ export function UpstreamProfilesSettingsDialog({
                           disabled={!upstreamEnabled}
                           onSave={onSaveHostRoutes}
                         />
+                        </div>
+                        </div>
+                        <div data-capability="host_domains.list">
+                        <div data-capability="host_domains.set">
                         <BulkListEditor
                           title="Host domains"
                           items={hostDomains}
@@ -230,6 +236,8 @@ export function UpstreamProfilesSettingsDialog({
                           disabled={!upstreamEnabled}
                           onSave={onSaveHostDomains}
                         />
+                        </div>
+                        </div>
                       </section>
                     </div>
                   ) : (
@@ -247,6 +255,8 @@ export function UpstreamProfilesSettingsDialog({
                   {routingDraft.hostPolicy === "split" ? (
                     <div className="routing-substep">
                       <section className="split">
+                        <div data-capability="host_routes.sources">
+                        <div data-capability="host_routes.sources.refresh">
                         <RoutingListSourcesPanel
                           title="Host route sources"
                           urlsLabel="Host route URLs (one per line)"
@@ -262,6 +272,10 @@ export function UpstreamProfilesSettingsDialog({
                           onPreviewUrl={onPreviewHostRoutesUrl}
                           onRefreshUrl={onRefreshHostRoutesUrl}
                         />
+                        </div>
+                        </div>
+                        <div data-capability="host_domains.sources">
+                        <div data-capability="host_domains.sources.refresh">
                         <RoutingListSourcesPanel
                           title="Host domain sources"
                           urlsLabel="Host domain URLs (one per line)"
@@ -277,6 +291,8 @@ export function UpstreamProfilesSettingsDialog({
                           onPreviewUrl={onPreviewHostDomainsUrl}
                           onRefreshUrl={onRefreshHostDomainsUrl}
                         />
+                        </div>
+                        </div>
                       </section>
                       <p className="muted-line">
                         Host route/domain sources are saved together with the rest of this
@@ -348,6 +364,7 @@ export function UpstreamProfilesSettingsDialog({
               className="primary-button"
               disabled={busy === "upstream-settings" || busy === "routing-settings"}
               type="submit"
+              data-capability="upstream.settings"
             >
               <Save size={18} aria-hidden="true" />
               <span>Save</span>

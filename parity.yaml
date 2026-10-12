@@ -110,27 +110,32 @@ capabilities:
     service: kornode.services.server.ServerService.processes
     cli: "server process list"
     api: "GET /api/server/processes"
-    ui: server.process.list
+    ui: null
+    exempt: "process supervisor table is not exposed in the current panel; Dashboard shows aggregate process health only."
   - id: server.process.start
     service: kornode.services.server.ServerService.process_action
     cli: "server process start"
     api: "POST /api/server/process"
-    ui: server.process.start
+    ui: null
+    exempt: "process-level start action is not exposed in the current panel; admins use server start/reload controls."
   - id: server.process.stop
     service: kornode.services.server.ServerService.process_action
     cli: "server process stop"
     api: "POST /api/server/process"
-    ui: server.process.stop
+    ui: null
+    exempt: "process-level stop action is not exposed in the current panel; admins use server stop/reload controls."
   - id: server.process.restart
     service: kornode.services.server.ServerService.process_action
     cli: "server process restart"
     api: "POST /api/server/process"
-    ui: server.process.restart
+    ui: null
+    exempt: "process-level restart action is not exposed in the current panel; admins use server restart/reload controls."
   - id: server.process.status
     service: kornode.services.server.ServerService.process_action
     cli: "server process status"
     api: "POST /api/server/process"
-    ui: server.process.status
+    ui: null
+    exempt: "per-process status probe is not exposed in the current panel; Dashboard shows aggregate process health only."
   - id: server.hook
     service: kornode.services.sysctl.SysctlService.apply_interface
     cli: "server hook"
@@ -396,12 +401,14 @@ capabilities:
     service: kornode.services.upstream.UpstreamService.connect
     cli: "upstream connect"
     api: "POST /api/upstream/connect"
-    ui: upstream.connect
+    ui: null
+    exempt: "global connect action is not exposed in the current panel; profiles are connected with per-profile controls."
   - id: upstream.disconnect
     service: kornode.services.upstream.UpstreamService.disconnect
     cli: "upstream disconnect"
     api: "POST /api/upstream/disconnect"
-    ui: upstream.disconnect
+    ui: null
+    exempt: "global disconnect action is not exposed in the current panel; profiles are disconnected with per-profile controls."
   - id: upstream.profile.connect
     service: kornode.services.upstream.UpstreamService.connect
     cli: null
@@ -534,7 +541,8 @@ capabilities:
     service: kornode.services.nftables.NftablesService.apply
     cli: "routes reload"
     api: "POST /api/routing/reload"
-    ui: routes.reload
+    ui: null
+    exempt: "route reload is not exposed as a separate panel action; Network apply and nft apply cover runtime convergence."
   - id: domains.list
     service: kornode.services.routing.RoutingService.list_domains
     cli: "domains list"
@@ -667,7 +675,8 @@ capabilities:
     service: kornode.services.nftables.NftablesService.show
     cli: "nft show"
     api: "GET /api/routing/nft"
-    ui: nft.show
+    ui: null
+    exempt: "raw nftables ruleset display is not exposed in the current panel; diagnostics show firewall health."
   - id: nft.apply
     service: kornode.services.nftables.NftablesService.apply
     cli: "nft apply"
@@ -677,7 +686,8 @@ capabilities:
     service: kornode.services.nftables.NftablesService.cleanup
     cli: "nft cleanup"
     api: "POST /api/routing/nft/cleanup"
-    ui: nft.cleanup
+    ui: null
+    exempt: "nftables cleanup is a destructive maintenance action and is not exposed in the current panel."
 
   - id: internal_dns.status
     service: kornode.services.internal_dns.InternalDnsService.status
@@ -859,26 +869,23 @@ capabilities:
     service: kornode.services.net.NetService.plan
     cli: "net plan"
     api: "GET /api/net/plan"
-    ui: null
-    exempt: "panel Network page (plan/apply/explain) is not built yet"
+    ui: net.plan
   - id: net.apply
     service: kornode.services.net.NetService.apply
     cli: "net apply"
     api: "POST /api/net/apply"
-    ui: null
-    exempt: "panel Network page (plan/apply/explain) is not built yet"
+    ui: net.apply
   - id: net.explain
     service: kornode.services.net.NetService.explain
     cli: "net explain"
     api: "POST /api/net/explain"
-    ui: null
-    exempt: "panel Network page (plan/apply/explain) is not built yet"
+    ui: net.explain
   - id: net.status
     service: kornode.services.net.NetService.status
     cli: null
     api: "GET /api/net/status"
-    ui: null
-    exempt: "reconciler status is shown by the future Network page; no CLI beyond net plan"
+    ui: net.status
+    exempt: "reconciler status is panel/API-only; no CLI beyond net plan"
   - id: net.run
     service: kornode.services.net.run_reconciler
     cli: "net run"
@@ -897,3 +904,7 @@ parity_ignore:
     reason: "Session identity plumbing, not an admin management capability."
   - api: "GET /api/client/routing"
     reason: "Korclient synchronization endpoint, not a hub admin management capability."
+  - api: "POST /api/config/fabric-settings"
+    reason: "Structured config helper endpoint covered by the Fabric settings panel, not a separate management capability."
+  - api: "POST /api/config/validate"
+    reason: "Validation helper endpoint covered by config.validate/config.source.validate, not a separate panel action."

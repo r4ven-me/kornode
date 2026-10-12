@@ -34,7 +34,7 @@ export function GroupsView({
 }) {
   return (
     <div className="view-stack">
-      <section className="panel user-create-panel">
+      <section className="panel user-create-panel" data-capability="groups.config">
         <div className="inline-form group-create-form">
           <label>
             <span>Group name</span>
@@ -44,13 +44,13 @@ export function GroupsView({
               placeholder="devops"
             />
           </label>
-          <button className="primary-button" type="button" onClick={onCreate}>
+          <button className="primary-button" type="button" onClick={onCreate} data-capability="groups.config">
             <Plus size={18} aria-hidden="true" />
             <span>Create config</span>
           </button>
         </div>
       </section>
-      <section className="panel">
+      <section className="panel" data-capability="groups.list">
         <Table columns={["Group", "Members", "Config", "Actions"]} empty="No groups">
           {groups.map((group) => (
             <tr key={group.name}>
@@ -76,6 +76,7 @@ export function GroupsView({
                     icon={FileSliders}
                     busy={busy === `group-config-load-${group.name}`}
                     onClick={() => onOpenConfig(group.name)}
+                    data-capability="groups.config"
                   />
                   <IconButton
                     label="Clear group config"
@@ -83,6 +84,7 @@ export function GroupsView({
                     disabled={!group.config_exists}
                     busy={busy === `group-config-delete-${group.name}`}
                     onClick={() => onDeleteConfig(group.name)}
+                    data-capability="groups.config.delete"
                   />
                   <IconButton
                     label="Delete group"
@@ -90,6 +92,7 @@ export function GroupsView({
                     danger
                     busy={busy === `group-delete-${group.name}`}
                     onClick={() => onDeleteGroup(group.name)}
+                    data-capability="groups.delete"
                   />
                 </div>
               </td>

@@ -81,7 +81,7 @@ export function ConfigView({
   return (
     <div className="view-stack">
       {section === "server" && (
-      <section className="panel config-section-panel">
+      <section className="panel config-section-panel" data-capability="server.settings">
         <div className="panel-header config-section-header">
           <div>
             <h2>VPN server</h2>
@@ -185,13 +185,13 @@ export function ConfigView({
         )}
 
         <div className="panel-footer config-save-footer">
-          <ActionButton label="Save" icon={Save} primary busy={busy === "server-config-settings"} onClick={onSaveServerSettings} />
+          <ActionButton label="Save" icon={Save} primary busy={busy === "server-config-settings"} onClick={onSaveServerSettings} data-capability="server.settings" />
         </div>
       </section>
       )}
 
       {section === "auth" && (
-      <section className="panel auth-settings-panel">
+      <section className="panel auth-settings-panel" data-capability="server.auth_settings">
         <div className="panel-header">
           <h2>Authentication methods</h2>
         </div>
@@ -257,7 +257,7 @@ export function ConfigView({
                       </div>
                     </fieldset>
                     <div className="settings-actions">
-                      <ActionButton label="Test email" icon={Send} busy={busy === "auth-methods-test-email"} disabled={!authMethodsDraft.otpSendByEmail || !authMethodsDraft.otpSmtpHost.trim() || authMethodsDraft.otpSmtpPort < 1 || authMethodsDraft.otpSmtpPort > 65535 || !authMethodsDraft.otpSmtpFrom.trim() || !authMethodsDraft.otpSmtpTestRecipient.trim()} onClick={onTestOtpEmail} />
+                      <ActionButton label="Test email" icon={Send} busy={busy === "auth-methods-test-email"} disabled={!authMethodsDraft.otpSendByEmail || !authMethodsDraft.otpSmtpHost.trim() || authMethodsDraft.otpSmtpPort < 1 || authMethodsDraft.otpSmtpPort > 65535 || !authMethodsDraft.otpSmtpFrom.trim() || !authMethodsDraft.otpSmtpTestRecipient.trim()} onClick={onTestOtpEmail} data-capability="server.auth_test_email" />
                     </div>
                   </div>
                 </details>
@@ -276,7 +276,7 @@ export function ConfigView({
                       </div>
                     </fieldset>
                     <div className="settings-actions">
-                      <ActionButton label="Test Telegram" icon={Send} busy={busy === "auth-methods-test-telegram"} disabled={!authMethodsDraft.otpSendByTelegram || !authMethodsDraft.otpTelegramBotToken || !authMethodsDraft.otpTelegramChatId.trim()} onClick={onTestOtpTelegram} />
+                      <ActionButton label="Test Telegram" icon={Send} busy={busy === "auth-methods-test-telegram"} disabled={!authMethodsDraft.otpSendByTelegram || !authMethodsDraft.otpTelegramBotToken || !authMethodsDraft.otpTelegramChatId.trim()} onClick={onTestOtpTelegram} data-capability="server.auth_test_telegram" />
                     </div>
                   </div>
                 </details>
@@ -287,14 +287,14 @@ export function ConfigView({
         )}
 
         <div className="panel-footer">
-          <ActionButton label="Save" icon={Save} primary busy={busy === "auth-methods-settings"} onClick={onSaveAuthMethodsSettings} />
+          <ActionButton label="Save" icon={Save} primary busy={busy === "auth-methods-settings"} onClick={onSaveAuthMethodsSettings} data-capability="server.auth_settings" />
         </div>
       </section>
       )}
 
       {section === "web" && (
       <>
-      <section className="panel config-section-panel">
+      <section className="panel config-section-panel" data-capability="web.settings">
         <div className="panel-header config-section-header">
           <div>
             <h2>Web / API panel</h2>
@@ -353,7 +353,7 @@ export function ConfigView({
         )}
 
         <div className="panel-footer config-save-footer">
-          <ActionButton label="Save" icon={Save} primary busy={busy === "web-config-settings"} onClick={onSaveWebSettings} />
+          <ActionButton label="Save" icon={Save} primary busy={busy === "web-config-settings"} onClick={onSaveWebSettings} data-capability="web.settings" />
         </div>
       </section>
       <AdminTotpPanel onNotice={onNotice} />
@@ -361,7 +361,7 @@ export function ConfigView({
       )}
 
       {section === "system" && (
-      <section className="panel">
+      <section className="panel" data-capability="config.general_settings">
         <div className="panel-header">
           <h2>General</h2>
         </div>
@@ -428,13 +428,14 @@ export function ConfigView({
             primary
             busy={busy === "general-settings"}
             onClick={onSaveGeneralSettings}
+            data-capability="config.general_settings"
           />
         </div>
       </section>
       )}
 
       {section === "fabric" && (
-      <section className="panel config-section-panel">
+      <section className="panel config-section-panel" data-capability="config.show">
         <div className="panel-header config-section-header">
           <div>
             <h2>Fabric</h2>
@@ -470,7 +471,7 @@ export function ConfigView({
       <SettingsTabs ariaLabel="Advanced configuration">
       <details>
         <summary>Persistent YAML</summary>
-        <section className="panel">
+        <section className="panel" data-capability="config.source.show">
         <div className="panel-header">
           <div>
             <h2>Persistent YAML</h2>
@@ -504,26 +505,30 @@ export function ConfigView({
           </details>
         )}
         <div className="panel-footer">
-          <ActionButton label="Reload" icon={RefreshCw} onClick={onReloadSource} />
+          <ActionButton label="Reload" icon={RefreshCw} onClick={onReloadSource} data-capability="config.source.show" />
+          <span data-capability="config.validate">
           <ActionButton
             label="Validate"
             icon={CheckCircle2}
             busy={busy === "config-validate"}
             onClick={onValidate}
+            data-capability="config.source.validate"
           />
+          </span>
           <ActionButton
             label="Save"
             icon={Save}
             primary
             busy={busy === "config-save"}
             onClick={onSave}
+            data-capability="config.source.save"
           />
         </div>
       </section>
       </details>
       <details>
         <summary>Rendered files</summary>
-        <section className="panel">
+        <section className="panel" data-capability="config.render.preview">
         <div className="panel-header">
           <h2>Rendered files</h2>
         </div>
@@ -544,12 +549,13 @@ export function ConfigView({
           ))
         )}
         <div className="panel-footer">
-          <ActionButton label="Refresh" icon={RefreshCw} onClick={onRender} />
+          <ActionButton label="Refresh" icon={RefreshCw} onClick={onRender} data-capability="config.render.preview" />
           <ActionButton
             label="Diff"
             icon={FileDiff}
             busy={busy === "config-diff"}
             onClick={onDiff}
+            data-capability="config.diff"
           />
           <ActionButton
             label="Render configs"
@@ -558,6 +564,7 @@ export function ConfigView({
             title="Write generated Korvus Node, supervisor, dnsmasq and nftables files from YAML"
             busy={busy === "write-config"}
             onClick={onWrite}
+            data-capability="config.render"
           />
         </div>
       </section>

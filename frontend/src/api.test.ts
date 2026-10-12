@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyInternalDns,
+  applyNetPlan,
   login,
   saveAuthMethodsSettings,
   saveFabricSettings,
@@ -14,6 +15,7 @@ import {
   writeRenderedConfig,
   type UpstreamProfileDraft
 } from "./api";
+import { netDriftCount, netPlanLines } from "./lib/net";
 
 afterEach(() => {
   setCsrfToken(null);
@@ -373,5 +375,34 @@ describe("saveRoutingSettings", () => {
     const sent = JSON.parse(String(init.body));
     expect(sent.host_policy).toBe("split");
     expect(sent.host_dns).toBe("resolv_conf");
+  });
+});
+
+describe("network API", () => {
+  it("posts the dry-run flag when applying the network plan", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ applied: false, dry_run: true, ops: [], warnings: [], exits: [], schema_hash: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await applyNetPlan("session", true);
+
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/net/apply");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ dry_run: true });
+  });
+});
+
+describe("network view helpers", () => {
+  it("uses the kernel match line when a plan has no operations", () => {
+    expect(netPlanLines([])).toEqual(["kernel matches the compiled policy"]);
+  });
+
+  it("sums reconciler drift counters", () => {
+    expect(netDriftCount({ running: true, drift: { rules: 2, routes: 3 } })).toBe(5);
   });
 });

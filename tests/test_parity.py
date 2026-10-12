@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml
 from fastapi.routing import APIRoute, APIWebSocketRoute
 from typer.main import get_command
@@ -49,8 +48,8 @@ def discover_api_routes() -> set[str]:
             elif isinstance(route, APIWebSocketRoute):
                 found.add(f"WS {prefix}{route.path}")
             elif type(route).__name__ == "_IncludedRouter":
-                context = getattr(route, "include_context")
-                found.update(walk(getattr(route, "original_router").routes, f"{prefix}{context.prefix}"))
+                context = route.include_context
+                found.update(walk(route.original_router.routes, f"{prefix}{context.prefix}"))
         return found
 
     return {
