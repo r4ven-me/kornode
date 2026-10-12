@@ -13,7 +13,8 @@ pyroute2 traps verified against 0.9.6 on the netlab VM:
 - tables > 255 are only in FRA_TABLE (the header says 252);
 - non-unicast IPv6 routes read back with RTA_OIF = lo;
 - `get_routes(table=0)` returns nothing; omit `table` to list all tables;
-- `route("del")` needs scope=255 (RT_SCOPE_NOWHERE) or device routes never match.
+- `route("del")` needs scope=255 (RT_SCOPE_NOWHERE) or device routes never match;
+- `route("get")` takes the mark as `mark=`; `fwmark=` is silently ignored.
 """
 
 from __future__ import annotations
@@ -143,6 +144,27 @@ class Kernel:
                     )
                     elements.add(NftElements(family, table, data["name"], members))
         return schema_hash, frozenset(elements)
+
+    def route_get(self, dst: str, mark: int | None, src: str | None = None) -> str | None:
+        """Output device the kernel picks for `dst` with `mark` (like `ip
+        route get <dst> mark <mark>`), or None if it is unreachable/rejected.
+        The pyroute2 keyword is `mark`; `fwmark` is silently ignored and would
+        report the uplink route instead (verified on 0.9.6)."""
+        args: dict[str, Any] = {"dst": dst}
+        if mark is not None:
+            args["mark"] = mark
+        if src is not None:
+            args["src"] = src
+        with IPRoute() as ipr:
+            try:
+                messages = ipr.route("get", **args)
+            except NetlinkError:
+                return None
+            if not messages or messages[0]["type"] != 1:
+                return None
+            oif = messages[0].get_attr("RTA_OIF")
+            names = ipr.get_links(oif) if oif else []
+            return str(names[0].get_attr("IFLA_IFNAME")) if names else None
 
     # -- apply --------------------------------------------------------------
 

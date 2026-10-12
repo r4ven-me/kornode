@@ -173,3 +173,20 @@ def test_tunnel_link_bounce_reinstalls_its_route(node: Namespace, tmp_path: Path
     finally:
         process.terminate()
         process.wait(timeout=10)
+
+
+@pytest.mark.netlab
+def test_explain_kernel_check_agrees_then_reports_drift(node: Namespace) -> None:
+    drive(node, "converge")
+    node.run(["ip", "route", "add", "default", "dev", "kup0"])  # uplink default in main
+
+    agree = drive(node, "explain", "10.100.3.15", "10.60.1.5")
+    assert agree["kernel_check"] == "ip route get 10.60.1.5 mark 0x0c000200 -> dev ktun1"
+    assert agree["warnings"] == []
+
+    node.run(["ip", "route", "del", "default", "dev", "ktun1", "table", "12002"])
+    drift = drive(node, "explain", "10.100.3.15", "10.60.1.5")
+    # Kill-switch holds (unreachable), and explain flags that the kernel no
+    # longer matches the compiled policy.
+    assert drift["kernel_check"] == "ip route get 10.60.1.5 mark 0x0c000200 -> unreachable"
+    assert drift["warnings"] == ["kernel routes it via nothing, compiled policy expects ktun1"]

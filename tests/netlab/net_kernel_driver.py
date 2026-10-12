@@ -21,7 +21,7 @@ from kornode.net.model import EgressPolicy
 from kornode.net.reconciler import Reconciler, serve_control, watch_netlink
 
 
-def desired(corp: list[str]):  # type: ignore[no-untyped-def]
+def build(corp: list[str]):  # type: ignore[no-untyped-def]
     policy = EgressPolicy.model_validate(
         {
             "sets": {"corp": {"routes": corp}},
@@ -48,7 +48,11 @@ def desired(corp: list[str]):  # type: ignore[no-untyped-def]
         uplink="kup0",
         all_rp_filter="1",
     )
-    return compile_policy(policy, facts).desired
+    return compile_policy(policy, facts), policy, facts
+
+
+def desired(corp: list[str]):  # type: ignore[no-untyped-def]
+    return build(corp)[0].desired
 
 
 def run(socket_path: Path) -> None:
@@ -65,6 +69,15 @@ def run(socket_path: Path) -> None:
 
 
 def main() -> None:
+    if sys.argv[1] == "explain":
+        from kornode.net.explain import explain
+
+        compiled, policy, facts = build(["10.60.0.0/16"])
+        decision = explain(
+            compiled, policy, facts, sys.argv[2], sys.argv[3], route_get=Kernel().route_get
+        )
+        print(json.dumps(decision.as_dict()))
+        return
     if sys.argv[1] == "run":
         run(Path(sys.argv[2]))
         return
