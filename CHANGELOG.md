@@ -23,6 +23,8 @@ incidents, without changing the model itself.
 
 ### Added
 
+- `kornode.net.reconciler`: converges the kernel on input changes, netlink events and a 10 s
+  timer (200 ms debounce, single flight, exponential backoff), with a status/wake Unix socket.
 - `kornode.net.kernel`: reads kernel state (pyroute2, /proc, `nft -j`) and applies a plan --
   netlink for rules/routes, one `nft -f` transaction for kornode's tables and set contents.
 - `kornode.net` egress model and compiler: an ordered first-match egress policy compiles

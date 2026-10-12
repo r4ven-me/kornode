@@ -2,18 +2,23 @@
 converge the real kernel with kornode.net.kernel, print what happened as JSON.
 
 Usage: net_kernel_driver.py converge|plan [--corp CIDR,...]
+       net_kernel_driver.py run SOCKET_PATH   (reconciler until SIGTERM)
 """
 
 from __future__ import annotations
 
 import ipaddress
 import json
+import signal
 import sys
+import threading
+from pathlib import Path
 
 from kornode.net.compile import NodeFacts, TunnelFact, compile_policy
 from kornode.net.diff import diff
 from kornode.net.kernel import Kernel
 from kornode.net.model import EgressPolicy
+from kornode.net.reconciler import Reconciler, serve_control, watch_netlink
 
 
 def desired(corp: list[str]):  # type: ignore[no-untyped-def]
@@ -46,7 +51,23 @@ def desired(corp: list[str]):  # type: ignore[no-untyped-def]
     return compile_policy(policy, facts).desired
 
 
+def run(socket_path: Path) -> None:
+    reconciler = Reconciler(lambda: desired(["10.60.0.0/16"]), Kernel())
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: (stop.set(), reconciler.stop()))
+    server = serve_control(reconciler, socket_path)
+    threading.Thread(target=watch_netlink, args=(reconciler, stop), daemon=True).start()
+    try:
+        reconciler.run_forever()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def main() -> None:
+    if sys.argv[1] == "run":
+        run(Path(sys.argv[2]))
+        return
     corp = ["10.60.0.0/16"]
     if "--corp" in sys.argv:
         corp = sys.argv[sys.argv.index("--corp") + 1].split(",")

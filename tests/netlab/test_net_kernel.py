@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from tests.netlab.lab import Lab, Namespace
+
+from kornode.net.reconciler import control_request
 
 DRIVER = Path(__file__).with_name("net_kernel_driver.py")
 ROOT = Path(__file__).resolve().parents[2]
@@ -99,3 +104,72 @@ def test_golden_rulesets_load_into_a_real_kernel(lab: Lab, name: str) -> None:
     )
 
     assert result.ok, result.stderr
+
+
+def _start_reconciler(ns: Namespace, socket_path: Path) -> subprocess.Popen[bytes]:
+    env = {**os.environ, "PYTHONPATH": f"{ROOT / 'backend'}:{ROOT}"}
+    return subprocess.Popen(  # noqa: S603 - explicit argv
+        ["ip", "netns", "exec", ns.full_name, sys.executable, str(DRIVER), "run", str(socket_path)],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _wait(predicate: Callable[[], bool], timeout: float) -> float:
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        if predicate():
+            return time.monotonic() - started
+        time.sleep(0.05)
+    raise AssertionError(f"not reached within {timeout}s")
+
+
+@pytest.mark.netlab
+def test_nl10_deleted_policy_route_is_restored_within_2s(
+    node: Namespace, tmp_path: Path
+) -> None:
+    sock = tmp_path / "reconciler.sock"
+    process = _start_reconciler(node, sock)
+
+    def tunnel_route() -> bool:
+        result = node.run(["ip", "route", "show", "table", "12002"], check=False)
+        return "default dev ktun1" in result.stdout
+
+    try:
+        _wait(lambda: sock.exists() and tunnel_route(), timeout=15)
+
+        node.run(["ip", "route", "del", "default", "dev", "ktun1", "table", "12002"])
+        elapsed = _wait(tunnel_route, timeout=5)
+
+        print(f"NL-10: policy route restored after {elapsed:.2f}s")
+        assert elapsed <= 2.0, f"restored after {elapsed:.2f}s"
+        status = control_request(sock, "status")["status"]
+        assert status["drift"].get("ReplaceRoute", 0) >= 1
+        assert status["last_error"] is None
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+@pytest.mark.netlab
+def test_tunnel_link_bounce_reinstalls_its_route(node: Namespace, tmp_path: Path) -> None:
+    sock = tmp_path / "reconciler.sock"
+    process = _start_reconciler(node, sock)
+
+    def tunnel_route() -> bool:
+        result = node.run(["ip", "route", "show", "table", "12002"], check=False)
+        return "default dev ktun1" in result.stdout
+
+    try:
+        _wait(lambda: sock.exists() and tunnel_route(), timeout=15)
+        node.run(["ip", "link", "set", "ktun1", "down"])  # kernel drops the route
+        _wait(lambda: not tunnel_route(), timeout=5)
+        table = node.run(["ip", "route", "show", "table", "12002"]).stdout
+        assert "unreachable default" in table  # kill-switch stays
+
+        node.run(["ip", "link", "set", "ktun1", "up"])
+        assert _wait(tunnel_route, timeout=5) <= 2.0
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
