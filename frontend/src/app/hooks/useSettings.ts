@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   saveAuthMethodsSettings,
+  saveFabricSettings,
   saveGeneralSettings,
   saveServerSettings,
   saveWebSettings,
@@ -10,11 +11,13 @@ import {
 import { syntheticCommand } from "../../lib/commands";
 import {
   type AuthMethodsDraft,
+  type FabricSettingsDraft,
   type GeneralSettingsDraft,
   type ServerSettingsDraft,
   type WebSettingsDraft,
   authMethodsPayload,
   readAuthMethodsDraft,
+  readFabricSettingsDraft,
   readGeneralSettingsDraft,
   readServerSettingsDraft,
   readWebSettingsDraft,
@@ -38,6 +41,9 @@ export function useSettings(core: PanelCore) {
   const [generalSettingsDraft, setGeneralSettingsDraft] = useState<GeneralSettingsDraft>(() =>
     readGeneralSettingsDraft({})
   );
+  const [fabricSettingsDraft, setFabricSettingsDraft] = useState<FabricSettingsDraft>(() =>
+    readFabricSettingsDraft({})
+  );
 
   core.registerHydrator("settings", ({ config }) => {
     if (!config) {
@@ -47,6 +53,7 @@ export function useSettings(core: PanelCore) {
     setAuthMethodsDraft(readAuthMethodsDraft(config));
     setWebSettingsDraft(readWebSettingsDraft(config));
     setGeneralSettingsDraft(readGeneralSettingsDraft(config));
+    setFabricSettingsDraft(readFabricSettingsDraft(config));
   });
 
   const saveServer = async () => {
@@ -174,6 +181,23 @@ export function useSettings(core: PanelCore) {
     }
   };
 
+  const saveFabric = async () => {
+    const result = await runAction("fabric-settings", "Fabric settings saved", (token) =>
+      saveFabricSettings(token, {
+        node_id: fabricSettingsDraft.nodeId,
+        enabled: fabricSettingsDraft.enabled,
+        cidr: fabricSettingsDraft.cidr,
+        client_pool: fabricSettingsDraft.clientPool,
+        source_pool: fabricSettingsDraft.sourcePool,
+        domain: fabricSettingsDraft.domain,
+        reserved: splitLines(fabricSettingsDraft.reserved)
+      })
+    );
+    if (result !== null) {
+      recordCommand("config", syntheticCommand(["korctl", "config", "fabric-settings"], "saved"));
+    }
+  };
+
   return {
     serverSettingsDraft,
     setServerSettingsDraft,
@@ -183,11 +207,14 @@ export function useSettings(core: PanelCore) {
     setWebSettingsDraft,
     generalSettingsDraft,
     setGeneralSettingsDraft,
+    fabricSettingsDraft,
+    setFabricSettingsDraft,
     saveServer,
     saveAuthMethods,
     testEmail,
     testTelegram,
     saveWeb,
-    saveGeneral
+    saveGeneral,
+    saveFabric
   };
 }

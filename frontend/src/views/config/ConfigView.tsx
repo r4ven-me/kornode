@@ -3,7 +3,7 @@ import type { ConfigSection } from "../../app/types";
 import { KorclientHint } from "../../components/KorclientHint";
 import { SettingsTabs } from "../../components/SettingsTabs";
 import { ActionButton, EmptyState, Pill } from "../../components/ui";
-import type { AuthMethodsDraft, GeneralSettingsDraft, ServerSettingsDraft, WebSettingsDraft } from "../../lib/drafts";
+import type { AuthMethodsDraft, FabricSettingsDraft, GeneralSettingsDraft, ServerSettingsDraft, WebSettingsDraft } from "../../lib/drafts";
 import { AdminTotpPanel } from "./AdminTotpPanel";
 import { type ConfigSource } from "../../api";
 
@@ -20,16 +20,19 @@ export function ConfigView({
   authMethodsDraft,
   webSettingsDraft,
   generalSettingsDraft,
+  fabricSettingsDraft,
   onServerSettingsDraftChange,
   onAuthMethodsDraftChange,
   onWebSettingsDraftChange,
   onGeneralSettingsDraftChange,
+  onFabricSettingsDraftChange,
   onSaveServerSettings,
   onSaveAuthMethodsSettings,
   onTestOtpEmail,
   onTestOtpTelegram,
   onSaveWebSettings,
   onSaveGeneralSettings,
+  onSaveFabricSettings,
   busy,
   onDraftChange,
   onReloadSource,
@@ -52,16 +55,19 @@ export function ConfigView({
   authMethodsDraft: AuthMethodsDraft;
   webSettingsDraft: WebSettingsDraft;
   generalSettingsDraft: GeneralSettingsDraft;
+  fabricSettingsDraft: FabricSettingsDraft;
   onServerSettingsDraftChange: (value: ServerSettingsDraft) => void;
   onAuthMethodsDraftChange: (value: AuthMethodsDraft) => void;
   onWebSettingsDraftChange: (value: WebSettingsDraft) => void;
   onGeneralSettingsDraftChange: (value: GeneralSettingsDraft) => void;
+  onFabricSettingsDraftChange: (value: FabricSettingsDraft) => void;
   onSaveServerSettings: () => void;
   onSaveAuthMethodsSettings: () => void;
   onTestOtpEmail: () => void;
   onTestOtpTelegram: () => void;
   onSaveWebSettings: () => void;
   onSaveGeneralSettings: () => void;
+  onSaveFabricSettings: () => void;
   busy: string | null;
   onDraftChange: (value: string) => void;
   onReloadSource: () => void;
@@ -423,6 +429,39 @@ export function ConfigView({
             busy={busy === "general-settings"}
             onClick={onSaveGeneralSettings}
           />
+        </div>
+      </section>
+      )}
+
+      {section === "fabric" && (
+      <section className="panel config-section-panel">
+        <div className="panel-header config-section-header">
+          <div>
+            <h2>Fabric</h2>
+            <p className="muted-line">Node identity, derived pools and reserved address space.</p>
+          </div>
+          <label className="switch">
+            <input checked={fabricSettingsDraft.enabled} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, enabled: event.target.checked })} type="checkbox" />
+            <span>Enabled</span>
+          </label>
+        </div>
+
+        <SettingsTabs ariaLabel="Fabric settings">
+          <details className="settings-details" open>
+            <summary>Node &amp; pools</summary>
+            <div className="settings-grid settings-details-body">
+              <label><span>Node ID</span><input type="number" min={1} max={254} value={fabricSettingsDraft.nodeId} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, nodeId: Math.min(254, Math.max(1, Number(event.target.value) || 1)) })} /></label>
+              <label><span>Fabric CIDR</span><input value={fabricSettingsDraft.cidr} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, cidr: event.target.value })} /></label>
+              <label><span>Client pool template</span><input value={fabricSettingsDraft.clientPool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, clientPool: event.target.value })} /></label>
+              <label><span>Source pool template</span><input value={fabricSettingsDraft.sourcePool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, sourcePool: event.target.value })} /></label>
+              <label><span>DNS domain</span><input value={fabricSettingsDraft.domain} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, domain: event.target.value })} /></label>
+              <label><span>Reserved CIDRs (one per line)</span><textarea rows={4} value={fabricSettingsDraft.reserved} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, reserved: event.target.value })} /></label>
+            </div>
+          </details>
+        </SettingsTabs>
+
+        <div className="panel-footer config-save-footer">
+          <ActionButton label="Save" icon={Save} primary busy={busy === "fabric-settings"} onClick={onSaveFabricSettings} />
         </div>
       </section>
       )}

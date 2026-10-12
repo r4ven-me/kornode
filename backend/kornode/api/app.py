@@ -31,7 +31,7 @@ from kornode.api import (
     routes_web_config,
 )
 from kornode.config.loader import DEFAULT_CONFIG_PATH, load_config
-from kornode.config.models import AppConfig
+from kornode.config.models import AddressOverlapError, AppConfig
 from kornode.services.audit import AuditService
 from kornode.services.command import CommandError
 
@@ -105,6 +105,16 @@ def create_app(
     @app.exception_handler(ValueError)
     def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(AddressOverlapError)
+    def address_overlap_handler(_request: Request, exc: AddressOverlapError) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "address_overlap",
+                "conflicts": [conflict.to_dict() for conflict in exc.conflicts],
+            },
+        )
 
     @app.exception_handler(CommandError)
     def command_error_handler(_request: Request, exc: CommandError) -> JSONResponse:

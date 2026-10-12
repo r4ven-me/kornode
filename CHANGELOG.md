@@ -23,6 +23,8 @@ incidents, without changing the model itself.
 
 ### Added
 
+- P2-07 fabric addressing config: `node.id`, `fabric.*`, derived server pool/DNS
+  listen values when enabled, overlap validation, and structured Fabric settings in the panel.
 - `kornode.net.reconciler`: converges the kernel on input changes, netlink events and a 10 s
   timer (200 ms debounce, single flight, exponential backoff), with a status/wake Unix socket.
 - `kornode.net.kernel`: reads kernel state (pyroute2, /proc, `nft -j`) and applies a plan --

@@ -503,16 +503,19 @@ export function App() {
             authMethodsDraft={settings.authMethodsDraft}
             webSettingsDraft={settings.webSettingsDraft}
             generalSettingsDraft={settings.generalSettingsDraft}
+            fabricSettingsDraft={settings.fabricSettingsDraft}
             onServerSettingsDraftChange={settings.setServerSettingsDraft}
             onAuthMethodsDraftChange={settings.setAuthMethodsDraft}
             onWebSettingsDraftChange={settings.setWebSettingsDraft}
             onGeneralSettingsDraftChange={settings.setGeneralSettingsDraft}
+            onFabricSettingsDraftChange={settings.setFabricSettingsDraft}
             onSaveServerSettings={() => void settings.saveServer()}
             onSaveAuthMethodsSettings={() => void settings.saveAuthMethods()}
             onTestOtpEmail={settings.testEmail}
             onTestOtpTelegram={settings.testTelegram}
             onSaveWebSettings={() => void settings.saveWeb()}
             onSaveGeneralSettings={() => void settings.saveGeneral()}
+            onSaveFabricSettings={() => void settings.saveFabric()}
             busy={busy}
             onDraftChange={configEditor.editDraft}
             onReloadSource={configEditor.reloadSource}
