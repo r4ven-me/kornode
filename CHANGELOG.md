@@ -23,6 +23,8 @@ incidents, without changing the model itself.
 
 ### Added
 
+- `kornode.net.state`/`diff`: kernel networking state as data and `diff(actual, desired)` into an
+  ordered, idempotent plan that only ever touches kornode-owned rules, routes and nft tables.
 - New `kornode.net` package (routing redesign P2): the future single owner of kernel
   networking state; import-restricted to stdlib/pydantic/pyroute2. New dependency: `pyroute2`.
 - `korctl doctor` (+ `GET /api/diagnostics/doctor` + a "Doctor" panel card on the Diagnostics
