@@ -1439,3 +1439,37 @@ def test_no_carrier_exemption_without_recorded_addresses(tmp_path: Path) -> None
     )
 
     assert "counter return" not in NftablesConfigRenderer().render(config)
+
+
+def _host_full_upstream_config(tmp_path: Path) -> AppConfig:
+    return AppConfig.model_validate(
+        {
+            "system": {"generated_dir": str(tmp_path / "generated")},
+            "routing": {"client_policy": "full", "host_policy": "full"},
+            "upstream": {
+                "enabled": True,
+                "interface": "oc-middle0",
+                "profiles": [{"name": "hub", "server": "203.0.113.2", "username": "u"}],
+            },
+        }
+    )
+
+
+def test_kill_switch_drops_marked_traffic_only_on_the_uplink(tmp_path: Path) -> None:
+    # D-21: connected LAN/docker/client networks reached via the
+    # suppress_prefixlength rule must not be dropped; only a leak out the
+    # uplink is.
+    rendered = NftablesConfigRenderer().render(
+        _host_full_upstream_config(tmp_path), uplink_interface="eth0"
+    )
+
+    assert 'meta mark 0x0c01 oifname "eth0" counter drop' in rendered
+    assert 'oifname != "oc-middle0" counter drop' not in rendered
+
+
+def test_kill_switch_stays_strict_when_uplink_is_unknown(tmp_path: Path) -> None:
+    rendered = NftablesConfigRenderer().render(
+        _host_full_upstream_config(tmp_path), uplink_interface=None
+    )
+
+    assert 'meta mark 0x0c01 oifname != "oc-middle0" counter drop' in rendered

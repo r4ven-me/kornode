@@ -112,15 +112,6 @@ def test_kill_switch_keeps_unreachable_default_and_blocks_uplink_leak(
 
 
 @pytest.mark.netlab
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "P0-03 vs kill-switch conflict found by netlab: rule 90 correctly routes "
-        "marked host traffic to a connected network via main, but the postrouting "
-        "kill-switch then drops it (marked, oif != tunnel). Needs a design decision, "
-        "see docs/redesign/DECISIONS.md D-21."
-    ),
-)
 def test_suppress_rule_keeps_connected_routes_ahead_of_policy_table(
     topology: Topology,
     connected_node3: UpstreamHandle,
@@ -135,7 +126,9 @@ def test_suppress_rule_keeps_connected_routes_ahead_of_policy_table(
 
     assert lan_body == f"echo from {NODE3_LAN_ADDR}\n"
     assert cli3_ping.ok
-    assert inet_body.startswith("echo from 10.250.0.")
+    # Tunneled: the hub masquerades VPN clients toward the internet, so inet
+    # sees the hub's address. A leak would show node3's own uplink address.
+    assert inet_body == f"echo from {HUB_ADDR}\n"
 
 
 @pytest.mark.netlab

@@ -271,7 +271,11 @@ table inet {{ filter_table }} {
     # policy route hasn't been installed yet -- drop it instead of letting
     # it leak out unencrypted via the host's own connection.
 {% for target in targets if target.killswitch %}
+{% if uplink_interface and uplink_interface != target.interface %}
+    meta mark {{ target.fwmark }} oifname "{{ uplink_interface }}" counter drop
+{% else %}
     meta mark {{ target.fwmark }} oifname != "{{ target.interface }}" counter drop
+{% endif %}
 {% endfor %}
   }
 {% endif %}
@@ -289,13 +293,21 @@ table inet {{ filter_table }} {
     # host) legitimately leaves via lo, never the tunnel.
     oifname "lo" accept
 {% if upstream_killswitch %}
+{% if uplink_interface and uplink_interface != outbound_interface %}
+    meta mark {{ config.routing.fwmark }} oifname "{{ uplink_interface }}" counter drop
+{% else %}
     meta mark {{ config.routing.fwmark }} oifname != "{{ outbound_interface }}" counter drop
+{% endif %}
 {% endif %}
     # Per-profile host routing is unconditional once a target exists (same
     # "explicitly assigned traffic must not silently leak" philosophy as the
     # client-side forward kill-switch above), regardless of host_policy.
 {% for target in host_targets %}
+{% if uplink_interface and uplink_interface != target.interface %}
+    meta mark {{ target.fwmark }} oifname "{{ uplink_interface }}" counter drop
+{% else %}
     meta mark {{ target.fwmark }} oifname != "{{ target.interface }}" counter drop
+{% endif %}
 {% endfor %}
   }
 {% endif %}

@@ -60,7 +60,13 @@ class NftablesConfigRenderer(TemplateRenderer):
         targets = RoutingService(config).list_targets(default_interface=outbound_interface)
         return targets, outbound_interface, upstream_active
 
-    def render(self, config: AppConfig, outbound_interface: str | None = None) -> str:
+    def render(
+        self,
+        config: AppConfig,
+        outbound_interface: str | None = None,
+        *,
+        uplink_interface: str | None = None,
+    ) -> str:
         from kornode.services.routing import RoutingService
 
         targets, outbound_interface, upstream_active = self.resolve_targets(
@@ -95,6 +101,13 @@ class NftablesConfigRenderer(TemplateRenderer):
             "host_traffic_enabled": config.routing.host_policy != "off",
             "host_mode": config.routing.host_policy,
             "carrier_addresses": carrier_addresses(config),
+            # Kill-switches drop marked traffic leaving via the uplink (the
+            # main table's default-route interface) -- not "anything but the
+            # tunnel", which also dropped marked traffic that the
+            # suppress_prefixlength rule correctly sends to a connected
+            # LAN/docker/client network (D-21). Unknown uplink -> the strict
+            # `!= tunnel` form is rendered instead (fail closed).
+            "uplink_interface": uplink_interface,
             "host_split_routes": routing_service.list_host_routes() if host_split_active else [],
             "host_split_domains": (
                 routing_service.list_host_domains() if host_split_active else []

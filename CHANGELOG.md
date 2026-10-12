@@ -34,6 +34,10 @@ incidents, without changing the model itself.
 
 ### Fixed
 
+- In `full` mode, kill-switches dropped marked traffic to this node's own connected networks
+  (LAN, docker bridge, client subnet) even though routing correctly sent it there; they now drop
+  only marked traffic leaving via the uplink (or, if the uplink can't be determined, anything not
+  leaving via the tunnel, as before).
 - `host_policy: full` loaded no nftables rules at all: the template emitted `ip6 counter ...`
   (a bare `ip6` is a syntax error for nft, incl. the 1.1.3 shipped in the image), so the whole
   ruleset failed to apply -- no marking, no kill-switch, no MSS clamp -- while `upstream connect`

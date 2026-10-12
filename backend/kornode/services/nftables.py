@@ -9,6 +9,7 @@ from kornode.config.models import AppConfig
 from kornode.renderers.nftables import NftablesConfigRenderer
 from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.files import FileManager
+from kornode.services.network_stats import NetworkStatsService
 from kornode.services.policy_routing import PolicyRoutingService
 from kornode.services.routing import RoutingTarget
 
@@ -40,7 +41,13 @@ class NftablesService:
         return f"{self.config.routing.nft_prefix}_nat"
 
     def render(self, outbound_interface: str | None = None) -> str:
-        return self.renderer.render(self.config, outbound_interface)
+        # Only kill-switch rules use it, and they only exist with upstream on.
+        uplink = (
+            NetworkStatsService(self.config, runner=self.runner).resolve_interface()
+            if self.config.upstream.enabled
+            else None
+        )
+        return self.renderer.render(self.config, outbound_interface, uplink_interface=uplink)
 
     @property
     def _targets_state_path(self) -> Path:
