@@ -1,4 +1,4 @@
-.PHONY: help install test netlab lint typecheck check render docker-build git-tag docker-tag docker-push docker-release docker-test docker-cli-check frontend-install frontend-build frontend-test frontend-e2e frontend-audit release
+.PHONY: help install test netlab parity lint typecheck check render docker-build git-tag docker-tag docker-push docker-release docker-test docker-cli-check frontend-install frontend-build frontend-test frontend-e2e frontend-audit release
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then printf '%s' '.venv/bin/python'; else printf '%s' 'python'; fi)
 NPM ?= npm
@@ -24,6 +24,9 @@ install:
 
 test:
 	$(PYTHON) -m pytest
+
+parity:
+	$(PYTHON) -m pytest tests/test_parity.py -q
 
 netlab:
 	$(PYTHON) -m pytest -m netlab -v

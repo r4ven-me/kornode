@@ -199,10 +199,12 @@ P0-03 с kill-switch (D-20, D-21).
 
 ### Фаза 2. Адресный план и ядро `kornode.net` (3–4 недели)
 
-- [ ] Пакет `kornode.net`: модель желаемого состояния (sysctl, rules, routes, nft) как чистые данные, компилятор, diff, применение на pyroute2. Без зависимостей от FastAPI и конфиг-модели панели — это будущее ядро агента.
-- [ ] Reconciler: netlink-подписка, таймер, атомарное применение. Все текущие точки применения (`connect`, `switch`, `recover`, `apply_server_routing_if_changed`, watchdog `ensure`) переводятся на «изменить вход + разбудить reconciler».
-- [ ] `node.id`, `fabric.cidr`, вывод пулов и служебного адреса; валидатор пересечений.
-- [ ] `explain` и `--dry-run` с diff.
+- [~] Пакет `kornode.net`: модель желаемого состояния (sysctl, rules, routes, nft) как чистые данные, компилятор, diff, применение на pyroute2. Без зависимостей от FastAPI и конфиг-модели панели — это будущее ядро агента.
+- [~] Reconciler: netlink-подписка, таймер, атомарное применение. Все текущие точки применения (`connect`, `switch`, `recover`, `apply_server_routing_if_changed`, watchdog `ensure`) переводятся на «изменить вход + разбудить reconciler».
+- [~] `node.id`, `fabric.cidr`, вывод пулов и служебного адреса; валидатор пересечений.
+- [~] `explain` и `--dry-run` с diff.
+
+> Статус (2026-10-12): ядро `kornode.net` (модель, компилятор, diff, адаптер ядра, reconciler, explain, адресация), `korctl net`/`/api/net`, страница Network, parity — готово и проверено на реальном ядре (netlab 22/22, NL-10 за ~0.3 с). **Не сделано:** перевод хаба на reconciler (P2-08/P2-09: удаление `NftablesService`/`PolicyRoutingService`, вызовы из `UpstreamService`, supervisor-программа) — см. `docs/redesign/NEXT_SESSION.md`.
 
 Готово, когда: в коде ровно одно место вызывает nft и меняет rules/routes, ручное удаление маршрута восстанавливается меньше чем за 2 с, а `kornode.net` импортируется без зависимостей панели.
 

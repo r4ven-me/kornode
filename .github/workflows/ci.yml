@@ -24,6 +24,7 @@ jobs:
       - run: make typecheck PYTHON=python
       - run: make test PYTHON=python
       - run: make render PYTHON=python
+      - run: make parity PYTHON=python
 
   netlab:
     runs-on: ubuntu-latest

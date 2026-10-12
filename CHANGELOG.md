@@ -8,6 +8,9 @@ incidents, without changing the model itself.
 
 ### Testing
 
+- `make parity` (+ CI step): `parity.yaml` maps every CLI command, API route and panel control
+  to a capability; fails on unlisted surfaces and on capabilities missing a side without a
+  stated exemption. Exemptions list the v1 parity gaps.
 - Regression baseline: the P0 netlab scenarios fail on `raven` (pre-P0) for the root causes
   P0 fixes and pass on `main`; procedure and results in `docs/spec/09-testing.md`.
 - Added P1-03 netlab scenarios that run real kornode-rendered ocserv/openconnect
