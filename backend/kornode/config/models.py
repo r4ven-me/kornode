@@ -8,7 +8,16 @@ import re
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+
+from kornode.net.addressing import (
+    Conflict,
+    OwnedPrefix,
+    check_overlaps,
+    derive_addresses,
+    validate_templates,
+)
+from kornode.net.errors import PolicyError
 
 DOMAIN_RE = re.compile(
     r"^(?=.{1,253}\.?$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
@@ -82,6 +91,18 @@ INTERVAL_UNIT_SECONDS: dict[str, int] = {
 def _validate_cidr(value: str) -> str:
     ipaddress.ip_network(value, strict=False)
     return value
+
+
+class AddressOverlapError(Exception):
+    def __init__(self, conflicts: list[Conflict]) -> None:
+        self.conflicts = conflicts
+        super().__init__(
+            "address_overlap: "
+            + "; ".join(
+                f"{conflict.prefix} overlaps {conflict.with_} ({conflict.owner})"
+                for conflict in conflicts
+            )
+        )
 
 
 def _validate_ip(value: str) -> str:
@@ -167,6 +188,47 @@ def profile_safe_name(name: str) -> str:
     gets rendered -- two profiles colliding on their normalized name would
     otherwise make the whole nft ruleset load fail."""
     return re.sub(r"[^a-z0-9_]", "_", name.lower())
+
+
+class NodeConfig(StrictModel):
+    id: int = Field(default=1, ge=1, le=254)
+
+
+class FabricConfig(StrictModel):
+    enabled: bool = False
+    cidr: str = "10.99.0.0/24"
+    client_pool: str = "10.100.{id}.0/24"
+    source_pool: str = "10.8.{id}.0/24"
+    domain: str = "kornode.internal"
+    reserved: list[str] = Field(default_factory=list)
+
+    @field_validator("cidr")
+    @classmethod
+    def validate_cidr(cls, value: str) -> str:
+        return _validate_cidr(value)
+
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, value: str) -> str:
+        return _validate_domain(value)
+
+    @field_validator("reserved")
+    @classmethod
+    def validate_reserved(cls, value: list[str]) -> list[str]:
+        return [_validate_cidr(item) for item in value]
+
+    @model_validator(mode="after")
+    def validate_address_templates(self) -> FabricConfig:
+        try:
+            validate_templates(
+                fabric_cidr=self.cidr,
+                client_pool=self.client_pool,
+                source_pool=self.source_pool,
+                reserved=self.reserved,
+            )
+        except PolicyError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
 
 
 class LogRotationConfig(StrictModel):
@@ -1170,7 +1232,111 @@ class AdvancedConfig(StrictModel):
     raw_ocserv_options: RawOcservOptions = Field(default_factory=list)
 
 
+def _context_explicit_paths(info: ValidationInfo) -> set[tuple[str, ...]] | None:
+    if isinstance(info.context, dict):
+        paths = info.context.get("explicit_paths")
+        if isinstance(paths, set):
+            return {tuple(str(part) for part in path) for path in paths}
+    return None
+
+
+def _raw_has_path(data: Any, path: tuple[str, ...]) -> bool:
+    current = data
+    for part in path:
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
+
+
+def _is_explicit(data: Any, info: ValidationInfo, path: tuple[str, ...]) -> bool:
+    explicit_paths = _context_explicit_paths(info)
+    if explicit_paths is not None:
+        return path in explicit_paths
+    return _raw_has_path(data, path)
+
+
+def _raw_section(data: dict[str, Any], name: str) -> dict[str, Any]:
+    section = data.get(name)
+    return dict(section) if isinstance(section, dict) else {}
+
+
 class AppConfig(StrictModel):
+    @model_validator(mode="before")
+    @classmethod
+    def derive_fabric_defaults(cls, data: Any, info: ValidationInfo) -> Any:
+        if not isinstance(data, dict):
+            return data
+        fabric_raw = _raw_section(data, "fabric")
+        if not _is_truthy(fabric_raw.get("enabled", False)):
+            return data
+
+        node_raw = _raw_section(data, "node")
+        node_id = int(node_raw.get("id", 1))
+        fabric_cidr = str(fabric_raw.get("cidr", "10.99.0.0/24"))
+        client_pool = str(fabric_raw.get("client_pool", "10.100.{id}.0/24"))
+        source_pool = str(fabric_raw.get("source_pool", "10.8.{id}.0/24"))
+        domain = str(fabric_raw.get("domain", "kornode.internal"))
+        reserved_raw = fabric_raw.get("reserved", [])
+        reserved = [str(item) for item in reserved_raw] if isinstance(reserved_raw, list) else []
+        try:
+            derived = derive_addresses(
+                node_id,
+                fabric_cidr=fabric_cidr,
+                client_pool=client_pool,
+                source_pool=source_pool,
+                domain=domain,
+            )
+        except PolicyError as exc:
+            raise ValueError(str(exc)) from exc
+
+        server = _raw_section(data, "server")
+        internal_dns = _raw_section(data, "internal_dns")
+        server_explicit = _is_explicit(data, info, ("server", "ipv4_network"))
+        dns_explicit = _is_explicit(data, info, ("internal_dns", "listen"))
+
+        if not server_explicit:
+            server["ipv4_network"] = str(derived.client_pool)
+        if not dns_explicit:
+            internal_dns["listen"] = str(derived.service_address)
+
+        conflicts: list[Conflict] = []
+        owned = [
+            OwnedPrefix(derived.source_pool, node_id, "source"),
+            OwnedPrefix(
+                ipaddress.ip_network(server.get("ipv4_network", str(derived.client_pool))),
+                node_id,
+                "client_pool",
+                adding=True,
+            ),
+        ]
+        overlap_result = check_overlaps(
+            owned,
+            fabric_cidr=fabric_cidr,
+            reserved=reserved,
+        )
+        conflicts.extend(overlap_result.errors)
+        if dns_explicit:
+            listen = internal_dns.get("listen", str(derived.service_address))
+            listen_ip = ipaddress.ip_address(listen)
+            client_network = ipaddress.ip_network(server["ipv4_network"], strict=False)
+            if listen_ip not in client_network:
+                conflicts.append(
+                    Conflict(
+                        str(listen_ip),
+                        node_id,
+                        str(client_network),
+                        "server.ipv4_network",
+                    )
+                )
+        if conflicts:
+            raise AddressOverlapError(conflicts)
+
+        updated = dict(data)
+        updated["server"] = server
+        updated["internal_dns"] = internal_dns
+        return updated
+
     @model_validator(mode="before")
     @classmethod
     def migrate_legacy_dns_keys(cls, data: Any) -> Any:
@@ -1234,6 +1400,8 @@ class AppConfig(StrictModel):
             data["internal_dns"] = internal_dns
         return data
 
+    node: NodeConfig = Field(default_factory=NodeConfig)
+    fabric: FabricConfig = Field(default_factory=FabricConfig)
     system: SystemConfig = Field(default_factory=SystemConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     certificates: CertificatesConfig = Field(default_factory=CertificatesConfig)

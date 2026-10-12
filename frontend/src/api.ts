@@ -391,9 +391,15 @@ async function requestJson<T>(
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
-      const payload = (await response.json()) as { detail?: unknown };
+      const payload = (await response.json()) as {
+        detail?: unknown;
+        error?: unknown;
+        conflicts?: unknown;
+      };
       if (payload.detail) {
         detail = formatApiDetail(payload.detail);
+      } else if (payload.error === "address_overlap" && Array.isArray(payload.conflicts)) {
+        detail = formatAddressOverlap(payload.conflicts);
       }
     } catch {
       // Keep status text for non-JSON responses.
@@ -401,6 +407,19 @@ async function requestJson<T>(
     throw new Error(detail);
   }
   return response.json() as Promise<T>;
+}
+
+function formatAddressOverlap(conflicts: unknown[]): string {
+  const messages = conflicts
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return "";
+      }
+      const record = item as Record<string, unknown>;
+      return `${String(record.prefix ?? "prefix")} overlaps ${String(record.with ?? "network")} (${String(record.owner ?? "owner")})`;
+    })
+    .filter((item) => item.length > 0);
+  return messages.length > 0 ? `address overlap: ${messages.join("; ")}` : "address overlap";
 }
 
 async function requestBlob(path: string, _token: string, init: RequestInit = {}): Promise<Blob> {
@@ -572,6 +591,26 @@ export function saveGeneralSettings(
   }
 ): Promise<{ status: string }> {
   return requestJson<{ status: string }>("/api/config/general-settings", token, {
+    method: "POST",
+    body: body(payload)
+  });
+}
+
+export type FabricSettings = {
+  node_id: number;
+  enabled: boolean;
+  cidr: string;
+  client_pool: string;
+  source_pool: string;
+  domain: string;
+  reserved: string[];
+};
+
+export function saveFabricSettings(
+  token: string,
+  payload: FabricSettings
+): Promise<{ status: string }> {
+  return requestJson<{ status: string }>("/api/config/fabric-settings", token, {
     method: "POST",
     body: body(payload)
   });

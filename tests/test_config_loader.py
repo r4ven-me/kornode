@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from kornode.config.loader import load_config
+from kornode.config.models import AddressOverlapError
 
 
 def test_internal_dns_listen_follows_a_customized_ipv4_network(tmp_path: Path) -> None:
@@ -50,12 +51,88 @@ def test_malformed_ipv4_network_still_raises_its_own_error(tmp_path: Path) -> No
 def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     config = load_config(tmp_path / "missing.yaml", environ={})
 
+    assert config.node.id == 1
+    assert config.fabric.enabled is False
     assert config.server.port == 443
     assert config.web.enabled is False
     assert config.routing.client_policy == "full"
     assert config.system.log_rotation.enabled is False
     assert config.certificates.letsencrypt.auto_renew_interval == 7
     assert config.certificates.letsencrypt.auto_renew_interval_unit == "days"
+
+
+def test_fabric_enabled_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"fabric": {"enabled": True}},
+        environ={},
+    )
+
+    assert config.node.id == 1
+    assert config.server.ipv4_network == "10.100.1.0/24"
+    assert config.internal_dns.listen == "10.100.1.1"
+
+
+def test_fabric_uses_node_id_for_derived_addresses(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"node": {"id": 7}, "fabric": {"enabled": True}},
+        environ={},
+    )
+
+    assert config.server.ipv4_network == "10.100.7.0/24"
+    assert config.internal_dns.listen == "10.100.7.1"
+
+
+def test_fabric_env_overrides_work(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        environ={
+            "KORNODE_NODE__ID": "9",
+            "KORNODE_FABRIC__ENABLED": "true",
+            "KORNODE_FABRIC__CLIENT_POOL": '"10.110.{id}.0/24"',
+        },
+    )
+
+    assert config.node.id == 9
+    assert config.fabric.client_pool == "10.110.{id}.0/24"
+    assert config.server.ipv4_network == "10.110.9.0/24"
+    assert config.internal_dns.listen == "10.110.9.1"
+
+
+def test_explicit_server_network_overrides_fabric_derived_default(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "fabric": {"enabled": True},
+            "server": {"ipv4_network": "10.120.1.0/24"},
+            "internal_dns": {"listen": "10.120.1.1"},
+        },
+        environ={},
+    )
+
+    assert config.server.ipv4_network == "10.120.1.0/24"
+    assert config.internal_dns.listen == "10.120.1.1"
+
+
+def test_explicit_server_network_rejects_fabric_overlap(tmp_path: Path) -> None:
+    with pytest.raises(AddressOverlapError) as exc_info:
+        load_config(
+            tmp_path / "missing.yaml",
+            cli_overrides={
+                "fabric": {"enabled": True, "reserved": ["10.120.0.0/16"]},
+                "server": {"ipv4_network": "10.120.1.0/24"},
+                "internal_dns": {"listen": "10.120.1.1"},
+            },
+            environ={},
+        )
+
+    assert exc_info.value.conflicts[0].to_dict() == {
+        "prefix": "10.120.1.0/24",
+        "node": 1,
+        "with": "10.120.0.0/16",
+        "owner": "fabric.reserved",
+    }
 
 
 def test_load_config_defaults_for_new_server_tuning_fields(tmp_path: Path) -> None:

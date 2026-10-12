@@ -3,6 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "node": {"id": 1},
+    "fabric": {
+        "enabled": False,
+        "cidr": "10.99.0.0/24",
+        "client_pool": "10.100.{id}.0/24",
+        "source_pool": "10.8.{id}.0/24",
+        "domain": "kornode.internal",
+        "reserved": [],
+    },
     "system": {
         "timezone": "UTC",
         "data_dir": "/var/lib/kornode",

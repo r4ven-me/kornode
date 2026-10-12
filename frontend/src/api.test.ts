@@ -4,6 +4,7 @@ import {
   applyInternalDns,
   login,
   saveAuthMethodsSettings,
+  saveFabricSettings,
   saveInternalDnsSettings,
   saveRoutingSettings,
   saveUpstreamProfile,
@@ -138,6 +139,41 @@ describe("OTP delivery settings API", () => {
     expect(path).toBe(expectedPath);
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual(authMethodsPayload);
+  });
+});
+
+describe("saveFabricSettings", () => {
+  it("sends the structured fabric payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "saved" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await saveFabricSettings("session", {
+      node_id: 3,
+      enabled: true,
+      cidr: "10.99.0.0/24",
+      client_pool: "10.100.{id}.0/24",
+      source_pool: "10.8.{id}.0/24",
+      domain: "kornode.internal",
+      reserved: ["10.200.0.0/16"]
+    });
+
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/config/fabric-settings");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      node_id: 3,
+      enabled: true,
+      cidr: "10.99.0.0/24",
+      client_pool: "10.100.{id}.0/24",
+      source_pool: "10.8.{id}.0/24",
+      domain: "kornode.internal",
+      reserved: ["10.200.0.0/16"]
+    });
   });
 });
 
