@@ -45,7 +45,8 @@ class NetService:
     def plan(self) -> dict[str, Any]:
         compiled = self.inputs.compiled()
         keys = [sysctl.key for sysctl in compiled.desired.sysctls]
-        plan = diff(self.kernel.read(keys), compiled.desired)
+        chains = sorted({rule.chain_key for rule in compiled.desired.foreign_rules})
+        plan = diff(self.kernel.read(keys, chains), compiled.desired)
         return {
             "ops": _plan_dict(plan),
             "warnings": list(compiled.warnings),

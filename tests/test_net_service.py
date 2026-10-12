@@ -20,7 +20,9 @@ class FakeKernel:
     def __init__(self) -> None:
         self.state = ActualState()
 
-    def read(self, sysctl_keys: list[str]) -> ActualState:
+    def read(
+        self, sysctl_keys: list[str], foreign_chains: object = ()
+    ) -> ActualState:
         return self.state
 
     def apply(self, plan: Plan) -> None:

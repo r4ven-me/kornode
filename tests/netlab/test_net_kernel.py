@@ -190,3 +190,66 @@ def test_explain_kernel_check_agrees_then_reports_drift(node: Namespace) -> None
     # longer matches the compiled policy.
     assert drift["kernel_check"] == "ip route get 10.60.1.5 mark 0x0c000200 -> unreachable"
     assert drift["warnings"] == ["kernel routes it via nothing, compiled policy expects ktun1"]
+
+
+def _docker_user(ns: Namespace) -> str:
+    return ns.run(["nft", "list", "chain", "ip", "filter", "DOCKER-USER"]).stdout
+
+
+@pytest.mark.netlab
+def test_docker_user_compat_rules_are_tagged_and_idempotent(node: Namespace) -> None:
+    ns_script = (
+        "table ip filter {\n"
+        "  chain DOCKER-USER {\n"
+        "    ip saddr 172.17.0.0/16 counter return\n"
+        "  }\n"
+        "}\n"
+    )
+    node.run(["nft", "-f", "-"], input_text=ns_script)
+
+    result = drive(node, "converge")
+
+    assert result["after"] == []
+    chain = _docker_user(node)
+    assert 'ip saddr 10.100.3.0/24 accept comment "kornode-compat"' in chain
+    assert 'ip daddr 10.100.3.0/24 accept comment "kornode-compat"' in chain
+    assert "ip saddr 172.17.0.0/16 counter" in chain  # Docker's own rule kept
+    assert chain.count("kornode-compat") == 2
+    assert drive(node, "plan")["plan"] == []
+
+
+@pytest.mark.netlab
+def test_no_docker_user_chain_means_no_compat_rules(node: Namespace) -> None:
+    assert drive(node, "converge")["after"] == []
+    assert not node.run(["nft", "list", "table", "ip", "filter"], check=False).ok
+
+
+@pytest.mark.netlab
+def test_v1_state_is_removed_once_and_only_v1_state(node: Namespace) -> None:
+    v1 = (
+        "table inet kornode_filter {\n"
+        "  chain forward { type filter hook forward priority filter; policy accept; }\n"
+        "}\n"
+        "table ip filter {\n"
+        "  chain DOCKER-USER {\n"
+        "    ip saddr 10.100.3.0/24 accept\n"
+        "    ip daddr 10.100.3.0/24 accept\n"
+        "    ip saddr 172.17.0.0/16 counter return\n"
+        "  }\n"
+        "}\n"
+    )
+    node.run(["nft", "-f", "-"], input_text=v1)
+    node.run(["ip", "route", "add", "default", "dev", "ktun1", "table", "1201"])
+    node.run(["ip", "route", "add", "unreachable", "default", "table", "1201", "metric", "4096"])
+    node.run(["ip", "route", "add", "10.9.0.0/16", "dev", "kup0", "table", "300"])
+
+    drive(node, "cleanup")
+
+    assert not node.run(["nft", "list", "table", "inet", "kornode_filter"], check=False).ok
+    tables = node.run(["ip", "route", "show", "table", "1201"], check=False)
+    assert tables.stdout.strip() == ""
+    assert "10.9.0.0/16" in node.run(["ip", "route", "show", "table", "300"]).stdout
+    chain = _docker_user(node)
+    assert "ip saddr 10.100.3.0/24 accept" not in chain
+    assert "ip saddr 172.17.0.0/16 counter" in chain
+    drive(node, "cleanup")  # idempotent

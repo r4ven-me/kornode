@@ -32,8 +32,10 @@ from pyroute2.netlink.exceptions import NetlinkError  # type: ignore[import-unty
 
 from kornode.net.diff import (
     AddRule,
+    DeleteForeignRule,
     DelRoute,
     DelRule,
+    InsertForeignRule,
     NftLoad,
     Op,
     Plan,
@@ -43,11 +45,13 @@ from kornode.net.diff import (
 )
 from kornode.net.errors import ApplyError
 from kornode.net.state import (
+    COMPAT_COMMENT,
     OWNED_NFT_TABLES,
     TABLE_ID_MAX,
     TABLE_ID_MIN,
     ActualState,
     Family,
+    ForeignNftRule,
     IpRule,
     NftElements,
     Route,
@@ -80,7 +84,11 @@ class Kernel:
 
     # -- read ---------------------------------------------------------------
 
-    def read(self, sysctl_keys: Iterable[str] = ()) -> ActualState:
+    def read(
+        self,
+        sysctl_keys: Iterable[str] = (),
+        foreign_chains: Iterable[tuple[str, str, str]] = (),
+    ) -> ActualState:
         with IPRoute() as ipr:
             links = {link["index"]: link.get_attr("IFLA_IFNAME") for link in ipr.get_links()}
             rules = frozenset(
@@ -98,13 +106,84 @@ class Kernel:
                 if (route := _parse_route(message, links)) is not None
             )
         schema_hash, elements = self._read_nft()
+        chains, foreign = self._read_foreign(foreign_chains)
         return ActualState(
             sysctls=frozenset(self._read_sysctls(sysctl_keys)),
             rules=rules,
             routes=routes,
             nft_schema_hash=schema_hash,
             elements=elements,
+            foreign_rules=foreign,
+            foreign_chains=chains,
         )
+
+    def _list_chain(self, family: str, table: str, chain: str) -> list[tuple[str, str]] | None:
+        """(rule text, handle) of every rule in a chain, None if absent."""
+        result = subprocess.run(
+            [self.nft, "-a", "list", "chain", family, table, chain],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        rules = []
+        for line in result.stdout.splitlines():
+            text, _, handle = line.strip().rpartition("# handle ")
+            if handle.isdigit() and text and not text.startswith(("chain ", "type ")):
+                rules.append((text.strip(), handle))
+        return rules
+
+    def _read_foreign(
+        self, chains: Iterable[tuple[str, str, str]]
+    ) -> tuple[frozenset[tuple[str, str, str]], frozenset[ForeignNftRule]]:
+        present: set[tuple[str, str, str]] = set()
+        found: set[ForeignNftRule] = set()
+        tag = f'comment "{COMPAT_COMMENT}"'
+        for family, table, chain in set(chains):
+            rules = self._list_chain(family, table, chain)
+            if rules is None:
+                continue
+            present.add((family, table, chain))
+            for text, _ in rules:
+                if text.endswith(tag):
+                    expr = text[: -len(tag)].strip()
+                    found.add(ForeignNftRule(family, table, chain, expr))
+        return frozenset(present), frozenset(found)
+
+    def remove_v1_state(
+        self,
+        *,
+        filter_table: str,
+        route_tables: Iterable[int],
+        docker_exprs: Iterable[str],
+    ) -> None:
+        """One-shot migration from v1 (P2-08): v1's `inet <prefix>_filter`
+        table, the routes in its policy tables (1201+), and its untagged
+        DOCKER-USER accept rules. v1's ip rules (priorities 90-199) and its
+        `ip <prefix>_nat` table are owned ranges/names and get reconciled
+        away/replaced by the normal diff. Safe to run when nothing is there."""
+        subprocess.run(
+            [self.nft, "delete", "table", "inet", filter_table],
+            capture_output=True,
+            check=False,
+        )
+        with IPRoute() as ipr:
+            for table in route_tables:
+                for af in _AF.values():
+                    for message in ipr.get_routes(family=af, table=table):
+                        try:
+                            ipr.route("del", **_raw_route_del_args(message, table))
+                        except NetlinkError:
+                            continue
+        wanted = set(docker_exprs)
+        for text, handle in self._list_chain("ip", "filter", "DOCKER-USER") or []:
+            if text in wanted:
+                subprocess.run(
+                    [self.nft, "delete", "rule", "ip", "filter", "DOCKER-USER", "handle", handle],
+                    capture_output=True,
+                    check=False,
+                )
 
     def _read_sysctls(self, keys: Iterable[str]) -> list[Sysctl]:
         found = []
@@ -177,6 +256,10 @@ class Kernel:
         with IPRoute() as ipr:
             while index < len(ops):
                 op = ops[index]
+                if isinstance(op, (InsertForeignRule, DeleteForeignRule)):
+                    self._apply_foreign(op)
+                    index += 1
+                    continue
                 if isinstance(op, (NftLoad, UpdateElements)):
                     batch: list[NftLoad | UpdateElements] = []
                     while index < len(ops) and isinstance(ops[index], (NftLoad, UpdateElements)):
@@ -203,6 +286,30 @@ class Kernel:
             ipr.route("replace", **_route_args(op.route, ipr))
         elif isinstance(op, DelRoute):
             ipr.route("del", **_route_args(op.route, ipr, for_delete=True))
+
+    def _apply_foreign(self, op: InsertForeignRule | DeleteForeignRule) -> None:
+        rule = op.rule
+        if isinstance(op, InsertForeignRule):
+            argv = [
+                self.nft, "insert", "rule", rule.family, rule.table, rule.chain,
+                *rule.expr.split(), "comment", f'"{COMPAT_COMMENT}"',
+            ]
+        else:
+            tagged = f'{rule.expr} comment "{COMPAT_COMMENT}"'
+            handles = [
+                handle
+                for text, handle in self._list_chain(rule.family, rule.table, rule.chain) or []
+                if text == tagged
+            ]
+            if not handles:
+                return
+            argv = [
+                self.nft, "delete", "rule", rule.family, rule.table, rule.chain,
+                "handle", handles[0],
+            ]
+        result = subprocess.run(argv, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            raise ApplyError(f"{op}: {result.stderr.strip()}")
 
     def _apply_nft(self, batch: list[NftLoad | UpdateElements]) -> None:
         lines: list[str] = []
@@ -337,4 +444,20 @@ def _route_args(route: Route, ipr: Any, *, for_delete: bool = False) -> dict[str
             args["oif"] = matches[0]
         if route.gateway is not None:
             args["gateway"] = route.gateway
+    return args
+
+
+def _raw_route_del_args(message: Any, table: int) -> dict[str, Any]:
+    attrs = dict(message["attrs"])
+    args: dict[str, Any] = {
+        "family": message["family"],
+        "table": table,
+        "type": message["type"],
+        "scope": 255,
+        "proto": 0,
+        "priority": attrs.get("RTA_PRIORITY", 0),
+    }
+    dst = attrs.get("RTA_DST")
+    zero = "0.0.0.0" if message["family"] == socket.AF_INET else "::"
+    args["dst"] = f"{dst or zero}/{message['dst_len']}"
     return args

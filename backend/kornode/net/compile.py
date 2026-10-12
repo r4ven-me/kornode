@@ -17,6 +17,7 @@ from kornode.net.model import EgressPolicy, InlineDest, NodeRef, Rule, SetRef, V
 from kornode.net.state import (
     DesiredState,
     Family,
+    ForeignNftRule,
     IpRule,
     NftElements,
     NftRuleset,
@@ -299,6 +300,7 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
         routes=_routes(exit_list, facts),
         nft=NftRuleset(script),
         elements=_elements(elements, policy, facts),
+        foreign_rules=_docker_user_rules(policy, facts),
     )
     return Compiled(
         desired=desired,
@@ -464,3 +466,17 @@ def _elements(
     items.add(NftElements(family, table, "carrier_v4", frozenset(carrier4)))
     items.add(NftElements(family, table, "carrier_v6", frozenset(carrier6)))
     return frozenset(items)
+
+
+def _docker_user_rules(policy: EgressPolicy, facts: NodeFacts) -> frozenset[ForeignNftRule]:
+    """Accept forwarded client/source traffic in Docker's DOCKER-USER chain:
+    on a Docker host its `ip filter` FORWARD policy is drop, and an accept in
+    kornode's own table does not exempt a packet from another table's base
+    chain. Only installed when that chain exists (kernel adapter)."""
+    networks = [str(facts.client_pool)] if facts.client_pool is not None else []
+    networks += [source.cidr for source in policy.sources if ":" not in source.cidr]
+    return frozenset(
+        ForeignNftRule("ip", "filter", "DOCKER-USER", f"ip {direction} {network} accept")
+        for network in networks
+        for direction in ("saddr", "daddr")
+    )

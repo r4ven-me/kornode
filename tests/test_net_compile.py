@@ -89,6 +89,7 @@ def _render(compiled: Compiled) -> dict[str, str]:
             for item in sorted(state.elements, key=lambda item: item.set_key)
         ),
         "sysctls": "".join(f"{s.key}={s.value}\n" for s in sorted(state.sysctls, key=repr)),
+        "foreign": "".join(f"{rule}\n" for rule in sorted(state.foreign_rules, key=repr)),
     }
 
 

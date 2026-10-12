@@ -14,6 +14,7 @@ from kornode.net.state import (
     OWNED_NFT_TABLES,
     ActualState,
     DesiredState,
+    ForeignNftRule,
     IpRule,
     NftElements,
     NftRuleset,
@@ -72,7 +73,27 @@ class UpdateElements:
     target: frozenset[str] = frozenset()
 
 
-Op = SetSysctl | AddRule | DelRule | ReplaceRoute | DelRoute | NftLoad | UpdateElements
+@dataclass(frozen=True, slots=True)
+class InsertForeignRule:
+    rule: ForeignNftRule
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteForeignRule:
+    rule: ForeignNftRule
+
+
+Op = (
+    SetSysctl
+    | AddRule
+    | DelRule
+    | ReplaceRoute
+    | DelRoute
+    | NftLoad
+    | UpdateElements
+    | InsertForeignRule
+    | DeleteForeignRule
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +133,12 @@ def diff(actual: ActualState, desired: DesiredState) -> Plan:
 
     ops.extend(_nft_ops(actual, desired))
 
+    for foreign in sorted(desired.foreign_rules - actual.foreign_rules, key=repr):
+        if foreign.chain_key in actual.foreign_chains:
+            ops.append(InsertForeignRule(foreign))
+    for foreign in sorted(actual.foreign_rules - desired.foreign_rules, key=repr):
+        ops.append(DeleteForeignRule(foreign))
+
     desired_keys = {route.key for route in desired.routes}
     stale = [route for route in actual_routes if route.key not in desired_keys]
     for route in sorted(stale, key=_route_sort_key):
@@ -150,6 +177,7 @@ def apply_to_state(state: ActualState, plan: Plan) -> ActualState:
     routes = {route.key: route for route in state.routes}
     schema_hash = state.nft_schema_hash
     elements = {item.set_key: item for item in state.elements}
+    foreign = set(state.foreign_rules)
 
     for op in plan.ops:
         if isinstance(op, SetSysctl):
@@ -162,6 +190,10 @@ def apply_to_state(state: ActualState, plan: Plan) -> ActualState:
             routes[op.route.key] = op.route
         elif isinstance(op, DelRoute):
             routes.pop(op.route.key, None)
+        elif isinstance(op, InsertForeignRule):
+            foreign.add(op.rule)
+        elif isinstance(op, DeleteForeignRule):
+            foreign.discard(op.rule)
         elif isinstance(op, NftLoad):
             schema_hash = op.ruleset.schema_hash
             elements = {
@@ -182,6 +214,7 @@ def apply_to_state(state: ActualState, plan: Plan) -> ActualState:
         routes=frozenset(routes.values()),
         nft_schema_hash=schema_hash,
         elements=frozenset(elements.values()),
+        foreign_rules=frozenset(foreign),
     )
 
 
@@ -224,5 +257,11 @@ def describe(op: Op) -> str:
         return f"delete route {_route_text(op.route)}"
     if isinstance(op, NftLoad):
         return f"load nft ruleset (schema {op.ruleset.schema_hash[:12]})"
+    if isinstance(op, InsertForeignRule):
+        rule = op.rule
+        return f"insert into {rule.family} {rule.table} {rule.chain}: {rule.expr}"
+    if isinstance(op, DeleteForeignRule):
+        rule = op.rule
+        return f"delete from {rule.family} {rule.table} {rule.chain}: {rule.expr}"
     changes = [f"+{item}" for item in sorted(op.add)] + [f"-{item}" for item in sorted(op.delete)]
     return f"nft set {op.family} {op.table} {op.set_name}: {' '.join(changes)}"

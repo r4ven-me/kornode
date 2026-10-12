@@ -148,6 +148,27 @@ class NftElements:
         return (self.family, self.table, self.set_name)
 
 
+COMPAT_COMMENT = "kornode-compat"
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignNftRule:
+    """A rule kornode keeps in someone else's chain -- today only Docker's
+    documented `ip filter DOCKER-USER` hook, which otherwise drops forwarded
+    VPN traffic. Always tagged with `comment "kornode-compat"` in the kernel
+    so kornode can tell its own rules from the chain owner's. Never created
+    when the chain doesn't exist."""
+
+    family: str
+    table: str
+    chain: str
+    expr: str
+
+    @property
+    def chain_key(self) -> tuple[str, str, str]:
+        return (self.family, self.table, self.chain)
+
+
 @dataclass(frozen=True, slots=True)
 class DesiredState:
     sysctls: frozenset[Sysctl] = frozenset()
@@ -155,6 +176,7 @@ class DesiredState:
     routes: frozenset[Route] = frozenset()
     nft: NftRuleset | None = None
     elements: frozenset[NftElements] = frozenset()
+    foreign_rules: frozenset[ForeignNftRule] = frozenset()
 
     def __post_init__(self) -> None:
         for rule in self.rules:
@@ -189,6 +211,10 @@ class ActualState:
     routes: frozenset[Route] = frozenset()
     nft_schema_hash: str | None = None
     elements: frozenset[NftElements] = frozenset()
+    # kornode-tagged rules found in foreign chains, and which of the chains
+    # asked about exist at all.
+    foreign_rules: frozenset[ForeignNftRule] = frozenset()
+    foreign_chains: frozenset[tuple[str, str, str]] = frozenset()
 
 
 def owns_rule(rule: IpRule) -> bool:
