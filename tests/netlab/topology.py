@@ -51,6 +51,7 @@ DNS_NAME_MONITORING = "monitoring.kornode.internal"
 
 @dataclass
 class Topology:
+    lab: Lab
     inet: Namespace
     hub: Namespace
     node2: Namespace
@@ -84,7 +85,15 @@ def build_default_topology(lab: Lab) -> Topology:
     node3 = lab.add_namespace("node3")
     cli3 = lab.add_namespace("cli3")
     ext = lab.add_namespace("ext")
-    topology = Topology(inet=inet, hub=hub, node2=node2, node3=node3, cli3=cli3, ext=ext)
+    topology = Topology(
+        lab=lab,
+        inet=inet,
+        hub=hub,
+        node2=node2,
+        node3=node3,
+        cli3=cli3,
+        ext=ext,
+    )
 
     try:
         _wire_inet_spoke(lab, inet, hub, f"{INET_HUB_ADDR}/28", f"{HUB_ADDR}/28")
