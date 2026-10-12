@@ -22,6 +22,7 @@ from kornode.api import (
     routes_identity,
     routes_internal_dns,
     routes_logs,
+    routes_net,
     routes_routing,
     routes_server,
     routes_sessions,
@@ -149,6 +150,7 @@ def create_app(
     app.include_router(routes_upstream.router, prefix="/api/upstream", tags=["upstream"])
     app.include_router(routes_terminal.router, prefix="/api/terminal", tags=["terminal"])
     app.include_router(routes_diagnostics.router, prefix="/api/diagnostics", tags=["diagnostics"])
+    app.include_router(routes_net.router, prefix="/api/net", tags=["net"])
     app.include_router(routes_logs.router, prefix="/api/logs", tags=["logs"])
     app.include_router(routes_web_config.router, prefix="/api/web-config", tags=["web-config"])
 

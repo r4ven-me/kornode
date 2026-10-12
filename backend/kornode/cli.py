@@ -32,6 +32,7 @@ from kornode.services.groups import GroupConfigService
 from kornode.services.host_dns import HostDnsService
 from kornode.services.internal_dns import InternalDnsService
 from kornode.services.logs import LogRotationService, LogService
+from kornode.services.net import NetService, run_reconciler
 from kornode.services.nftables import NftablesService
 from kornode.services.otp import OtpService
 from kornode.services.password_hash import hash_password
@@ -64,6 +65,7 @@ identity_oidc_app = typer.Typer(help="Manage OIDC connector settings")
 identity_group_app = typer.Typer(help="Manage VPN group policies")
 identity_group_config_app = typer.Typer(help="Manage ocserv config-per-group files")
 nft_app = typer.Typer(help="Manage project-owned nftables state")
+net_app = typer.Typer(help="Routing core: plan, apply, explain, run the reconciler")
 host_dns_app = typer.Typer(help="Point the host's resolver at the built-in dnsmasq")
 web_app = typer.Typer(help="Manage Web GUI security")
 
@@ -1199,6 +1201,68 @@ def nft_apply(
             echo_result(result)
 
 
+@net_app.command("plan")
+def net_plan(as_json: bool = typer.Option(False, "--json")) -> None:
+    """What the reconciler would change in the kernel right now."""
+    plan = NetService(get_config()).plan()
+    if as_json:
+        typer.echo(json.dumps(plan, indent=2))
+        return
+    for exit_ in plan["exits"]:
+        state = "up" if exit_["up"] else "down"
+        table = exit_["table"] if exit_["table"] is not None else "-"
+        typer.echo(f"exit {exit_['name']}: mark {exit_['mark']} table {table} ({state})")
+    for warning in plan["warnings"]:
+        typer.echo(f"warning: {warning}", err=True)
+    if not plan["ops"]:
+        typer.echo("kernel matches the compiled policy")
+    for op in plan["ops"]:
+        typer.echo(f"  {op['text']}")
+
+
+@net_app.command("apply")
+def net_apply(
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Converge the kernel now (wakes the reconciler, or runs one pass)."""
+    result = NetService(get_config()).apply(dry_run=dry_run)
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+        return
+    if dry_run:
+        for op in result["ops"]:
+            typer.echo(f"dry-run: {op['text']}")
+        return
+    status = result.get("status", {})
+    typer.echo(f"applied via {result['via']}")
+    if status.get("last_error"):
+        typer.echo(f"error: {status['last_error']}", err=True)
+        raise typer.Exit(1)
+
+
+@net_app.command("explain")
+def net_explain(
+    src: str = typer.Argument(..., help="Source address, or 'host'"),
+    dst: str = typer.Argument(..., help="Destination address"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Why traffic from SRC to DST goes where it goes."""
+    decision = NetService(get_config()).explain(src, dst)
+    if as_json:
+        typer.echo(json.dumps(decision, indent=2))
+        return
+    for key, value in decision.items():
+        if value not in (None, [], ""):
+            typer.echo(f"{key}: {value}")
+
+
+@net_app.command("run")
+def net_run() -> None:
+    """Run the reconciler (supervisor program; not a management action)."""
+    run_reconciler(STATE.get("config_path") or DEFAULT_CONFIG_PATH, STATE.get("env_file"))
+
+
 @nft_app.command("show")
 def nft_show() -> None:
     echo_result(NftablesService(get_config()).show())
@@ -1288,6 +1352,7 @@ app.add_typer(routes_app, name="routes")
 app.add_typer(domains_app, name="domains")
 app.add_typer(internal_dns_app, name="internal-dns")
 app.add_typer(nft_app, name="nft")
+app.add_typer(net_app, name="net")
 app.add_typer(host_dns_app, name="host-dns")
 app.add_typer(web_app, name="web")
 

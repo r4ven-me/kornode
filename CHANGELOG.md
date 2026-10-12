@@ -23,6 +23,8 @@ incidents, without changing the model itself.
 
 ### Added
 
+- `korctl net plan|apply|explain|run` and `GET /api/net/plan`, `POST /api/net/apply`,
+  `POST /api/net/explain`, `GET /api/net/status`, all on one `NetService`.
 - `kornode.config.legacy`: v1 routing keys (`client_policy`, `host_policy`, split lists,
   per-profile client/host routing) translate into an egress policy; named profiles win over the
   defaults by coming first. Golden translation for every file in `examples/`.

@@ -183,3 +183,46 @@ def apply_to_state(state: ActualState, plan: Plan) -> ActualState:
         nft_schema_hash=schema_hash,
         elements=frozenset(elements.values()),
     )
+
+
+def _rule_text(rule: IpRule) -> str:
+    parts = [f"{rule.priority}:", "from all"]
+    if rule.to:
+        parts.append(f"to {rule.to}")
+    if rule.fwmark is not None:
+        mask = f"/0x{rule.fwmask:x}" if rule.fwmask is not None else ""
+        parts.append(f"fwmark 0x{rule.fwmark:x}{mask}")
+    parts.append(f"lookup {rule.table}")
+    if rule.suppress_prefixlength is not None:
+        parts.append(f"suppress_prefixlength {rule.suppress_prefixlength}")
+    return f"ipv{rule.family} " + " ".join(parts)
+
+
+def _route_text(route: Route) -> str:
+    parts: list[str] = [route.type] if route.type != "unicast" else []
+    parts.append(route.dst)
+    if route.gateway:
+        parts.append(f"via {route.gateway}")
+    if route.dev:
+        parts.append(f"dev {route.dev}")
+    if route.metric:
+        parts.append(f"metric {route.metric}")
+    return f"ipv{route.family} table {route.table}: " + " ".join(parts)
+
+
+def describe(op: Op) -> str:
+    """One human-readable line per plan op (korctl net plan, the panel)."""
+    if isinstance(op, SetSysctl):
+        return f"sysctl {op.sysctl.key}={op.sysctl.value}"
+    if isinstance(op, AddRule):
+        return f"add rule {_rule_text(op.rule)}"
+    if isinstance(op, DelRule):
+        return f"delete rule {_rule_text(op.rule)}"
+    if isinstance(op, ReplaceRoute):
+        return f"replace route {_route_text(op.route)}"
+    if isinstance(op, DelRoute):
+        return f"delete route {_route_text(op.route)}"
+    if isinstance(op, NftLoad):
+        return f"load nft ruleset (schema {op.ruleset.schema_hash[:12]})"
+    changes = [f"+{item}" for item in sorted(op.add)] + [f"-{item}" for item in sorted(op.delete)]
+    return f"nft set {op.family} {op.table} {op.set_name}: {' '.join(changes)}"
