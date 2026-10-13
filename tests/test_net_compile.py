@@ -11,6 +11,7 @@ import yaml
 
 from kornode.net.compile import (
     Compiled,
+    EnrollGuard,
     NodeFacts,
     SourceFact,
     TunnelFact,
@@ -47,6 +48,11 @@ def hub_case() -> tuple[EgressPolicy, NodeFacts]:
         resolved={"corp": frozenset({"10.60.5.5/32"})},
         uplink="eth0",
         all_rp_filter="1",
+        enroll=EnrollGuard(
+            pool=ipaddress.IPv4Network("10.99.255.240/28"),
+            address=ipaddress.IPv4Address("10.99.0.1"),
+            port=8444,
+        ),
     )
     return policy, facts
 
@@ -128,7 +134,7 @@ def test_local_exit_has_no_rule_or_table_but_is_masqueraded() -> None:
     compiled = compile_policy(*hub_case())
 
     assert not [rule for rule in compiled.desired.rules if rule.table == 12003]
-    assert "== 0x0c000300 oifname != \"lo\" masquerade" in compiled.script
+    assert '== 0x0c000300 oifname != "lo" masquerade' in compiled.script
 
 
 def test_implicit_returns_come_before_every_rule() -> None:
@@ -136,8 +142,11 @@ def test_implicit_returns_come_before_every_rule() -> None:
     chain = script.split("chain egress_classify {", 1)[1].split("}", 1)[0]
 
     first_mark = chain.index("meta mark set")
-    for line in ("fib daddr type local return", "ip daddr @local_v4 return",
-                 "ip daddr @carrier_v4 return"):
+    for line in (
+        "fib daddr type local return",
+        "ip daddr @local_v4 return",
+        "ip daddr @carrier_v4 return",
+    ):
         assert chain.index(line) < first_mark
 
 
@@ -162,6 +171,20 @@ def test_kill_switch_blocks_the_uplink_only() -> None:
     assert "oifname !=" not in script.split("chain forward", 1)[1].split("}", 1)[0]
 
 
+def test_enroll_guard_filters_input_and_forward() -> None:
+    script = compile_policy(*hub_case()).script
+    input_chain = script.split("chain input {", 1)[1].split("}", 1)[0]
+    forward_chain = script.split("chain forward {", 1)[1].split("}", 1)[0]
+
+    assert "ip saddr 10.99.255.240/28 ip daddr 10.99.0.1 tcp dport 8444 accept" in input_chain
+    assert "ip saddr 10.99.255.240/28 drop" in input_chain
+    assert forward_chain.strip().splitlines()[:3] == [
+        "type filter hook forward priority filter; policy accept;",
+        "    ip saddr 10.99.255.240/28 drop",
+        "    ip daddr 10.99.255.240/28 drop",
+    ]
+
+
 def test_kill_switch_is_strict_when_uplink_unknown() -> None:
     policy, facts = hub_case()
     facts = dataclasses.replace(facts, uplink=None)
@@ -172,7 +195,6 @@ def test_kill_switch_is_strict_when_uplink_unknown() -> None:
         'meta mark & 0xffffff00 == 0x0c000200 oifname != "oc-office0" '
         "reject with icmpx admin-prohibited"
     ) in script
-
 
 
 def test_stale_own_marks_never_leave_via_the_uplink() -> None:
@@ -200,6 +222,7 @@ def test_uplink_that_is_not_an_ifname_is_rejected_not_rendered() -> None:
     with pytest.raises(PolicyError, match="invalid interface name"):
         compile_policy(policy, facts)
 
+
 def test_exit_without_kill_switch_throws_instead_of_unreachable() -> None:
     policy, facts = hub_case()
     rules = [rule.model_dump(by_alias=True, exclude_none=True) for rule in policy.egress]
@@ -213,9 +236,7 @@ def test_exit_without_kill_switch_throws_instead_of_unreachable() -> None:
 
 def test_down_tunnel_keeps_only_the_kill_switch_route() -> None:
     policy, facts = hub_case()
-    facts = dataclasses.replace(
-        facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)}
-    )
+    facts = dataclasses.replace(facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)})
 
     routes = {r for r in compile_policy(policy, facts).desired.routes if r.table == 12002}
 
@@ -281,8 +302,9 @@ def test_invalid_references_are_rejected(egress: list[dict[str, Any]], message: 
 def test_clients_without_a_pool_are_rejected() -> None:
     _, facts = hub_case()
     facts = dataclasses.replace(facts, client_pool=None)
-    policy = EgressPolicy.model_validate({"egress": [{"from": ["clients"], "to": "any",
-                                                      "via": "local"}]})
+    policy = EgressPolicy.model_validate(
+        {"egress": [{"from": ["clients"], "to": "any", "via": "local"}]}
+    )
 
     with pytest.raises(PolicyError, match="no client pool"):
         compile_policy(policy, facts)
@@ -334,9 +356,7 @@ def test_via_parsing() -> None:
 
 def test_no_per_interface_sysctl_for_a_down_tunnel() -> None:
     policy, facts = hub_case()
-    facts = dataclasses.replace(
-        facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)}
-    )
+    facts = dataclasses.replace(facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)})
 
     keys = {sysctl.key for sysctl in compile_policy(policy, facts).desired.sysctls}
 

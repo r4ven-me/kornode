@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from kornode.config.models import AppConfig
+from kornode.config.models import AppConfig, GroupPolicyConfig
+from kornode.services.files import FileManager
 from kornode.services.groups import GroupConfigService
 from kornode.services.users import UserConfig, UserService
 
@@ -99,6 +100,26 @@ def test_user_groups_are_written_between_username_and_hash(tmp_path: Path) -> No
     assert UserService(config).read_user_groups("alice") == ["devops", "sre"]
 
 
+def test_reserved_group_names_are_rejected_for_user_membership(tmp_path: Path) -> None:
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "secrets_dir": tmp_path / "secrets",
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match="group 'agents' is reserved"):
+        UserService(config).set_user_groups("alice", ["agents"])
+
+
+def test_reserved_group_policy_names_are_rejected() -> None:
+    with pytest.raises(ValueError, match="group 'enroll' is reserved"):
+        GroupPolicyConfig.model_validate({"name": "enroll"})
+
+
 def test_user_groups_do_not_parse_password_hash_as_group(tmp_path: Path) -> None:
     config = AppConfig.model_validate(
         {
@@ -143,6 +164,82 @@ def test_user_created_without_a_group_can_still_be_added_to_one(tmp_path: Path) 
     service.set_user_groups("wh1te", ["infra"])
 
     assert service.read_user_groups("wh1te") == ["infra"]
+
+
+def test_ensure_default_group_adds_only_missing_groups_and_preserves_disabled(
+    tmp_path: Path,
+) -> None:
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "secrets_dir": tmp_path / "secrets",
+            }
+        }
+    )
+    passwd = config.secret_path("ocpasswd")
+    passwd.parent.mkdir(parents=True)
+    passwd.write_text(
+        "alice:$5$hash\nbob:devops:$5$hash\n!carol:$5$hash\n",
+        encoding="utf-8",
+    )
+
+    changed = UserService(config).ensure_default_group()
+
+    assert changed == ["alice", "carol"]
+    assert passwd.read_text(encoding="utf-8") == (
+        "alice:clients:$5$hash\nbob:devops:$5$hash\n!carol:clients:$5$hash\n"
+    )
+
+
+def test_ensure_default_group_dry_run_does_not_write(tmp_path: Path) -> None:
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "secrets_dir": tmp_path / "secrets",
+            }
+        }
+    )
+    passwd = config.secret_path("ocpasswd")
+    passwd.parent.mkdir(parents=True)
+    passwd.write_text("alice:$5$hash\n", encoding="utf-8")
+
+    changed = UserService(config).ensure_default_group(dry_run=True)
+
+    assert changed == ["alice"]
+    assert passwd.read_text(encoding="utf-8") == "alice:$5$hash\n"
+
+
+def test_ensure_default_group_skips_write_when_nothing_changes(tmp_path: Path) -> None:
+    class RecordingFiles(FileManager):
+        def __init__(self) -> None:
+            self.writes: int = 0
+
+        def atomic_write_private_text(self, path: Path, content: str) -> None:
+            self.writes += 1
+            super().atomic_write_private_text(path, content)
+
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "secrets_dir": tmp_path / "secrets",
+            }
+        }
+    )
+    passwd = config.secret_path("ocpasswd")
+    passwd.parent.mkdir(parents=True)
+    passwd.write_text("alice:clients:$5$hash\n", encoding="utf-8")
+    files = RecordingFiles()
+
+    changed = UserService(config, files=files).ensure_default_group()
+
+    assert changed == []
+    assert files.writes == 0
 
 
 def test_concurrent_group_updates_do_not_lose_changes(tmp_path: Path) -> None:

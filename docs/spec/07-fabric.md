@@ -25,19 +25,13 @@ Per-user config for each agent (`config_per_user_dir/agent-<id>`):
 
 ```
 explicit-ipv4 = 10.99.0.3
-iroute = 10.100.3.0/24
-iroute = 10.8.3.0/24        # exported source
-iroute = 192.168.3.0/24     # exported LAN
 ```
 
-Changes → files rewritten atomically → `occtl reload`. Existing sessions pick
-up `route` changes on reconnect; to propagate immediately the hub queues a
-`reconnect {tunnel: fabric}` command for affected agents **only** if their
-routes changed and the change is not merely additive for prefixes the agent
-already routes via the fabric exit (the agent's own bundle already contains
-the fabric prefix list, and its exit table routes the whole set through the
-tunnel regardless of what ocserv pushed — so most changes need no
-reconnect).
+Until P4-01, generated per-user files carry only `explicit-ipv4`; `iroute` and
+per-agent route rendering are added with the routing reconciler work. Changes
+rewrite group/user files atomically. ocserv reads `config-per-group` and
+`config-per-user` when a session opens, so no ocserv reload is needed for these
+files; existing sessions pick up changes on reconnect.
 
 Hub egress for `from: fabric` (transit) is part of the hub's YAML policy;
 default compiled rules: `fabric → fabric via fabric` (agent ↔ agent),

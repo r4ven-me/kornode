@@ -57,6 +57,13 @@ class SourceFact:
 
 
 @dataclass(frozen=True, slots=True)
+class EnrollGuard:
+    pool: ipaddress.IPv4Network
+    address: ipaddress.IPv4Address
+    port: int
+
+
+@dataclass(frozen=True, slots=True)
 class NodeFacts:
     node_id: int
     client_pool: ipaddress.IPv4Network | None
@@ -69,6 +76,7 @@ class NodeFacts:
     fabric_ifaces: tuple[str, ...] = ()
     uplink: str | None = None
     all_rp_filter: str | None = None
+    enroll: EnrollGuard | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,15 +280,11 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
             continue
         classify.append(ClassifyRule(tail_index, name, _from_match(name, policy, facts), (), None))
 
-    warnings = [
-        f"rule {dead} is shadowed by rule {shadow}" for dead, shadow in dead_rules(policy)
-    ]
+    warnings = [f"rule {dead} is shadowed by rule {shadow}" for dead, shadow in dead_rules(policy)]
     for declared in policy.sources:
         fact = facts.sources.get(declared.name)
         if fact is None or not fact.present:
-            warnings.append(
-                f"source {declared.name!r}: interface {declared.interface} is missing"
-            )
+            warnings.append(f"source {declared.name!r}: interface {declared.interface} is missing")
 
     exit_list = tuple(exits.values())
     set_list = tuple(sorted(sets.values(), key=lambda item: item.name))
@@ -355,9 +359,7 @@ def _sysctls(exits: tuple[Exit, ...], policy: EgressPolicy, facts: NodeFacts) ->
     # tunnel cannot be written and would fail every pass until it is back
     # (the reconciler re-runs on RTM_NEWLINK, so it's set as soon as it is).
     ifaces = {
-        exit_.interface
-        for exit_ in exits
-        if exit_.interface and exit_.up and exit_.kind != "local"
+        exit_.interface for exit_ in exits if exit_.interface and exit_.up and exit_.kind != "local"
     }
     ifaces |= {
         source.interface

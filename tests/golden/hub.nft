@@ -81,9 +81,13 @@ table inet kornode {
   chain input {
     type filter hook input priority mangle; policy accept;
     ct state new iifname "oc-office0" ct mark set 0x0c000200
+    ip saddr 10.99.255.240/28 ip daddr 10.99.0.1 tcp dport 8444 accept
+    ip saddr 10.99.255.240/28 drop
   }
   chain forward {
     type filter hook forward priority filter; policy accept;
+    ip saddr 10.99.255.240/28 drop
+    ip daddr 10.99.255.240/28 drop
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
     meta mark & 0xffffff00 { 0x0c000100, 0x0c000200 } oifname "eth0" reject with icmpx admin-prohibited
     meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c000100, 0x0c000200, 0x0c000300 } oifname "eth0" reject with icmpx admin-prohibited

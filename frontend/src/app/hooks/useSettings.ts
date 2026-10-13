@@ -189,6 +189,7 @@ export function useSettings(core: PanelCore) {
         cidr: fabricSettingsDraft.cidr,
         client_pool: fabricSettingsDraft.clientPool,
         source_pool: fabricSettingsDraft.sourcePool,
+        enroll_pool: fabricSettingsDraft.enrollPool,
         domain: fabricSettingsDraft.domain,
         reserved: splitLines(fabricSettingsDraft.reserved)
       })

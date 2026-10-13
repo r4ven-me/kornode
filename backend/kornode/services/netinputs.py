@@ -14,7 +14,9 @@ from typing import Any
 
 from kornode.config.legacy import legacy_policy, profile_slug, upstream_exit
 from kornode.config.models import AppConfig, UpstreamProfileConfig
-from kornode.net.compile import Compiled, NodeFacts, TunnelFact, compile_policy
+from kornode.config.reserved import DEFAULT_CONTROL_PORT
+from kornode.net.addressing import derive_addresses
+from kornode.net.compile import Compiled, EnrollGuard, NodeFacts, TunnelFact, compile_policy
 from kornode.net.model import EgressPolicy
 from kornode.net.state import DesiredState
 from kornode.services.command import CommandRunner
@@ -152,6 +154,7 @@ class HubNetInputs:
             node_prefixes={node_id: (pool,)},
             uplink=NetworkStatsService(config, runner=self.runner).resolve_interface(),
             all_rp_filter=self._read_sysctl("net.ipv4.conf.all.rp_filter"),
+            enroll=self._enroll_guard(),
         )
 
     def compiled(self) -> Compiled:
@@ -220,3 +223,19 @@ class HubNetInputs:
             return self.proc_sys.joinpath(*key.split(".")).read_text(encoding="utf-8").strip()
         except OSError:
             return None
+
+    def _enroll_guard(self) -> EnrollGuard | None:
+        if not self.config.fabric.enabled:
+            return None
+        hub = derive_addresses(
+            1,
+            fabric_cidr=self.config.fabric.cidr,
+            client_pool=self.config.fabric.client_pool,
+            source_pool=self.config.fabric.source_pool,
+            domain=self.config.fabric.domain,
+        )
+        return EnrollGuard(
+            pool=ipaddress.IPv4Network(self.config.fabric.enroll_pool, strict=True),
+            address=hub.fabric_address,
+            port=DEFAULT_CONTROL_PORT,
+        )

@@ -41,6 +41,7 @@ def test_fabric_settings_saves_node_and_fabric_fields(tmp_path: Path) -> None:
             "cidr": "10.99.0.0/24",
             "client_pool": "10.100.{id}.0/24",
             "source_pool": "10.8.{id}.0/24",
+            "enroll_pool": "10.99.255.240/28",
             "domain": "kornode.internal",
             "reserved": ["10.200.0.0/16"],
             "write_rendered": False,
@@ -54,6 +55,7 @@ def test_fabric_settings_saves_node_and_fabric_fields(tmp_path: Path) -> None:
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["node"]["id"] == 3
     assert saved["fabric"]["enabled"] is True
+    assert saved["fabric"]["enroll_pool"] == "10.99.255.240/28"
     assert saved["fabric"]["reserved"] == ["10.200.0.0/16"]
 
 

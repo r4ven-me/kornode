@@ -676,6 +676,7 @@ export type FabricSettings = {
   cidr: string;
   client_pool: string;
   source_pool: string;
+  enroll_pool: string;
   domain: string;
   reserved: string[];
 };

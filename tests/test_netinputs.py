@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from kornode.config.models import AppConfig
-from kornode.net.compile import TunnelFact
+from kornode.net.compile import EnrollGuard, TunnelFact
 from kornode.services.command import CommandResult
 from kornode.services.netinputs import (
     HubNetInputs,
@@ -91,11 +91,29 @@ def test_facts_from_runtime(tmp_path: Path) -> None:
     assert [str(net) for net in facts.local_networks] == ["172.17.0.0/16", "192.168.1.0/24"]
     assert facts.uplink == "eth0"
     assert facts.all_rp_filter == "1"
+    assert facts.enroll is None
+
+
+def test_facts_include_enroll_guard_when_fabric_enabled(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        fabric={"enabled": True},
+        auth={"password": {"enabled": True}},
+    )
+
+    facts = HubNetInputs(config, runner=FakeRunner(), proc_sys=_proc(tmp_path, "1")).facts()
+
+    assert facts.enroll == EnrollGuard(
+        pool=ipaddress.IPv4Network("10.99.255.240/28"),
+        address=ipaddress.IPv4Address("10.99.0.1"),
+        port=8444,
+    )
 
 
 def test_desired_state_for_a_v1_full_tunnel_config(tmp_path: Path) -> None:
-    config = _config(tmp_path, upstream=UPSTREAM, routing={"client_policy": "full",
-                                                           "host_policy": "full"})
+    config = _config(
+        tmp_path, upstream=UPSTREAM, routing={"client_policy": "full", "host_policy": "full"}
+    )
     inputs = HubNetInputs(config, runner=FakeRunner(), proc_sys=_proc(tmp_path, "0"))
 
     compiled = inputs.compiled()
@@ -103,7 +121,7 @@ def test_desired_state_for_a_v1_full_tunnel_config(tmp_path: Path) -> None:
     assert [exit_.name for exit_ in compiled.exits] == ["upstream:main"]
     tables = {route.table for route in compiled.desired.routes}
     assert tables == {12001}
-    assert "oifname \"eth0\"" in compiled.script  # kill-switch on the uplink
+    assert 'oifname "eth0"' in compiled.script  # kill-switch on the uplink
 
 
 def test_resolved_domains_are_read_back_per_set(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult
 from kornode.services.files import FileManager
-from kornode.services.users import USERNAME_RE, UserConfig, UserService
+from kornode.services.users import UserConfig, UserService
 
 
 @dataclass(frozen=True)
@@ -27,9 +27,7 @@ class GroupConfigService:
         self.user_config = UserService(config, files=self.files)
 
     def validate_group_name(self, name: str) -> str:
-        if not USERNAME_RE.match(name):
-            raise ValueError(f"group '{name}' may contain letters, numbers, _, ., @ and - only")
-        return name
+        return self.user_config.validate_group_name(name)
 
     def group_config_dir(self) -> Path:
         return self.config.identity.config_per_group_dir or (

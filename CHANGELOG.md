@@ -7,6 +7,11 @@
 - Added the hub registry storage layer on SQLite/WAL with forward-only migrations,
   node/node-prefix repository methods, and `korctl registry snapshot` with
   integrity-checked 7-copy retention.
+- P3-02 part A: added the dedicated `fabric.enroll_pool`, enforced D-43 fabric
+  auth restrictions, and reserved fabric agent/enrollment usernames and groups.
+- P3-02 part B: render fabric ocserv auth, connect-script guard, generated
+  `clients`/`agents`/`enroll` group files, active agent `explicit-ipv4` files,
+  and the static enroll nft guard.
 
 Phase P0 of the [routing redesign](docs/redesign/PLAN.ru.md) (`docs/redesign/ROADMAP.md`):
 stabilises the current routing model by fixing the root causes behind the most common

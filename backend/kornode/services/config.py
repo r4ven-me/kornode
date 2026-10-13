@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass
 from pathlib import Path
 
 from kornode.config.models import AppConfig
@@ -10,16 +9,9 @@ from kornode.renderers import (
     OcservConfigRenderer,
     SupervisorConfigRenderer,
 )
-from kornode.renderers.base import default_template_dir
 from kornode.services.files import FileManager
+from kornode.services.rendered import RenderedFile
 from kornode.services.secrets import collect_config_secrets, mask_text
-
-
-@dataclass(frozen=True)
-class RenderedFile:
-    path: Path
-    content: str
-    mode: int = 0o644
 
 
 class ConfigService:
@@ -33,9 +25,7 @@ class ConfigService:
         files = [
             RenderedFile(
                 config.generated_path("ocserv-connect-script-kornode"),
-                (default_template_dir() / "ocserv-connect-script-kornode").read_text(
-                    encoding="utf-8"
-                ),
+                self.ocserv_renderer.render_connect_script(config),
                 mode=0o755,
             ),
             RenderedFile(
@@ -71,6 +61,11 @@ class ConfigService:
                     self.ocserv_renderer.render_group_policy(group),
                 )
             )
+        if config.fabric.enabled:
+            from kornode.services.fabric_groups import FabricGroupsService
+
+            fabric_groups = FabricGroupsService(config, self.file_manager)
+            files.extend(fabric_groups.render_files(fabric_groups.nodes()))
         return files
 
     def write_rendered_files(self, config: AppConfig) -> list[Path]:
@@ -81,10 +76,25 @@ class ConfigService:
             config.identity.config_per_group_dir
             or (config.system.generated_dir / "config-per-group")
         )
+        if config.fabric.enabled:
+            self.file_manager.ensure_dir(
+                config.identity.config_per_user_dir
+                or (config.system.generated_dir / "config-per-user")
+            )
+            from kornode.services.users import UserService
+
+            UserService(config, files=self.file_manager).ensure_default_group()
         written: list[Path] = []
-        for rendered in self.render_files(config):
+        rendered_files = self.render_files(config)
+        for rendered in rendered_files:
             self.file_manager.atomic_write_text(rendered.path, rendered.content, rendered.mode)
             written.append(rendered.path)
+        if config.fabric.enabled:
+            from kornode.services.fabric_groups import FabricGroupsService
+
+            for path in FabricGroupsService(config, self.file_manager).stale_files(rendered_files):
+                path.unlink()
+                written.append(path)
         return written
 
     def diff_rendered_files(self, config: AppConfig) -> str:

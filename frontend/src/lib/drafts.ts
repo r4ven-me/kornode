@@ -264,6 +264,7 @@ export type FabricSettingsDraft = {
   cidr: string;
   clientPool: string;
   sourcePool: string;
+  enrollPool: string;
   domain: string;
   reserved: string;
 };
@@ -277,6 +278,7 @@ export function readFabricSettingsDraft(config: Record<string, unknown>): Fabric
     cidr: readString(fabric.cidr, "10.99.0.0/24"),
     clientPool: readString(fabric.client_pool, "10.100.{id}.0/24"),
     sourcePool: readString(fabric.source_pool, "10.8.{id}.0/24"),
+    enrollPool: readString(fabric.enroll_pool, "10.99.255.240/28"),
     domain: readString(fabric.domain, "kornode.internal"),
     reserved: readStringArray(fabric.reserved).join("\n")
   };

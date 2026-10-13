@@ -68,6 +68,54 @@ def test_user_service_uses_ocpasswd_c_for_password_file(tmp_path: Path) -> None:
     ]
 
 
+def test_create_user_with_fabric_puts_user_in_clients(tmp_path: Path) -> None:
+    class WritingRunner(CommandRunner):
+        def run(
+            self,
+            argv: Sequence[str],
+            *,
+            timeout: int = 30,
+            cwd: str | None = None,
+            input_text: str | None = None,
+            env: Mapping[str, str] | None = None,
+            check: bool = True,
+            dry_run: bool = False,
+            extra_secrets: Sequence[str] | None = None,
+        ) -> CommandResult:
+            del timeout, cwd, input_text, env, check, dry_run, extra_secrets
+            passwd = Path(argv[2])
+            passwd.parent.mkdir(parents=True, exist_ok=True)
+            passwd.write_text(f"{argv[3]}:$5$hash\n", encoding="utf-8")
+            return CommandResult(tuple(argv), 0, "", "")
+
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "secrets_dir": tmp_path / "secrets",
+            },
+            "fabric": {"enabled": True},
+            "auth": {"password": {"enabled": True}},
+        }
+    )
+
+    UserService(config, runner=WritingRunner()).create_user("alice", "password")
+
+    assert config.secret_path("ocpasswd").read_text(encoding="utf-8") == ("alice:clients:$5$hash\n")
+
+
+@pytest.mark.parametrize("username", ["agent-1", "Agent-42", "enroll-once"])
+def test_reserved_usernames_are_rejected_on_create(tmp_path: Path, username: str) -> None:
+    runner = RecordingRunner()
+    service = UserService(_config(tmp_path), runner=runner)
+
+    with pytest.raises(ValueError, match="reserved for fabric agents/enrollment"):
+        service.create_user(username, "password")
+
+    assert runner.calls == []
+
+
 def test_user_service_reads_ocpasswd_lock_and_artifact_state(tmp_path: Path) -> None:
     config = _config(tmp_path)
     passwd_file = config.secret_path("ocpasswd")

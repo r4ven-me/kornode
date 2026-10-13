@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from kornode.config.reserved import RESERVED_GROUPS
 from kornode.net.addressing import (
     Conflict,
     OwnedPrefix,
@@ -200,9 +201,10 @@ class FabricConfig(StrictModel):
     client_pool: str = "10.100.{id}.0/24"
     source_pool: str = "10.8.{id}.0/24"
     domain: str = "kornode.internal"
+    enroll_pool: str = "10.99.255.240/28"
     reserved: list[str] = Field(default_factory=list)
 
-    @field_validator("cidr")
+    @field_validator("cidr", "enroll_pool")
     @classmethod
     def validate_cidr(cls, value: str) -> str:
         return _validate_cidr(value)
@@ -225,6 +227,7 @@ class FabricConfig(StrictModel):
                 client_pool=self.client_pool,
                 source_pool=self.source_pool,
                 reserved=self.reserved,
+                enroll_pool=self.enroll_pool,
             )
         except PolicyError as exc:
             raise ValueError(str(exc)) from exc
@@ -1120,6 +1123,8 @@ class GroupPolicyConfig(StrictModel):
     def validate_name(cls, value: str) -> str:
         if not re.match(r"^[A-Za-z0-9_.@-]{1,64}$", value):
             raise ValueError("identity.group_policies.name must be ocserv group-safe")
+        if value.lower() in RESERVED_GROUPS:
+            raise ValueError(f"group '{value}' is reserved")
         return value
 
     @field_validator("routes", "no_routes")
@@ -1282,6 +1287,7 @@ class AppConfig(StrictModel):
         fabric_cidr = str(fabric_raw.get("cidr", "10.99.0.0/24"))
         client_pool = str(fabric_raw.get("client_pool", "10.100.{id}.0/24"))
         source_pool = str(fabric_raw.get("source_pool", "10.8.{id}.0/24"))
+        enroll_pool = str(fabric_raw.get("enroll_pool", "10.99.255.240/28"))
         domain = str(fabric_raw.get("domain", "kornode.internal"))
         reserved_raw = fabric_raw.get("reserved", [])
         reserved = [str(item) for item in reserved_raw] if isinstance(reserved_raw, list) else []
@@ -1320,6 +1326,7 @@ class AppConfig(StrictModel):
             owned,
             fabric_cidr=fabric_cidr,
             reserved=reserved,
+            enroll_pool=enroll_pool,
         )
         conflicts.extend(overlap_result.errors)
         if dns_explicit:
@@ -1419,6 +1426,33 @@ class AppConfig(StrictModel):
     web: WebConfig = Field(default_factory=WebConfig)
     cli: CliConfig = Field(default_factory=CliConfig)
     advanced: AdvancedConfig = Field(default_factory=AdvancedConfig)
+
+    @model_validator(mode="after")
+    def validate_fabric_auth(self) -> AppConfig:
+        if not self.fabric.enabled:
+            return self
+        if not self.auth.password.enabled:
+            raise ValueError(
+                "fabric.enabled requires auth.password.enabled "
+                "(enroll users are password users, D-43)"
+            )
+        if self.auth.certificate.enabled:
+            raise ValueError(
+                "auth.certificate.enabled cannot be combined with fabric.enabled: "
+                "agents log in with certificates only, which would let client certificates "
+                "in without a password (D-43)"
+            )
+        if self.auth.oidc.enabled:
+            raise ValueError(
+                "auth.oidc.enabled cannot be combined with fabric.enabled: "
+                "ocserv would require it from enroll users too (D-43)"
+            )
+        if self.auth.otp.enabled and self.auth.otp.ocserv_oath_auth:
+            raise ValueError(
+                "auth.otp.ocserv_oath_auth cannot be combined with fabric.enabled: "
+                "ocserv would require it from enroll users too (D-43)"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_routing_compatibility(self) -> AppConfig:

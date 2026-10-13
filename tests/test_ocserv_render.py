@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 from kornode.config.loader import load_config
@@ -48,6 +50,8 @@ auth:
     assert "dns = 10.77.0.1" in rendered
     assert "route = 192.168.1.0/24" in rendered
     assert 'auth = "certificate"' in rendered
+    assert "enable-auth" not in rendered
+    assert "cert-group-oid" not in rendered
     assert "log-level = 2" in rendered
 
 
@@ -128,6 +132,92 @@ auth:
     rendered = OcservConfigRenderer().render(config)
 
     assert "cert-user-oid = 0.9.2342.19200300.100.1.1" in rendered
+
+
+def test_ocserv_render_adds_fabric_certificate_auth(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "data_dir": str(tmp_path / "data"),
+                "generated_dir": str(tmp_path / "generated"),
+                "secrets_dir": str(tmp_path / "secrets"),
+            },
+            "fabric": {"enabled": True},
+            "auth": {"password": {"enabled": True}},
+        },
+        environ={},
+    )
+
+    rendered = OcservConfigRenderer().render(config)
+
+    assert f'auth = "plain[passwd={config.secret_path("ocpasswd")}]"' in rendered
+    assert 'enable-auth = "certificate"' in rendered
+    assert "cert-user-oid = 2.5.4.3" in rendered
+    assert "cert-group-oid = 2.5.4.11" in rendered
+
+
+def test_connect_script_is_template_without_fabric(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "data_dir": str(tmp_path / "data"),
+                "generated_dir": str(tmp_path / "generated"),
+                "secrets_dir": str(tmp_path / "secrets"),
+            },
+        },
+        environ={},
+    )
+
+    rendered = OcservConfigRenderer().render_connect_script(config)
+
+    assert "# Fabric guard" not in rendered
+    assert "failures here are deliberately swallowed" in rendered
+
+
+def test_connect_script_fabric_guard(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "data_dir": str(tmp_path / "data"),
+                "generated_dir": str(tmp_path / "generated"),
+                "secrets_dir": str(tmp_path / "secrets"),
+            },
+            "fabric": {"enabled": True},
+            "auth": {"password": {"enabled": True}},
+        },
+        environ={},
+    )
+
+    rendered = OcservConfigRenderer().render_connect_script(config)
+    assert "# Fabric guard (D-43)" in rendered
+    assert "hook failures here are deliberately swallowed" in rendered
+    assert rendered.index("# Fabric guard") < rendered.index("korctl_bin=")
+
+    script = tmp_path / "connect.sh"
+    script.write_text(rendered, encoding="utf-8")
+    empty_path = tmp_path / "bin"
+    empty_path.mkdir()
+    cases = [
+        ({"GROUPNAME": ""}, 1),
+        ({"GROUPNAME": "agents", "USERNAME": "agent-3"}, 0),
+        ({"GROUPNAME": "agents", "USERNAME": "alice"}, 1),
+        ({"GROUPNAME": "agents", "USERNAME": "agent-03"}, 1),
+        ({"GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 0),
+        ({"GROUPNAME": "enroll", "USERNAME": "bob"}, 1),
+        ({"GROUPNAME": "clients", "USERNAME": "alice"}, 0),
+    ]
+    for env, expected in cases:
+        result = subprocess.run(
+            ["/bin/sh", str(script)],
+            check=False,
+            capture_output=True,
+            env={**env, "PATH": os.fspath(empty_path)},
+            text=True,
+        )
+        assert result.returncode == expected, (env, result)
 
 
 def test_ocserv_render_omits_debug_directive_when_disabled(tmp_path: Path) -> None:
@@ -214,7 +304,7 @@ auth:
 
     rendered = OcservConfigRenderer().render(config)
 
-    assert f'oath[usersfile={config.secret_path("users.oath")}]' in rendered
+    assert f"oath[usersfile={config.secret_path('users.oath')}]" in rendered
 
 
 def test_ocserv_render_includes_user_config_without_group_policies(tmp_path: Path) -> None:
@@ -309,9 +399,9 @@ def test_config_service_renders_group_policy_files(tmp_path: Path) -> None:
     written = ConfigService().write_rendered_files(config)
 
     assert config.identity.config_per_group_dir / "admins" in written
-    assert (config.identity.config_per_group_dir / "admins").read_text(
-        encoding="utf-8"
-    ).count("route = 10.40.0.0/16") == 1
+    assert (config.identity.config_per_group_dir / "admins").read_text(encoding="utf-8").count(
+        "route = 10.40.0.0/16"
+    ) == 1
 
 
 def test_ocserv_render_includes_internal_dns_forward_domains_in_split_dns(

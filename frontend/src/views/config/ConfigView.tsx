@@ -455,6 +455,7 @@ export function ConfigView({
               <label><span>Fabric CIDR</span><input value={fabricSettingsDraft.cidr} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, cidr: event.target.value })} /></label>
               <label><span>Client pool template</span><input value={fabricSettingsDraft.clientPool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, clientPool: event.target.value })} /></label>
               <label><span>Source pool template</span><input value={fabricSettingsDraft.sourcePool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, sourcePool: event.target.value })} /></label>
+              <label><span>Enroll pool</span><input value={fabricSettingsDraft.enrollPool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, enrollPool: event.target.value })} /></label>
               <label><span>DNS domain</span><input value={fabricSettingsDraft.domain} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, domain: event.target.value })} /></label>
               <label><span>Reserved CIDRs (one per line)</span><textarea rows={4} value={fabricSettingsDraft.reserved} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, reserved: event.target.value })} /></label>
             </div>

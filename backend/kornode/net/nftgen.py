@@ -161,6 +161,14 @@ def render_script(
                 f'    ct state new iifname "{_ifname(exit_.interface)}" '
                 f"ct mark set {_hex(exit_.mark)}"
             )
+    if facts.enroll is not None:
+        lines.extend(
+            [
+                f"    ip saddr {facts.enroll.pool} ip daddr {facts.enroll.address} "
+                f"tcp dport {facts.enroll.port} accept",
+                f"    ip saddr {facts.enroll.pool} drop",
+            ]
+        )
     # `reject` is only valid in input/forward/output hooks; the kernel refuses
     # it in postrouting (nft -c does not catch this), so host traffic is
     # dropped there (D-28).
@@ -172,6 +180,14 @@ def render_script(
         "  }",
         "  chain forward {",
         "    type filter hook forward priority filter; policy accept;",
+        *(
+            [
+                f"    ip saddr {facts.enroll.pool} drop",
+                f"    ip daddr {facts.enroll.pool} drop",
+            ]
+            if facts.enroll is not None
+            else []
+        ),
         f"    {MSS_CLAMP}",
         *kill_forward,
         "  }",

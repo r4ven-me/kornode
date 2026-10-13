@@ -63,10 +63,11 @@ def validate_templates(
     client_pool: str,
     source_pool: str,
     reserved: Iterable[str] = (),
+    enroll_pool: str | None = None,
 ) -> None:
     """Reject templates that are invalid for some id in 1..254 or that make
     any two derived prefixes (of any ids, of either template) overlap each
-    other, the fabric cidr or a reserved range."""
+    other, the fabric cidr, a reserved range or the enroll pool."""
     items: list[_Labelled] = [
         _Labelled(ipaddress.ip_network(fabric_cidr, strict=True), "fabric.cidr")
     ]
@@ -82,6 +83,21 @@ def validate_templates(
         raise PolicyError(
             f"{second.label} ({second.network}) overlaps {first.label} ({first.network})"
         )
+    if enroll_pool is not None:
+        try:
+            enroll = _Labelled(
+                ipaddress.ip_network(enroll_pool, strict=True),
+                "fabric.enroll_pool",
+            )
+        except ValueError as exc:
+            raise PolicyError(f"fabric.enroll_pool ({enroll_pool}) is not a valid network") from exc
+        enroll_clash = _first_overlap([enroll, *items])
+        if enroll_clash is not None:
+            first, second = enroll_clash
+            other = second if first.label == "fabric.enroll_pool" else first
+            raise PolicyError(
+                f"fabric.enroll_pool ({enroll.network}) overlaps {other.label} ({other.network})"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,21 +192,29 @@ def check_overlaps(
     *,
     fabric_cidr: str,
     reserved: Iterable[str] = (),
+    enroll_pool: str | None = None,
     local_networks: Iterable[LocalNetwork] = (),
 ) -> OverlapResult:
     owned = list(prefixes)
     locals_ = list(local_networks)
     fabric = ipaddress.ip_network(fabric_cidr, strict=True)
     reserved_networks = [ipaddress.ip_network(cidr, strict=True) for cidr in reserved]
+    enroll_network = (
+        ipaddress.ip_network(enroll_pool, strict=True) if enroll_pool is not None else None
+    )
     result = OverlapResult()
 
     # Rule 1: fabric prefixes of different nodes never overlap.
     for index, first in enumerate(owned):
         for second in owned[index + 1 :]:
             if first.node != second.node and first.prefix.overlaps(second.prefix):
-                subject, other = (second, first) if second.adding and not first.adding else (
-                    first,
-                    second,
+                subject, other = (
+                    (second, first)
+                    if second.adding and not first.adding
+                    else (
+                        first,
+                        second,
+                    )
                 )
                 result.errors.append(
                     Conflict(
@@ -210,6 +234,10 @@ def check_overlaps(
                 result.errors.append(
                     Conflict(str(item.prefix), item.node, str(network), "fabric.reserved")
                 )
+        if enroll_network is not None and item.prefix.overlaps(enroll_network):
+            result.errors.append(
+                Conflict(str(item.prefix), item.node, str(enroll_network), "fabric.enroll_pool")
+            )
         # Rule 3: a node's prefix must not collide with another node's local
         # networks -- that node could not reach it.
         for local in locals_:

@@ -45,7 +45,7 @@ def test_hub_is_node1() -> None:
 
 def test_default_templates_are_valid_and_fast() -> None:
     started = time.monotonic()
-    validate_templates(**DEFAULTS)
+    validate_templates(**DEFAULTS, enroll_pool="10.99.255.240/28")
     assert time.monotonic() - started < 1.0
 
 
@@ -70,6 +70,24 @@ def test_bad_templates_are_rejected(overrides: dict[str, str], message: str) -> 
 def test_template_overlapping_reserved_is_rejected() -> None:
     with pytest.raises(PolicyError, match="reserved 10.8.0.0/16"):
         validate_templates(**DEFAULTS, reserved=["10.8.0.0/16"])
+
+
+@pytest.mark.parametrize(
+    ("enroll_pool", "message"),
+    [
+        ("10.99.0.240/28", "fabric\\.enroll_pool.*fabric\\.cidr"),
+        ("10.200.0.0/24", "fabric\\.enroll_pool.*reserved 10\\.200\\.0\\.0/16"),
+        ("10.100.7.128/25", "fabric\\.enroll_pool.*client_pool\\[7\\]"),
+        ("10.8.42.0/25", "fabric\\.enroll_pool.*source_pool\\[42\\]"),
+    ],
+)
+def test_enroll_pool_rejects_overlaps(enroll_pool: str, message: str) -> None:
+    with pytest.raises(PolicyError, match=message):
+        validate_templates(
+            **DEFAULTS,
+            reserved=["10.200.0.0/16"],
+            enroll_pool=enroll_pool,
+        )
 
 
 def test_render_template() -> None:
@@ -128,6 +146,23 @@ def test_rule2_fabric_cidr_and_reserved() -> None:
 
     owners = sorted(conflict.owner for conflict in result.errors)
     assert owners == ["fabric.cidr", "fabric.reserved"]
+
+
+def test_rule2_enroll_pool_rejects_owned_prefix() -> None:
+    result = check_overlaps(
+        [OwnedPrefix(net("10.99.255.240/28"), 2, "client_pool")],
+        fabric_cidr="10.99.0.0/24",
+        enroll_pool="10.99.255.240/28",
+    )
+
+    assert [conflict.to_dict() for conflict in result.errors] == [
+        {
+            "prefix": "10.99.255.240/28",
+            "node": 2,
+            "with": "10.99.255.240/28",
+            "owner": "fabric.enroll_pool",
+        }
+    ]
 
 
 def test_rule3_error_when_adding_warning_when_existing() -> None:

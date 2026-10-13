@@ -92,7 +92,7 @@ Done when:
 | P3-09 | `korctl hub backup|restore` (+ API + panel), encrypted archive, restore test. |
 | P3-10 | E2E harness on 4 VMs via self-hosted runner, workflow `e2e.yml` (manual + PR label `e2e`). |
 
-Status 2026-10-13: P3-01 done.
+Status 2026-10-13: P3-01, P3-02 done (spikes S-01/S-02/S-04 run, D-42…D-44).
 
 Done when:
 - `kornode-agent enroll <token>` brings a fresh VM to `online` in ≤ 30 s [e2e];

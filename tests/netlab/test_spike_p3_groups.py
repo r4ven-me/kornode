@@ -8,26 +8,25 @@ P3-02 renders from the registry.
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
 import tempfile
 import textwrap
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 import pytest
 from tests.netlab.helpers import tcp_check
 from tests.netlab.kornode_nodes import (
-    _kill_openconnect,
     _popen_in_namespace,
     _terminate_process,
     _wait_until,
 )
 from tests.netlab.lab import Lab, Namespace
+from tests.netlab.ocserv_peers import LISTENER, Peer, issue_client_cert
 
 pytestmark = pytest.mark.netlab
 
@@ -43,47 +42,6 @@ CLIENT_USER = "alice"
 CLIENT_PASSWORD = "alice-password"
 ENROLL_USER = "enroll-3-k2f9"
 ENROLL_PASSWORD = "enroll-secret"
-
-LISTENER = textwrap.dedent(
-    """
-    import selectors, socket, sys
-    sel = selectors.DefaultSelector()
-    for item in sys.argv[1:]:
-        host, port = item.rsplit(":", 1)
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((host, int(port)))
-        s.listen(16)
-        sel.register(s, selectors.EVENT_READ)
-    while True:
-        for key, _ in sel.select():
-            conn, _ = key.fileobj.accept()
-            conn.close()
-    """
-)
-
-# Minimal vpnc-script: address, pushed routes (default when none), and
-# KN_EXTRA_ROUTES to emulate a client that adds routes the hub never pushed.
-VPNC_SCRIPT = textwrap.dedent(
-    """\
-    #!/bin/sh
-    env | sort > "$KN_ENV_DUMP.$reason"
-    [ "$reason" = connect ] || exit 0
-    ip link set dev "$TUNDEV" up mtu "${INTERNAL_IP4_MTU:-1400}"
-    ip addr add "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"
-    n="${CISCO_SPLIT_INC:-0}"
-    [ "$n" -eq 0 ] && ip route add default dev "$TUNDEV"
-    i=0
-    while [ "$i" -lt "$n" ]; do
-        eval a="\\$CISCO_SPLIT_INC_${i}_ADDR"
-        eval m="\\$CISCO_SPLIT_INC_${i}_MASKLEN"
-        ip route add "$a/$m" dev "$TUNDEV"
-        i=$((i + 1))
-    done
-    for r in $KN_EXTRA_ROUTES; do ip route add "$r" dev "$TUNDEV"; done
-    exit 0
-    """
-)
 
 # The guard under test for S-01: with `enable-auth = certificate` any
 # certificate of the hub CA logs in without a password; a certificate without
@@ -117,84 +75,6 @@ ENROLL_NFT = textwrap.dedent(
     }}
     """
 )
-
-
-@dataclass(repr=False)
-class Peer:
-    ns: Namespace
-    hub_addr: str
-    iface: str
-    tmp: Path
-    pid_file: Path = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.pid_file = self.tmp / f"{self.iface}.pid"
-
-    def connect(
-        self,
-        pin: str,
-        *,
-        user: str | None = None,
-        password: str | None = None,
-        cert: tuple[Path, Path] | None = None,
-        extra_routes: tuple[str, ...] = (),
-    ) -> bool:
-        argv = [
-            "openconnect",
-            "--interface",
-            self.iface,
-            "--background",
-            f"--pid-file={self.pid_file}",
-            f"--script={self.tmp / 'vpnc-script'}",
-            "--servercert",
-            pin,
-            "--non-inter",
-        ]
-        if user is not None:
-            argv.extend(["--user", user, "--passwd-on-stdin"])
-        if cert is not None:
-            argv.extend(["--certificate", str(cert[0]), "--sslkey", str(cert[1])])
-        argv.append(f"https://{self.hub_addr}:443")
-        env = {
-            **os.environ,
-            "KN_ENV_DUMP": str(self.tmp / f"{self.iface}.env"),
-            "KN_EXTRA_ROUTES": " ".join(extra_routes),
-        }
-        # Output to a file, not a pipe: the backgrounded child inherits stdout,
-        # and a pipe would keep the call open until the timeout.
-        with (self.tmp / f"{self.iface}.openconnect.log").open("ab") as log:
-            completed = subprocess.run(  # noqa: S603 - explicit argv, no shell
-                ["ip", "netns", "exec", self.ns.full_name, *argv],
-                input=f"{password}\n".encode() if password is not None else b"",
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=env,
-                timeout=30,
-                check=False,
-            )
-        if completed.returncode != 0:
-            return False
-        try:
-            _wait_until(lambda: self.address() is not None, f"{self.iface} address", timeout=10)
-        except TimeoutError:
-            return False
-        return True
-
-    def address(self) -> str | None:
-        result = self.ns.run(["ip", "-4", "-o", "addr", "show", "dev", self.iface], check=False)
-        match = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", result.stdout)
-        return match.group(1) if match else None
-
-    def pushed_routes(self) -> list[str]:
-        env = _read_env(self.tmp / f"{self.iface}.env.connect")
-        count = int(env.get("CISCO_SPLIT_INC", "0"))
-        return [
-            f"{env[f'CISCO_SPLIT_INC_{i}_ADDR']}/{env[f'CISCO_SPLIT_INC_{i}_MASKLEN']}"
-            for i in range(count)
-        ]
-
-    def stop(self) -> None:
-        _kill_openconnect(self.pid_file)
 
 
 @dataclass(repr=False)
@@ -254,8 +134,17 @@ def _start(lab: Lab, tmp: Path, *, guard: bool) -> GroupsLab:
         peers[name] = Peer(ns=ns, hub_addr=f"192.0.2.{base + 1}", iface=f"oc-{name}", tmp=tmp)
 
     pin = _make_pki(hub, tmp)
-    agent_cert = _issue(hub, tmp, f"agent-{AGENT_ID}", unit="agents")
-    client_cert = _issue(hub, tmp, CLIENT_USER, unit=None)
+    agent_cert = issue_client_cert(
+        hub,
+        tmp / "pki" / "ca.crt",
+        tmp / "pki" / "ca.key",
+        tmp / "pki",
+        f"agent-{AGENT_ID}",
+        unit="agents",
+    )
+    client_cert = issue_client_cert(
+        hub, tmp / "pki" / "ca.crt", tmp / "pki" / "ca.key", tmp / "pki", CLIENT_USER, unit=None
+    )
     _write_ocserv_files(hub, tmp, guard=guard)
     (tmp / "enroll.nft").write_text(ENROLL_NFT, encoding="utf-8")
     hub.run(["nft", "-f", str(tmp / "enroll.nft")])
@@ -351,27 +240,6 @@ def _make_pki(hub: Namespace, tmp: Path) -> str:
     return match.group(0)
 
 
-def _issue(hub: Namespace, tmp: Path, cn: str, *, unit: str | None) -> tuple[Path, Path]:
-    pki = tmp / "pki"
-    key, crt, tmpl = pki / f"{cn}.key", pki / f"{cn}.crt", pki / f"{cn}.tmpl"
-    lines = [f"cn = {cn}", "tls_www_client", "signing_key", "expiration_days = 30"]
-    if unit is not None:
-        lines.insert(1, f"unit = {unit}")
-    tmpl.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    hub.run(["certtool", "--generate-privkey", "--outfile", str(key)])
-    hub.run(
-        [
-            "certtool", "--generate-certificate",
-            "--load-privkey", str(key),
-            "--load-ca-certificate", str(pki / "ca.crt"),
-            "--load-ca-privkey", str(pki / "ca.key"),
-            "--template", str(tmpl),
-            "--outfile", str(crt),
-        ]
-    )  # fmt: skip
-    return crt, key
-
-
 def _write_ocserv_files(hub: Namespace, tmp: Path, *, guard: bool) -> None:
     pki = tmp / "pki"
     groups, users = tmp / "groups", tmp / "users"
@@ -408,9 +276,6 @@ def _write_ocserv_files(hub: Namespace, tmp: Path, *, guard: bool) -> None:
         encoding="utf-8",
     )
     script.chmod(0o755)
-    vpnc = tmp / "vpnc-script"
-    vpnc.write_text(VPNC_SCRIPT, encoding="utf-8")
-    vpnc.chmod(0o755)
     (tmp / "ocserv.conf").write_text(
         textwrap.dedent(
             f"""\
@@ -445,15 +310,6 @@ def _write_ocserv_files(hub: Namespace, tmp: Path, *, guard: bool) -> None:
         ),
         encoding="utf-8",
     )
-
-
-def _read_env(path: Path) -> dict[str, str]:
-    env: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        key, sep, value = line.partition("=")
-        if sep:
-            env[key] = value
-    return env
 
 
 @pytest.fixture

@@ -51,6 +51,7 @@ class FabricSettingsRequest(BaseModel):
     cidr: str = "10.99.0.0/24"
     client_pool: str = "10.100.{id}.0/24"
     source_pool: str = "10.8.{id}.0/24"
+    enroll_pool: str = "10.99.255.240/28"
     domain: str = "kornode.internal"
     reserved: list[str] = []
     write_rendered: bool = True
@@ -202,6 +203,7 @@ def save_fabric_settings(
             "cidr": payload.cidr,
             "client_pool": payload.client_pool,
             "source_pool": payload.source_pool,
+            "enroll_pool": payload.enroll_pool,
             "domain": payload.domain,
             "reserved": payload.reserved,
         },
