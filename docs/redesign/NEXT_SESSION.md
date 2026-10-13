@@ -7,8 +7,8 @@ switch to Sonnet for the code once the plan is agreed.
 ---
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык общения — русский, обращайся ко мне «Ivan».
-Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (P3),
-`docs/redesign/DECISIONS.md` (особенно D-29…D-31, S-01…S-04), `docs/spec/04`, `05`, `06`, `11`, `docs/spec/schemas/bundle.v1.schema.json`,
+Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (P3), раздел «Дальнейшие действия» в `docs/redesign/PLAN.ru.md`,
+`docs/redesign/DECISIONS.md` (особенно D-29…D-33, S-01…S-04), `docs/spec/04`, `05`, `06`, `11`, `docs/spec/schemas/bundle.v1.schema.json`,
 затем память Serena проекта `kornode`: `redesign/p2-hub-cutover`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Правила работы (важно, это про стоимость)
@@ -26,12 +26,15 @@ switch to Sonnet for the code once the plan is agreed.
 - **Скажи мне, когда переключиться** между Opus и Sonnet, не переключайся молча.
 
 ## Состояние (на момент передачи, 2026-10-13)
-Локальный `main` (опережает `origin/main` на ~40 коммитов, **не запушен**) содержит P0, P1 и весь P2: хаб работает на одном reconciler.
+Локальный `main` (опережает `origin/main` на ~45 коммитов, **не запушен**) содержит P0, P1 и весь P2 с исправлениями по ревью: хаб работает на одном reconciler.
 - `net/kernel.py` — единственный писатель ядра (nft, ip rule/route, sysctl); `tests/test_kernel_single_writer.py` это проверяет.
 - `NetService`: `apply()` (синхронный проход по `reconciler.sock`, иначе in-process; таймаут/мусор = `NetApplyError`, второго писателя нет),
   `converge()` (то же, но бросает при `last_error`), `wake()` (асинхронный толчок для хуков/резолвера). D-30.
 - Активный профиль в рантайме (`generated_dir/active-upstream`) — вход reconciler (D-31). Carrier-адреса — `upstream-carrier/<p>.addrs`, резолв — `resolved/<set>.txt`.
-- `connect()`: carrier → converge (kill-switch) → dial → converge. Netlab 24/24 на VM, 700+ юнит-тестов.
+- `connect()`: carrier → converge (kill-switch) → dial → converge. Netlab 26/26 на VM (включая NL-08 с работающим демоном `korctl net run`:
+  обрыв туннеля под трафиком и рестарт reconciler при упавшем туннеле — 0 пакетов на uplink); `make check` 719 passed.
+- Соединения, чей exit исчез из политики, режутся на uplink (D-32). Проход не обрывается на первой ошибке: добавления выполняются все,
+  удаления после ошибки пропускаются, исключение = проход с ошибкой, цикл не умирает (D-33). `routing.main_interface` — только `auto` или имя интерфейса.
 - Метка/таблица выхода зависят от его индекса в политике (при `client_policy: off` upstream = таблица 12002 / `0x0c000200`); читай из `korctl net plan --json`.
 Решение о пуше (одним PR `redesign/p2` → `origin/main`, чтобы CI-netlab впервые прошёл на GitHub-раннере, либо напрямую в `main`) — за мной, не предлагай и не делай сам.
 
@@ -43,8 +46,11 @@ switch to Sonnet for the code once the plan is agreed.
 1. **Opus, режим плана** — архитектура P3-04 + P3-06: формат бандла по `bundle.v1.schema.json`, подпись Ed25519, sealing секретов (D-16),
    монотонные версии, apply-with-confirm и rollback агента, загрузка из кэша. Результат: обновлённые `docs/spec/05`, `06` и записи в `DECISIONS.md`. Код — после моего согласования.
 2. Без архитектурного блока (можно параллельно, на Sonnet): **P3-01** (registry на SQLite, WAL, `VACUUM INTO`), **P3-02** (группы ocserv `clients`/`agents`/`enroll`).
-3. Далее: P3-03 (enroll, CSR, CRL) → P3-05 (control API, mTLS, long-poll) → P3-06/07 (агент и его CLI) → P3-08 (паритетные поверхности: `korctl agent`, `/api/agents/*`, панель) → P3-09 (backup/restore) → P3-10 (e2e на 4 VM).
+3. Далее: P3-03 (enroll, CSR, CRL) → P3-05 (control API, mTLS, long-poll) → **хвосты P2** (ниже) → P3-06/07 (агент и его CLI) → P3-08 (паритетные поверхности: `korctl agent`, `/api/agents/*`, панель) → P3-09 (backup/restore) → P3-10 (e2e на 4 VM).
 4. Spike S-01…S-04 проверяй в netlab до того, как строить на них код.
+Хвосты P2 (пуш не блокируют, закрыть до P3-06 — агент работает на том же `kornode.net` без центра):
+netlab-сценарий для D-32 «exit убран, пока соединение живо» (0 пакетов на uplink); окно второго писателя ядра на старте демона;
+события netlink в обход backoff после прохода с ошибкой; grep-тест единственного писателя → проверка по импортам/AST.
 Каждая задача — по `CLAUDE.md`: spec → тесты → код → docs → `make check` → netlab; `parity.yaml` обновляется в той же задаче.
 
 ## Что нужно от меня для P3-10 (напомни заранее)
