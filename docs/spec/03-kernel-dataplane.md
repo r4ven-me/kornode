@@ -117,7 +117,9 @@ Notes:
 ## Hub specifics
 
 - Forwarding between `vpns*` devices is allowed (agent ↔ agent via hub).
-- `restrict-user-to-routes` is **off** for `agents` (they carry transit), on
-  for `enroll`.
+- ocserv `restrict-user-to-*` is not used (it shells out to iptables,
+  D-44). `enroll` sessions are limited by a static rule set: from
+  `fabric.enroll_pool` only `tcp` to the hub fabric address on `control.port`
+  is accepted in `input`; `forward` drops the pool in both directions.
 - ocserv `isolate-workers` stays on; routes for agent prefixes come from
   `iroute` (S-03).

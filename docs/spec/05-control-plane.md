@@ -122,8 +122,8 @@ when the compiled content changed.
     "secret":"<32 random bytes b64>","camouflage":"<optional>","exp":"2026-10-11T16:41:00Z"}
    ```
    Hub stores `hash(secret)` and creates an ocserv user `enroll-3-k2f9` with the
-   same password in group `enroll` (restricted to `10.99.0.1/32` tcp/8444,
-   S-04), expiring at `exp`.
+   same password in group `enroll` (restricted to `10.99.0.1/32` tcp/8444 by
+   the hub nft rule set, D-44), expiring at `exp`.
 3. Agent `kornode-agent enroll <token>`: generates TLS key (ECDSA P-256) and
    X25519 seal key locally; connects openconnect with the enroll user (pinning
    `pin`); calls `POST /agent/v1/enroll` (server-auth TLS only, since it has no

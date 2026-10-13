@@ -12,6 +12,7 @@ fabric:
   client_pool: 10.100.{id}.0/24 # per-node ocserv client pool template
   source_pool: 10.8.{id}.0/24   # per-node default range for named sources
   domain: kornode.internal      # DNS zone of the fabric
+  enroll_pool: 10.99.255.240/28 # leases of one-time enroll sessions (07), outside cidr
   reserved: []                  # extra CIDRs nothing may overlap (e.g. corp ranges)
 ```
 
@@ -41,7 +42,7 @@ Runs on every registry/config mutation (hub) and on bundle apply (agent).
 Input set:
 
 - all fabric prefixes of all nodes (pools, sources, exported LANs);
-- `fabric.cidr`, `fabric.reserved`;
+- `fabric.cidr`, `fabric.reserved`, `fabric.enroll_pool`;
 - per node: its *local* networks reported by the agent (connected routes of
   physical interfaces, docker bridges) — reported in status, see 05;
 - hub: its own connected routes.
@@ -49,7 +50,8 @@ Input set:
 Rules:
 
 1. No two fabric prefixes of different nodes may overlap.
-2. No fabric prefix may overlap `fabric.cidr` or `reserved`.
+2. No fabric prefix may overlap `fabric.cidr`, `reserved` or `enroll_pool`;
+   `enroll_pool` must not overlap `fabric.cidr` or `reserved` (D-42).
 3. A fabric prefix of node N must not overlap a local network of node M (M≠N)
    — otherwise M could not reach N's prefix. Reported as **error** for
    prefixes being added, **warning** for already-existing state (so a newly

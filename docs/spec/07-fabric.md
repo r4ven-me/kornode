@@ -8,8 +8,18 @@ Three groups, rendered by the hub from the registry into
 | Group | Auth | Address | Routes pushed | Notes |
 | --- | --- | --- | --- | --- |
 | `clients` | password / OTP / OIDC / cert (existing settings) | hub client pool `10.100.1.0/24` | per egress for `clients` (existing split/full semantics via `route`/`no-route`) | DNS = hub service address |
-| `agents` | certificate, OU=`agents` (S-01) | `explicit-ipv4 10.99.0.<id>` per user (S-02) | `route` = every fabric prefix except the agent's own, plus `10.99.0.0/24` | `restrict-user-to-routes = false`, no DNS push (agents run their own resolver), `dpd`/`keepalive` from node transport settings |
-| `enroll` | password, one-time users | from a small range in fabric cidr, e.g. `10.99.0.240/28` | `10.99.0.1/32` only | `restrict-user-to-routes = true`, `restrict-user-to-ports = "tcp(8444)"`, `max-same-clients = 1` |
+| `agents` | certificate, OU=`agents` (S-01, D-43) | `explicit-ipv4 10.99.0.<id>` per user (S-02) | `route` = every fabric prefix except the agent's own, plus `10.99.0.0/24` | `restrict-user-to-routes = false`, no DNS push (agents run their own resolver), `dpd`/`keepalive` from node transport settings |
+| `enroll` | password, one-time users | `fabric.enroll_pool` (default `10.99.255.240/28`, outside `fabric.cidr`, D-42) | `10.99.0.1/32` only | `max-same-clients = 1`; restricted to `10.99.0.1:<control.port>` by a static nft rule set from `kornode.net`, not by ocserv `restrict-user-to-*` (D-44) |
+
+Authentication on the shared listener (D-43): `auth = "plain[...]"` (clients,
+enroll) with `enable-auth = "certificate"` (agents), `cert-user-oid = 2.5.4.3`,
+`cert-group-oid = 2.5.4.11`. Because `enable-auth` lets any certificate of the
+hub CA in without a password, the hub connect-script refuses sessions with an
+empty group (OU-less certificates) and `agents` sessions whose user is not
+`agent-<id>`. Password users without an explicit group are written with
+`clients`. `auth.certificate.enabled` (client certificate + password) cannot be
+combined with `fabric.enabled`. The hub side of an agent session is the first
+host of the group network, i.e. the hub fabric address `10.99.0.1` (S-02).
 
 Per-user config for each agent (`config_per_user_dir/agent-<id>`):
 
