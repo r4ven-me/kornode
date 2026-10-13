@@ -16,6 +16,7 @@ from tests.netlab.helpers import tcp_check
 from tests.netlab.lab import Lab, Namespace
 from tests.netlab.topology import HUB_ADDR, INET_HTTP_ADDR, Topology
 
+from kornode.net.reconciler import control_request
 from kornode.renderers.base import default_template_dir
 from kornode.services.command import CommandResult
 
@@ -139,9 +140,7 @@ def start_hub_server(lab: Lab, topology: Topology, tmp: Path) -> HubServerHandle
         "--password",
         VPN_PASSWORD,
     )
-    pin = json.loads(
-        korctl(topology.hub, root.config_path, "certificates", "pin").stdout
-    )["pin"]
+    pin = json.loads(korctl(topology.hub, root.config_path, "certificates", "pin").stdout)["pin"]
     log_file = root.log_dir / "ocserv.log"
     process = _popen_in_namespace(
         topology.hub,
@@ -242,6 +241,40 @@ def connect_node_upstream(
         handle.kill_leftover()
         raise
     return handle
+
+
+def start_reconciler(ns: Namespace, root: KornodeRoot) -> subprocess.Popen[bytes]:
+    """`korctl net run` as the supervisor runs it: other korctl calls then
+    converge through its socket (synchronous `apply`), not in-process."""
+    bin_dir = Path(sys.executable).absolute().parent
+    process = _popen_in_namespace(
+        ns,
+        [str(bin_dir / "korctl"), "--config", str(root.config_path), "net", "run"],
+        root.log_dir / "reconciler.log",
+    )
+    sock = root.generated_dir / "reconciler.sock"
+
+    def listening() -> bool:
+        # Asks the socket directly: `korctl net apply` would fall back to an
+        # in-process pass on a stale socket and race the daemon's first pass.
+        if process.poll() is not None:
+            raise RuntimeError(f"reconciler exited with {process.returncode}")
+        try:
+            reply = control_request(sock, "status", timeout=1.0)
+        except (OSError, ValueError):
+            return False
+        return reply.get("ok") is True and reply["status"]["passes"] >= 1
+
+    try:
+        _wait_until(listening, "reconciler socket")
+    except BaseException:
+        _terminate_process(process)
+        raise
+    return process
+
+
+def stop_reconciler(process: subprocess.Popen[bytes]) -> None:
+    _terminate_process(process)
 
 
 def write_kornode_config(

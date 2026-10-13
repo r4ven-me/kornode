@@ -4,13 +4,17 @@ NftElements."""
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
+
+from kornode.net.errors import PolicyError
 
 if TYPE_CHECKING:
     from kornode.net.compile import ClassifyRule, DestSetDecl, Exit, NodeFacts
     from kornode.net.model import EgressPolicy
 
 MARK_MASK = "0xffffff00"
+IFNAME = re.compile(r"[A-Za-z0-9_.-]{1,15}")
 OWN_MARKS = "ct mark & 0xff000000 == 0x0c000000"
 MSS_CLAMP = "tcp flags syn / syn,rst tcp option maxseg size set rt mtu"
 REJECT = "reject with icmpx admin-prohibited"
@@ -69,13 +73,22 @@ def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> li
         # D-21: marked traffic must never leave via the uplink; traffic that
         # routing sends to a connected LAN/docker/client network is fine.
         marks = ", ".join(_hex(exit_.mark) for exit_ in guarded)
-        return [f'    meta mark & {MARK_MASK} {{ {marks} }} oifname "{uplink}" {action}']
+        return [f'    meta mark & {MARK_MASK} {{ {marks} }} oifname "{_ifname(uplink)}" {action}']
     # Uplink unknown: fall back to the strict per-exit form (fail closed).
     return [
-        f'    meta mark & {MARK_MASK} == {_hex(exit_.mark)} oifname != "{exit_.interface}" {action}'
+        f"    meta mark & {MARK_MASK} == {_hex(exit_.mark)} "
+        f'oifname != "{_ifname(exit_.interface)}" {action}'
         for exit_ in guarded
         if exit_.interface
     ]
+
+
+def _ifname(value: str) -> str:
+    """Interface names are quoted into the script: anything but a kernel
+    ifname could close the quote and inject rules."""
+    if not IFNAME.fullmatch(value):
+        raise PolicyError(f"invalid interface name: {value!r}")
+    return value
 
 
 def render_script(
@@ -132,7 +145,8 @@ def render_script(
     for exit_ in exits:
         if exit_.kind != "local" and exit_.interface:
             lines.append(
-                f'    ct state new iifname "{exit_.interface}" ct mark set {_hex(exit_.mark)}'
+                f'    ct state new iifname "{_ifname(exit_.interface)}" '
+                f"ct mark set {_hex(exit_.mark)}"
             )
     # `reject` is only valid in input/forward/output hooks; the kernel refuses
     # it in postrouting (nft -c does not catch this), so host traffic is
@@ -164,7 +178,7 @@ def render_script(
         if exit_.kind == "local":
             lines.append(f'    {mark} oifname != "lo" masquerade')
         elif exit_.interface:
-            lines.append(f'    {mark} oifname "{exit_.interface}" masquerade')
+            lines.append(f'    {mark} oifname "{_ifname(exit_.interface)}" masquerade')
     # Unmarked client/source traffic only gets here on its way to this
     # node's own connected networks (it was returned before classification);
     # NAT it so LAN hosts without a route back to the pool still answer (D-26).

@@ -57,6 +57,15 @@ Scenario list (must all exist by the end of P4; each maps to a task "Done when")
 | NL-17 | two-host topology: source `wgusers` on hub, `via: exit:2` by set, rest `local` | listed destinations leave via node2's uplink with node2's address, others via hub; node2 offline → listed destinations get ICMP unreachable, never hub uplink |
 | NL-18 | same topology, full tunnel (`to: any via exit:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real fabric address |
 
+NL-08 is `test_tunnel_drop_and_reconnect_through_a_running_reconciler_leaks_nothing`:
+openconnect is killed and redialled under traffic while `korctl net run` is
+running, so the connect converges through the reconciler socket (D-30) and
+races the daemon's netlink passes. Its companion
+`test_reconciler_restart_with_the_tunnel_dying_meanwhile_leaks_nothing`
+covers the reconciler being down while the tunnel dies and its first pass
+after the restart. Both count packets to the internet target on the uplink
+(expected 0).
+
 ### Regression baseline (P1-06)
 
 The P0 scenarios (`tests/netlab/test_p0_upstream.py`) must fail on code

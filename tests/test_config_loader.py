@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from kornode.config.loader import load_config
 from kornode.config.models import AddressOverlapError
@@ -212,3 +213,20 @@ web:
     config = load_config(config_path, env_file=env_path, environ={})
 
     assert config.web.admin_password == "from-dotenv"
+
+
+@pytest.mark.parametrize("value", ['eth0" accept', "a" * 16, "eth 0"])
+def test_routing_main_interface_must_be_auto_or_an_ifname(tmp_path: Path, value: str) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.safe_dump({"routing": {"main_interface": value}}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid network interface name"):
+        load_config(config)
+
+
+def test_routing_main_interface_accepts_auto_and_an_ifname(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("routing:\n  main_interface: ens3\n", encoding="utf-8")
+
+    assert load_config(config).routing.main_interface == "ens3"
+    assert load_config(tmp_path / "missing.yaml").routing.main_interface == "auto"

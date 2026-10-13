@@ -174,6 +174,14 @@ def test_kill_switch_is_strict_when_uplink_unknown() -> None:
     ) in script
 
 
+
+def test_uplink_that_is_not_an_ifname_is_rejected_not_rendered() -> None:
+    policy, facts = hub_case()
+    facts = dataclasses.replace(facts, uplink='eth0" accept')
+
+    with pytest.raises(PolicyError, match="invalid interface name"):
+        compile_policy(policy, facts)
+
 def test_exit_without_kill_switch_throws_instead_of_unreachable() -> None:
     policy, facts = hub_case()
     rules = [rule.model_dump(by_alias=True, exclude_none=True) for rule in policy.egress]

@@ -13,6 +13,9 @@ incidents, without changing the model itself.
   stated exemption. Exemptions list the v1 parity gaps.
 - Regression baseline: the P0 netlab scenarios fail on `raven` (pre-P0) for the root causes
   P0 fixes and pass on `main`; procedure and results in `docs/spec/09-testing.md`.
+- Netlab NL-08 with the reconciler daemon running: tunnel drop and redial under traffic
+  (connect converges through `reconciler.sock`) and a reconciler restart while the tunnel
+  dies; both assert zero packets on the uplink.
 - Added P1-03 netlab scenarios that run real kornode-rendered ocserv/openconnect
   inside namespaces to cover the P0 routing fixes.
 - CI: new `netlab` job runs `sudo make netlab` on ubuntu-latest and uploads
@@ -83,6 +86,9 @@ incidents, without changing the model itself.
 
 ### Fixed
 
+- `routing.main_interface` is validated as `auto` or a kernel interface name; it is quoted
+  into the nft kill-switch, and an arbitrary string could inject rules that bypass it.
+  `kornode.net` also refuses to render any interface name that is not an ifname.
 - In `full` mode, kill-switches dropped marked traffic to this node's own connected networks
   (LAN, docker bridge, client subnet) even though routing correctly sent it there; they now drop
   only marked traffic leaving via the uplink (or, if the uplink can't be determined, anything not

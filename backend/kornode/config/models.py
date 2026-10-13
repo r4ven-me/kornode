@@ -975,6 +975,12 @@ class RoutingConfig(StrictModel):
             return "off"
         return value
 
+    @field_validator("main_interface")
+    @classmethod
+    def validate_main_interface(cls, value: str) -> str:
+        # Rendered into the nft kill-switch (`oifname "<uplink>"`).
+        return value if value == "auto" else _validate_interface_name(value)
+
     @field_validator("nft_prefix")
     @classmethod
     def validate_nft_prefix(cls, value: str) -> str:

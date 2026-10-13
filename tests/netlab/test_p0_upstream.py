@@ -6,7 +6,8 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,8 @@ from tests.netlab.kornode_nodes import (
     connect_node_upstream,
     korctl,
     start_hub_server,
+    start_reconciler,
+    stop_reconciler,
 )
 from tests.netlab.lab import Namespace
 from tests.netlab.topology import (
@@ -121,9 +124,7 @@ def test_kernel_after_connect_matches_the_plan(
     # connect() converges through the reconciler (carrier written, pass,
     # dial, pass): nothing is left for the next pass to change.
     plan = json.loads(
-        korctl(
-            topology.node3, connected_node3.config_path, "net", "plan", "--json"
-        ).stdout
+        korctl(topology.node3, connected_node3.config_path, "net", "plan", "--json").stdout
     )
 
     assert [op["text"] for op in plan["ops"]] == []
@@ -159,6 +160,102 @@ def test_reconciler_pass_during_a_tunnel_outage_does_not_open_the_uplink(
     assert "dev" not in routes.split("unreachable", 1)[0]  # no default via the dead tunnel
     assert plan["ops"] == []
     assert packets == 0
+
+
+@pytest.fixture
+def reconciler_node3(
+    topology: Topology,
+    connected_node3: UpstreamHandle,
+) -> Iterator[subprocess.Popen[bytes]]:
+    process = start_reconciler(topology.node3, connected_node3.root)
+    try:
+        yield process
+    finally:
+        stop_reconciler(process)
+
+
+@pytest.mark.netlab
+def test_tunnel_drop_and_reconnect_through_a_running_reconciler_leaks_nothing(
+    topology: Topology,
+    connected_node3: UpstreamHandle,
+    reconciler_node3: subprocess.Popen[bytes],
+) -> None:
+    # The supervisor layout: `korctl upstream connect` converges through the
+    # reconciler socket (D-30), and the daemon's netlink/timer passes run
+    # concurrently with the drop and the redial.
+    uplink = _default_route_device(topology.node3)
+    capture = _start_capture(topology.node3.full_name, uplink, f"host {INET_HTTP_ADDR}")
+    traffic = _start_connect_loop(
+        topology.node3.full_name, INET_HTTP_ADDR, HTTP_PORT, duration=30.0
+    )
+    try:
+        connected_node3.kill_leftover()
+        _wait_until(
+            lambda: not _interface_exists(topology.node3, UPSTREAM_INTERFACE),
+            f"{UPSTREAM_INTERFACE} gone",
+        )
+        time.sleep(1.0)  # let the daemon pass over the dead tunnel
+        korctl(
+            topology.node3,
+            connected_node3.config_path,
+            "upstream",
+            "connect",
+            connected_node3.profile,
+        )
+        _wait_until(
+            lambda: _interface_exists(topology.node3, UPSTREAM_INTERFACE),
+            f"{UPSTREAM_INTERFACE} back",
+        )
+        time.sleep(1.0)
+    finally:
+        _terminate(traffic)
+        packets = _stop_capture(capture)
+
+    applied = json.loads(
+        korctl(topology.node3, connected_node3.config_path, "net", "apply", "--json").stdout
+    )
+    routes = topology.node3.run(["ip", "route", "show", "table", connected_node3.table]).stdout
+    body = http_get(topology.node3, f"http://{HUB_LAN_ADDR}:{HUB_STUB_PORT}/", timeout=3.0)
+
+    assert packets == 0
+    assert applied["via"] == "reconciler"
+    assert applied["status"]["last_error"] is None
+    assert f"default dev {UPSTREAM_INTERFACE}" in routes
+    assert body.startswith("echo from 10.250.0.")
+
+
+@pytest.mark.netlab
+def test_reconciler_restart_with_the_tunnel_dying_meanwhile_leaks_nothing(
+    topology: Topology,
+    connected_node3: UpstreamHandle,
+    reconciler_node3: subprocess.Popen[bytes],
+) -> None:
+    # Nothing is torn down on reconciler exit, so the kernel keeps failing
+    # closed while it is gone; its first pass after the restart must too.
+    uplink = _default_route_device(topology.node3)
+    capture = _start_capture(topology.node3.full_name, uplink, f"host {INET_HTTP_ADDR}")
+    traffic = _start_connect_loop(
+        topology.node3.full_name, INET_HTTP_ADDR, HTTP_PORT, duration=30.0
+    )
+    restarted: subprocess.Popen[bytes] | None = None
+    try:
+        stop_reconciler(reconciler_node3)
+        topology.node3.run(["ip", "link", "delete", UPSTREAM_INTERFACE])
+        time.sleep(1.0)
+        restarted = start_reconciler(topology.node3, connected_node3.root)
+        time.sleep(1.0)
+    finally:
+        _terminate(traffic)
+        packets = _stop_capture(capture)
+        if restarted is not None:
+            stop_reconciler(restarted)
+
+    routes = topology.node3.run(["ip", "route", "show", "table", connected_node3.table]).stdout
+
+    assert packets == 0
+    assert re.search(r"unreachable default .*metric 4096", routes)
+    assert "dev" not in routes.split("unreachable", 1)[0]
+    assert not tcp_check(topology.node3, INET_HTTP_ADDR, HTTP_PORT, timeout=1.0)
 
 
 @pytest.mark.netlab
@@ -220,15 +317,18 @@ def _sysctl(ns: Namespace, key: str) -> str:
     return ns.run(["sysctl", "-n", key]).stdout.strip()
 
 
-def _start_connect_loop(full_namespace: str, host: str, port: int) -> subprocess.Popen[bytes]:
-    code = textwrap.dedent(
-        """
+def _start_connect_loop(
+    full_namespace: str, host: str, port: int, duration: float = 2.0
+) -> subprocess.Popen[bytes]:
+    code = (
+        textwrap.dedent(
+            """
         import socket
         import time
 
         host = HOST
         port = PORT
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + DURATION
         while time.monotonic() < deadline:
             try:
                 socket.create_connection((host, port), timeout=0.2).close()
@@ -236,7 +336,11 @@ def _start_connect_loop(full_namespace: str, host: str, port: int) -> subprocess
                 pass
             time.sleep(0.05)
         """
-    ).replace("HOST", repr(host)).replace("PORT", repr(port))
+        )
+        .replace("HOST", repr(host))
+        .replace("PORT", repr(port))
+        .replace("DURATION", repr(duration))
+    )
     return subprocess.Popen(  # noqa: S603 - explicit argv, no shell
         ["ip", "netns", "exec", full_namespace, "python3", "-c", code],
         stdout=subprocess.DEVNULL,
@@ -245,6 +349,15 @@ def _start_connect_loop(full_namespace: str, host: str, port: int) -> subprocess
 
 
 def _capture_packets(full_namespace: str, iface: str, bpf_filter: str) -> int:
+    process = _start_capture(full_namespace, iface, bpf_filter)
+    try:
+        stdout, _ = process.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        return _stop_capture(process)
+    return _count_packets(stdout)
+
+
+def _start_capture(full_namespace: str, iface: str, bpf_filter: str) -> subprocess.Popen[str]:
     process = subprocess.Popen(  # noqa: S603 - explicit argv, no shell
         [
             "ip",
@@ -265,16 +378,35 @@ def _capture_packets(full_namespace: str, iface: str, bpf_filter: str) -> int:
         stderr=subprocess.DEVNULL,
         text=True,
     )
+    time.sleep(0.5)  # tcpdump attaches before the scenario starts
+    return process
+
+
+def _stop_capture(process: subprocess.Popen[str]) -> int:
+    process.terminate()
     try:
-        stdout, _ = process.communicate(timeout=2)
+        stdout, _ = process.communicate(timeout=1)
     except subprocess.TimeoutExpired:
-        process.terminate()
-        try:
-            stdout, _ = process.communicate(timeout=1)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, _ = process.communicate()
+        process.kill()
+        stdout, _ = process.communicate()
+    return _count_packets(stdout)
+
+
+def _count_packets(stdout: str) -> int:
     return sum(1 for line in stdout.splitlines() if line and not line.startswith("tcpdump:"))
+
+
+def _interface_exists(ns: Namespace, name: str) -> bool:
+    return ns.run(["ip", "link", "show", "dev", name], check=False).ok
+
+
+def _wait_until(check: Callable[[], bool], description: str, timeout: float = 15.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(0.1)
+    raise TimeoutError(f"timed out waiting for {description}")
 
 
 def _terminate(process: subprocess.Popen[bytes]) -> None:
