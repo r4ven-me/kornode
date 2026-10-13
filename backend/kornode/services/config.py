@@ -84,6 +84,7 @@ class ConfigService:
             from kornode.services.users import UserService
 
             UserService(config, files=self.file_manager).ensure_default_group()
+            self._ensure_fabric_crl(config)
         written: list[Path] = []
         rendered_files = self.render_files(config)
         for rendered in rendered_files:
@@ -96,6 +97,14 @@ class ConfigService:
                 path.unlink()
                 written.append(path)
         return written
+
+    def _ensure_fabric_crl(self, config: AppConfig) -> None:
+        # ocserv refuses to start with `crl =` pointing at a missing file.
+        if not config.cert_path("ca.key").exists():
+            return
+        from kornode.services.certificates import CertificateService
+
+        CertificateService(config, files=self.file_manager).ensure_crl()
 
     def diff_rendered_files(self, config: AppConfig) -> str:
         secrets = collect_config_secrets(config)

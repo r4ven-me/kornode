@@ -10,7 +10,13 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kornode.config.models import DOMAIN_RE, AppConfig
-from kornode.config.reserved import CLIENTS_GROUP, RESERVED_GROUPS, is_reserved_username
+from kornode.config.reserved import (
+    CLIENTS_GROUP,
+    ENROLL_GROUP,
+    ENROLL_USER_RE,
+    RESERVED_GROUPS,
+    is_reserved_username,
+)
 from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.files import FileManager
 
@@ -574,8 +580,39 @@ class UserService:
     ) -> CommandResult:
         return self.create_user(username, password, dry_run=dry_run)
 
+    def create_enroll_user(
+        self,
+        username: str,
+        password: str,
+        *,
+        dry_run: bool = False,
+    ) -> CommandResult:
+        """One-shot enrollment account, created directly in the `enroll` group.
+
+        validate_username() rejects `enroll-*` for operators, so the fabric
+        enrollment service goes through this narrow entry point instead.
+        """
+        if not ENROLL_USER_RE.fullmatch(username):
+            raise ValueError(f"enroll username '{username}' is malformed")
+        self.files.ensure_dir(self.config.system.secrets_dir, mode=0o700)
+        return self.runner.run(
+            self._passwd_argv("-g", ENROLL_GROUP, username),
+            input_text=f"{password}\n{password}\n",
+            timeout=30,
+            dry_run=dry_run,
+            extra_secrets=[password],
+        )
+
+    def delete_enroll_user(self, username: str) -> bool:
+        if not ENROLL_USER_RE.fullmatch(username):
+            raise ValueError(f"enroll username '{username}' is malformed")
+        return self._remove_passwd_entry(username)
+
     def delete_user(self, username: str) -> bool:
         self.validate_username(username)
+        return self._remove_passwd_entry(username)
+
+    def _remove_passwd_entry(self, username: str) -> bool:
         with _PASSWD_REWRITE_LOCK:
             lines = self.files.read_lines(self.passwd_file)
             kept = [

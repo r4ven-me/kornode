@@ -44,6 +44,8 @@ table inet kornode {
   }
   chain prerouting {
     type filter hook prerouting priority mangle; policy accept;
+    # strict reverse path for ocserv sessions: a session may only use a source address routed back through its own device (D-47)
+    iifname "vpns*" meta nfproto ipv4 fib saddr . iif oif missing drop
     ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark return
     jump egress_classify
   }

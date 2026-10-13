@@ -118,26 +118,42 @@ when the compiled content changed.
    `pending` + token. Panel: "Add agent" dialog, same service.
 2. Token (shown once), base64url of:
    ```json
-   {"v":1,"hub":"vpn.example.com:443","pin":"pin-sha256:…","user":"enroll-3-k2f9",
-    "secret":"<32 random bytes b64>","camouflage":"<optional>","exp":"2026-10-11T16:41:00Z"}
+   {"v":1,"hub":"vpn.example.com:443","pin":"pin-sha256:…","id":"k2f9a1b0",
+    "user":"enroll-3-k2f9a1b0","secret":"<32 random bytes b64>",
+    "camouflage":"<optional>","exp":"2026-10-11T16:41:00Z"}
    ```
-   Hub stores `hash(secret)` and creates an ocserv user `enroll-3-k2f9` with the
+   `id` is the token id (also the suffix of `user`); a node has one live token,
+   issuing a new one revokes the previous one. Hub stores `sha256(secret)` and
+   creates an ocserv user `enroll-3-k2f9a1b0` with the
    same password in group `enroll` (restricted to `10.99.0.1/32` tcp/8444 by
    the hub nft rule set, D-44), expiring at `exp`.
 3. Agent `kornode-agent enroll <token>`: generates TLS key (ECDSA P-256) and
    X25519 seal key locally; connects openconnect with the enroll user (pinning
    `pin`); calls `POST /agent/v1/enroll` (server-auth TLS only, since it has no
    client cert yet) with `{token_id, secret, csr_pem, seal_pubkey_b64, facts}`.
-4. Hub verifies secret, signs CSR with CN=`agent-<id>`, OU=`agents`, lifetime
-   `cert_lifetime_days`; marks token used; deletes the enroll ocserv user;
+4. Hub verifies secret, checks the CSR (valid signature, ECDSA P-256, ≤ 8 KiB,
+   32-byte X25519 `seal_pubkey`) and signs **only its public key** with
+   CN=`agent-<id>`, OU=`agents`, lifetime `cert_lifetime_days` (D-45; the CSR
+   subject is ignored); claims the token atomically with the signing
+   (a bad CSR does not burn it); deletes the enroll ocserv user;
    sets node `active`; returns `{cert_pem, ca_pem, node_id, signing_keys:
    [{key_id, pubkey_b64}], bundle: {version, body_b64, signature}}`.
+Renewal (`POST /agent/v1/renew`) opens when 2/3 of the lifetime have passed
+(409 before); the previous certificate stays valid until it expires. Revocation
+(`revoke_node`) marks the node `revoked`, frees its prefixes, puts **every**
+certificate issued for it into `revoked.pem`, regenerates the CRL (`crl_next_update`
+30 days; the supervisor loop refreshes it after 10), reloads ocserv, runs
+`occtl disconnect user agent-<id>` and removes `config-per-user/agent-<id>`; the
+hub connect-script refuses an `agents` session without that file, so a stale CRL
+is not the only barrier (D-47).
+
 5. Agent writes `agent.yaml` (bootstrap), disconnects the enroll session,
    connects with its certificate, applies the first bundle with confirm
    (on rollback it stays in the bootstrap state, 06), starts the run loop.
 
-Failure modes: expired/used token → 410; wrong secret → 403 + audit; node not
-pending → 409. Enroll endpoint rate-limited per source address (5/min).
+Failure modes (checked in this order): unknown token id or wrong secret → 403 +
+audit (indistinguishable); expired/used token → 410; node not pending → 409;
+bad CSR/seal key → 400. Enroll endpoint rate-limited per source address (5/min).
 
 ## Bundle
 

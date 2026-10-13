@@ -121,5 +121,9 @@ Notes:
   D-44). `enroll` sessions are limited by a static rule set: from
   `fabric.enroll_pool` only `tcp` to the hub fabric address on `control.port`
   is accepted in `input`; `forward` drops the pool in both directions.
+- Those rules match by source address, so they only hold if a session cannot
+  forge one. `prerouting` therefore starts with a strict reverse-path check
+  scoped to IPv4 on ocserv session devices: `iifname "<server.device>*" meta
+  nfproto ipv4 fib saddr . iif oif missing drop` (D-47). The tunnels' `rp_filter=2` is untouched.
 - ocserv `isolate-workers` stays on; routes for agent prefixes come from
   `iroute` (S-03).

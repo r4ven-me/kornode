@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import threading
+import time
 from pathlib import Path
 
 from kornode.config.models import AppConfig
@@ -345,6 +346,77 @@ class CertificateService:
             return None
         return self.certificate_info(path.read_text(encoding="utf-8"))
 
+    def sign_agent_public_key(
+        self,
+        node_id: int,
+        public_key_pem: str,
+        *,
+        lifetime_days: int,
+        dry_run: bool = False,
+    ) -> Path:
+        """Issue CN=agent-<id>, OU=agents from a bare public key (D-45).
+
+        The subject comes only from the template: certtool would copy it from
+        a CSR, and the CSR is attacker-controlled. Proof of possession is
+        checked by the caller before the key gets here.
+        """
+        name = f"agent-{node_id}"
+        agents_dir = self.cert_dir / "agents"
+        self.files.ensure_dir(agents_dir, mode=0o700)
+        pubkey = agents_dir / f"{name}.pub.tmp"
+        out = agents_dir / f"{name}.crt.tmp"
+        self.files.atomic_write_text(pubkey, public_key_pem, mode=0o600)
+        template = self._write_template(
+            self._template_path(f"{name}.tmpl"),
+            "\n".join(
+                [
+                    f"cn = {name}",
+                    "unit = agents",
+                    "tls_www_client",
+                    "signing_key",
+                    f"expiration_days = {lifetime_days}",
+                    "",
+                ]
+            ),
+        )
+        try:
+            self.runner.run(
+                [
+                    "certtool",
+                    "--generate-certificate",
+                    "--load-pubkey",
+                    str(pubkey),
+                    "--load-ca-certificate",
+                    str(self.config.cert_path("ca.crt")),
+                    "--load-ca-privkey",
+                    str(self.config.cert_path("ca.key")),
+                    "--template",
+                    str(template),
+                    "--outfile",
+                    str(out),
+                ],
+                timeout=60,
+                dry_run=dry_run,
+            )
+        finally:
+            pubkey.unlink(missing_ok=True)
+            template.unlink(missing_ok=True)
+        return out
+
+    def ensure_crl(self, *, dry_run: bool = False) -> bool:
+        """Create the CRL if absent; ocserv refuses to start with `crl =` pointing nowhere."""
+        if (self.cert_dir / "crl.pem").exists():
+            return False
+        self.files.ensure_dir(self.cert_dir, mode=0o700)
+        self.generate_crl(dry_run=dry_run)
+        return True
+
+    def crl_age_seconds(self) -> float | None:
+        crl = self.cert_dir / "crl.pem"
+        if not crl.exists():
+            return None
+        return max(0.0, time.time() - crl.stat().st_mtime)
+
     def generate_crl(self, *, dry_run: bool = False) -> CommandResult:
         ca_key = self.config.cert_path("ca.key")
         ca_crt = self.config.cert_path("ca.crt")
@@ -358,24 +430,19 @@ class CertificateService:
             self._template_path("crl.tmpl"),
             "crl_next_update = 30\n",
         )
-        return self.runner.run(
-            [
-                "certtool",
-                "--generate-crl",
-                "--load-ca-privkey",
-                str(ca_key),
-                "--load-ca-certificate",
-                str(ca_crt),
-                "--load-certificate",
-                str(revoked),
-                "--template",
-                str(template),
-                "--outfile",
-                str(crl),
-            ],
-            timeout=60,
-            dry_run=dry_run,
-        )
+        argv = [
+            "certtool",
+            "--generate-crl",
+            "--load-ca-privkey",
+            str(ca_key),
+            "--load-ca-certificate",
+            str(ca_crt),
+        ]
+        # No revocations yet: certtool still emits a valid empty CRL.
+        if revoked.exists() and revoked.stat().st_size > 0:
+            argv.extend(["--load-certificate", str(revoked)])
+        argv.extend(["--template", str(template), "--outfile", str(crl)])
+        return self.runner.run(argv, timeout=60, dry_run=dry_run)
 
 
 def _certificate_identities(value: str) -> list[str]:

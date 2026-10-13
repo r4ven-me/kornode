@@ -238,4 +238,5 @@ class HubNetInputs:
             pool=ipaddress.IPv4Network(self.config.fabric.enroll_pool, strict=True),
             address=hub.fabric_address,
             port=DEFAULT_CONTROL_PORT,
+            session_iface=f"{self.config.server.device}*",
         )

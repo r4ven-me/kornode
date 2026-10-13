@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 MARK_MASK = "0xffffff00"
 IFNAME = re.compile(r"[A-Za-z0-9_.-]{1,15}")
+IFNAME_GLOB = re.compile(r"[A-Za-z0-9_.-]{1,14}\*")
 OWN_MARKS = "ct mark & 0xff000000 == 0x0c000000"
 MSS_CLAMP = "tcp flags syn / syn,rst tcp option maxseg size set rt mtu"
 REJECT = "reject with icmpx admin-prohibited"
@@ -104,6 +105,12 @@ def _ifname(value: str) -> str:
     return value
 
 
+def _ifname_glob(value: str) -> str:
+    if not IFNAME_GLOB.fullmatch(value):
+        raise PolicyError(f"invalid interface name pattern: {value!r}")
+    return value
+
+
 def render_script(
     *,
     exits: tuple[Exit, ...],
@@ -128,6 +135,16 @@ def render_script(
     lines += [
         "  chain prerouting {",
         "    type filter hook prerouting priority mangle; policy accept;",
+        *(
+            [
+                "    # strict reverse path for ocserv sessions: a session may only use a "
+                "source address routed back through its own device (D-47)",
+                f'    iifname "{_ifname_glob(facts.enroll.session_iface)}" meta nfproto ipv4 '
+                "fib saddr . iif oif missing drop",
+            ]
+            if facts.enroll is not None
+            else []
+        ),
         f"    {OWN_MARKS} meta mark set ct mark return",
         "    jump egress_classify",
         "  }",

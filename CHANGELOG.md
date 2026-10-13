@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added (P3-03: agent enrollment)
+
+- `EnrollmentService`: one-shot enrollment tokens (1 h, secret stored hashed) with a
+  one-time `enroll-<node>-<id>` ocserv user, CSR signing by the hub CA (CN/OU set by the
+  hub, ECDSA P-256 only, 90 days), renewal after 2/3 of the lifetime, node revocation via
+  CRL + ocserv reload + `occtl disconnect`, and `korctl registry maintain` (expired
+  tokens, stale CRL) in the registry supervisor loop. D-45, D-46.
+- `ocserv.conf` gets `crl` with `fabric.enabled`; the connect-script guard refuses
+  agents without a `config-per-user` file; strict reverse-path check for ocserv session
+  devices closes source spoofing from enroll sessions (D-47).
+- `cryptography` is now a runtime dependency.
+
 ### Added (P3-01: registry)
 
 - Added the hub registry storage layer on SQLite/WAL with forward-only migrations,

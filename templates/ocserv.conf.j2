@@ -22,6 +22,7 @@ cert-user-oid = {{ config.server.cert_user_oid }}
 {% endif %}
 {% if config.fabric.enabled %}
 cert-group-oid = 2.5.4.11
+crl = {{ crl }}
 {% endif %}
 
 {% for item in auth_lines %}

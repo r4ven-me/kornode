@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from kornode.registry.db import RegistryError, transaction
 from kornode.registry.models import (
+    EnrollToken,
     Node,
     NodePrefix,
     NodeState,
@@ -182,6 +183,58 @@ class Registry:
             ).fetchall()
         return [_prefix_from_row(row) for row in rows]
 
+    def create_enroll_token(
+        self,
+        *,
+        id: str,
+        node_id: int,
+        ocserv_user: str,
+        secret_hash: str,
+        expires_at: str,
+    ) -> EnrollToken:
+        try:
+            with self._write():
+                self.conn.execute(
+                    """
+                    INSERT INTO enroll_tokens (id, node_id, ocserv_user, secret_hash, expires_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (id, node_id, ocserv_user, secret_hash, expires_at),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise RegistryConflict(str(exc)) from exc
+        return self.get_enroll_token(id)
+
+    def get_enroll_token(self, token_id: str) -> EnrollToken:
+        row = self.conn.execute("SELECT * FROM enroll_tokens WHERE id = ?", (token_id,)).fetchone()
+        if row is None:
+            raise RegistryNotFound(f"enroll token {token_id!r} not found")
+        return _token_from_row(row)
+
+    def list_enroll_tokens(self, node_id: int | None = None) -> list[EnrollToken]:
+        if node_id is None:
+            rows = self.conn.execute("SELECT * FROM enroll_tokens ORDER BY expires_at").fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM enroll_tokens WHERE node_id = ? ORDER BY expires_at", (node_id,)
+            ).fetchall()
+        return [_token_from_row(row) for row in rows]
+
+    def mark_enroll_token_used(self, token_id: str, used_at: str) -> bool:
+        """Atomic one-shot claim: True only for the caller that flipped it."""
+        with self._write():
+            cursor = self.conn.execute(
+                "UPDATE enroll_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL",
+                (used_at, token_id),
+            )
+        return cursor.rowcount == 1
+
+    def delete_enroll_tokens(self, token_ids: Sequence[str]) -> None:
+        with self._write():
+            self.conn.executemany(
+                "DELETE FROM enroll_tokens WHERE id = ?", [(item,) for item in token_ids]
+            )
+
     @contextmanager
     def _write(self) -> Iterator[None]:
         context = nullcontext() if self.conn.in_transaction else transaction(self.conn)
@@ -208,6 +261,17 @@ def _node_from_row(row: sqlite3.Row) -> Node:
         last_seen=cast(str | None, row["last_seen"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+    )
+
+
+def _token_from_row(row: sqlite3.Row) -> EnrollToken:
+    return EnrollToken(
+        id=str(row["id"]),
+        node_id=int(row["node_id"]),
+        ocserv_user=str(row["ocserv_user"]),
+        secret_hash=str(row["secret_hash"]),
+        expires_at=str(row["expires_at"]),
+        used_at=cast(str | None, row["used_at"]),
     )
 
 

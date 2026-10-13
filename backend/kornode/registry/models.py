@@ -37,6 +37,16 @@ class NodePrefix:
     export: bool
 
 
+@dataclass(frozen=True)
+class EnrollToken:
+    id: str
+    node_id: int
+    ocserv_user: str
+    secret_hash: str
+    expires_at: str
+    used_at: str | None
+
+
 def utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

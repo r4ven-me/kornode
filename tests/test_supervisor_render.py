@@ -123,6 +123,7 @@ def test_supervisor_render_adds_registry_snapshot_when_fabric_enabled(tmp_path: 
 
     assert "[program:registry-snapshot]" in rendered
     assert "korctl registry snapshot" in rendered
+    assert "korctl registry maintain" in rendered
     assert f"stdout_logfile={tmp_path}/logs/registry-snapshot.log" in rendered
 
 

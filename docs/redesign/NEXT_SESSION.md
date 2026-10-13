@@ -1,4 +1,6 @@
-# Prompt for the next session — P3-03 onwards (control plane and agent)
+# Prompt for the next session — P3-04 onwards (control plane and agent)
+
+> P3-03 is done on branch `redesign/p3-03-enrollment` (service layer, D-45…D-47). Next: P3-04 (bundle compiler). Carry-overs for P3-05: bind `renew` to the mTLS client CN; node deletion only via `EnrollmentService.revoke_node`; the `enroll` HTTP handler maps `EnrollmentError.status/code`.
 
 Paste everything below the line into a fresh Claude Code session started in
 `/home/lans/Cloud/Projects/public/kornode`. **Start on Opus in plan mode** (P3-03 is non-trivial: tokens, CSR, CRL,

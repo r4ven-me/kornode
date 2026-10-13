@@ -61,6 +61,8 @@ class EnrollGuard:
     pool: ipaddress.IPv4Network
     address: ipaddress.IPv4Address
     port: int
+    # Glob of ocserv session devices ("vpns*"): strict reverse-path check (D-47).
+    session_iface: str = "vpns*"
 
 
 @dataclass(frozen=True, slots=True)

@@ -83,7 +83,7 @@ Done when:
 | --- | --- |
 | P3-01 | Registry: SQLite at `data_dir/registry.db`, schema + migrations (`docs/spec/05-control-plane.md`), repository layer, WAL mode, nightly `VACUUM INTO` snapshot. |
 | P3-02 | Hub-side classes: three ocserv groups `clients`, `agents`, `enroll`; group configs rendered from the registry. |
-| P3-03 | Enrollment: token issue/revoke, one-time `enroll` ocserv users restricted to the control API, CSR signing with the existing CA (`certtool`), cert renewal, revocation via CRL. |
+| P3-03 | Enrollment: token issue/revoke, one-time `enroll` ocserv users restricted to the control API, CSR signing with the existing CA (`certtool`), cert renewal, revocation via CRL. **Done (service layer, D-45…D-47; API/CLI/panel surfaces in P3-08).** |
 | P3-04 | Bundle compiler on the hub: per-agent JSON per `schemas/bundle.v1.schema.json`, Ed25519 signature, secret sealing, monotonic versions, stored history. |
 | P3-05 | Control API service (`kornode.control`): separate supervisor program bound to the hub fabric address, mTLS, long-poll, reports, command queue. Runs with `web.enabled: false`. |
 | P3-06 | Agent package `kornode_agent` + image `kornode-agent`: enroll, run loop, cache (3 versions), verify, apply-with-confirm, rollback, boot from cache, report, commands. Depends only on `kornode.net` + small deps. |

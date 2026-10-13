@@ -200,9 +200,14 @@ def test_connect_script_fabric_guard(tmp_path: Path) -> None:
     script.write_text(rendered, encoding="utf-8")
     empty_path = tmp_path / "bin"
     empty_path.mkdir()
+    # Only agents with a config-per-user file (= active in the registry) get in.
+    user_dir = tmp_path / "generated" / "config-per-user"
+    user_dir.mkdir(parents=True)
+    (user_dir / "agent-3").write_text("explicit-ipv4 = 10.99.0.3\n", encoding="utf-8")
     cases = [
         ({"GROUPNAME": ""}, 1),
         ({"GROUPNAME": "agents", "USERNAME": "agent-3"}, 0),
+        ({"GROUPNAME": "agents", "USERNAME": "agent-4"}, 1),
         ({"GROUPNAME": "agents", "USERNAME": "alice"}, 1),
         ({"GROUPNAME": "agents", "USERNAME": "agent-03"}, 1),
         ({"GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 0),

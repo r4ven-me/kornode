@@ -1330,6 +1330,25 @@ def registry_snapshot_command(
     typer.echo(str(written))
 
 
+@registry_app.command("maintain")
+def registry_maintain_command() -> None:
+    """Purge expired enrollment tokens and refresh a stale CRL (supervisor loop)."""
+    from kornode.services.enrollment import EnrollmentService
+    from kornode.services.server import ServerService
+
+    config = get_config()
+    if not config.fabric.enabled:
+        typer.echo("fabric disabled")
+        return
+    server = ServerService(config)
+
+    def reload_ocserv() -> None:
+        server.reload()
+
+    result = EnrollmentService(config, reload_ocserv=reload_ocserv).maintain()
+    typer.echo(json.dumps(result, sort_keys=True))
+
+
 @web_app.command("hash-password")
 def web_hash_password() -> None:
     password = typer.prompt("Admin password", hide_input=True, confirmation_prompt=True)

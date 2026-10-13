@@ -150,6 +150,13 @@ capabilities:
     ui: null
     exempt: "process entrypoint for supervisor; admin backup arrives with P3-09 hub backup"
 
+  - id: registry.maintain
+    service: kornode.services.enrollment.EnrollmentService.maintain
+    cli: "registry maintain"
+    api: null
+    ui: null
+    exempt: "process entrypoint for supervisor (expired enrollment tokens, CRL refresh); no operator-facing capability."
+
   - id: certificates.status
     service: kornode.services.server_certificates.ServerCertificateService.status
     cli: "certificates status"
