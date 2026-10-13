@@ -96,7 +96,16 @@ CREATE TABLE commands (
 CREATE TABLE audit (                                 -- reuse existing audit service if suitable
   at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT, details TEXT
 );
+CREATE INDEX reports_node_id_received_at_idx ON reports(node_id, received_at);
+CREATE INDEX commands_node_id_state_idx ON commands(node_id, state);
+CREATE INDEX enroll_tokens_expires_at_idx ON enroll_tokens(expires_at);
 ```
+
+The registry DB file is created `0600` (the mode of `data_dir` is left alone). A
+snapshot worker checks hourly and writes at most one snapshot per 24 h to
+`data_dir/backups/registry/registry-YYYYMMDDTHHMMSSZ.db` using `VACUUM INTO`
+and an atomic replace. Snapshot copies are `0600`, verified with
+`PRAGMA integrity_check`, and the newest 7 are retained.
 
 All writes go through `RegistryService` (one class, used by CLI, admin API and
 control API). Any mutation affecting an agent's bundle recompiles it in the

@@ -119,3 +119,12 @@ autorestart=true
 stdout_logfile={{ config.system.log_dir }}/log-rotation.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
+
+{% if config.fabric.enabled %}
+[program:registry-snapshot]
+command=/bin/sh -c 'while true; do korctl registry snapshot || true; sleep 3600; done'
+autorestart=true
+stdout_logfile={{ config.system.log_dir }}/registry-snapshot.log
+stdout_logfile_maxbytes=0
+redirect_stderr=true
+{% endif %}

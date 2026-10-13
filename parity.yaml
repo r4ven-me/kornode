@@ -143,6 +143,13 @@ capabilities:
     ui: null
     exempt: "Internal ocserv connect-script entrypoint, not an admin management capability."
 
+  - id: registry.snapshot
+    service: kornode.registry.snapshot.snapshot
+    cli: "registry snapshot"
+    api: null
+    ui: null
+    exempt: "process entrypoint for supervisor; admin backup arrives with P3-09 hub backup"
+
   - id: certificates.status
     service: kornode.services.server_certificates.ServerCertificateService.status
     cli: "certificates status"

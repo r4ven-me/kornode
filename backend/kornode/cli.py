@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from kornode.config.loader import (
     resolve_secret_refs,
 )
 from kornode.config.models import AppConfig, GroupPolicyConfig, OidcProviderConfig
+from kornode.registry.snapshot import due as registry_snapshot_due
+from kornode.registry.snapshot import snapshot as registry_snapshot
 from kornode.services.cert_pin import fetch_server_pin
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult
@@ -65,6 +68,7 @@ identity_group_config_app = typer.Typer(help="Manage ocserv config-per-group fil
 net_app = typer.Typer(help="Routing core: plan, apply, explain, run the reconciler")
 host_dns_app = typer.Typer(help="Point the host's resolver at the built-in dnsmasq")
 web_app = typer.Typer(help="Manage Web GUI security")
+registry_app = typer.Typer(help="Manage the hub registry")
 
 STATE: dict[str, Path | None] = {"config_path": None, "env_file": None}
 
@@ -1305,6 +1309,27 @@ def logs_rotate(
         typer.echo("rotated: " + ", ".join(rotated))
 
 
+@registry_app.command("snapshot")
+def registry_snapshot_command(
+    force: bool = typer.Option(False, "--force", help="Write a snapshot even if one is not due."),
+) -> None:
+    config = get_config()
+    db_path = config.system.data_dir / "registry.db"
+    dest_dir = config.system.data_dir / "backups" / "registry"
+    now = datetime.now(UTC)
+    if not db_path.exists():
+        typer.echo("no registry")
+        return
+    if not force and not registry_snapshot_due(dest_dir, now=now):
+        typer.echo("not due")
+        return
+    written = registry_snapshot(db_path, dest_dir, now=now)
+    if written is None:
+        typer.echo("no registry")
+        return
+    typer.echo(str(written))
+
+
 @web_app.command("hash-password")
 def web_hash_password() -> None:
     password = typer.prompt("Admin password", hide_input=True, confirmation_prompt=True)
@@ -1333,6 +1358,7 @@ app.add_typer(internal_dns_app, name="internal-dns")
 app.add_typer(net_app, name="net")
 app.add_typer(host_dns_app, name="host-dns")
 app.add_typer(web_app, name="web")
+app.add_typer(registry_app, name="registry")
 
 
 if __name__ == "__main__":

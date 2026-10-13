@@ -47,7 +47,7 @@ package-dir = {"" = "backend"}
 where = ["backend"]
 
 [tool.setuptools.package-data]
-kornode = ["py.typed"]
+kornode = ["py.typed", "registry/migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

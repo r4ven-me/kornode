@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added (P3-01: registry)
+
+- Added the hub registry storage layer on SQLite/WAL with forward-only migrations,
+  node/node-prefix repository methods, and `korctl registry snapshot` with
+  integrity-checked 7-copy retention.
+
 Phase P0 of the [routing redesign](docs/redesign/PLAN.ru.md) (`docs/redesign/ROADMAP.md`):
 stabilises the current routing model by fixing the root causes behind the most common
 incidents, without changing the model itself.

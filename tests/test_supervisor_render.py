@@ -106,6 +106,44 @@ def test_supervisor_render_always_includes_log_rotation_loop(tmp_path: Path) -> 
     assert "korctl logs-rotate" in rendered
 
 
+def test_supervisor_render_adds_registry_snapshot_when_fabric_enabled(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "generated_dir": str(tmp_path / "generated"),
+                "log_dir": str(tmp_path / "logs"),
+            },
+            "fabric": {"enabled": True},
+        },
+        environ={},
+    )
+
+    rendered = SupervisorConfigRenderer().render(config)
+
+    assert "[program:registry-snapshot]" in rendered
+    assert "korctl registry snapshot" in rendered
+    assert f"stdout_logfile={tmp_path}/logs/registry-snapshot.log" in rendered
+
+
+def test_supervisor_render_omits_registry_snapshot_when_fabric_disabled(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "generated_dir": str(tmp_path / "generated"),
+                "log_dir": str(tmp_path / "logs"),
+            },
+            "fabric": {"enabled": False},
+        },
+        environ={},
+    )
+
+    rendered = SupervisorConfigRenderer().render(config)
+
+    assert "[program:registry-snapshot]" not in rendered
+
+
 def test_supervisor_render_always_includes_domain_resolver(tmp_path: Path) -> None:
     # Always registered, like host-dns-guard/log-rotation: a no-op cycle
     # when there's nothing configured to resolve, so turning split routing
