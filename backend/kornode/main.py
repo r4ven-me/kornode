@@ -12,15 +12,15 @@ from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandError
 from kornode.services.config import ConfigService
 from kornode.services.files import FileManager
-from kornode.services.nftables import NftablesService
+from kornode.services.net import NetApplyError, NetService
 from kornode.services.server_certificates import ServerCertificateService
-from kornode.services.sysctl import SysctlService
 
 
 def unlink_stale_runtime_sockets(generated_dir: Path) -> None:
     for path in [
         generated_dir / "supervisor.sock",
         generated_dir / "occtl.sock",
+        generated_dir / "reconciler.sock",
         *generated_dir.glob("ocserv.sock*"),
         *generated_dir.glob("occtl.sock*"),
     ]:
@@ -31,7 +31,6 @@ def unlink_stale_runtime_sockets(generated_dir: Path) -> None:
 def initialize_runtime(config_path: Path | None = None) -> None:
     resolved_config_path = config_path or DEFAULT_CONFIG_PATH
     config = load_config(resolved_config_path)
-    _require_startup_sysctls(config)
     files = FileManager()
     files.ensure_dir(config.system.data_dir)
     files.ensure_dir(config.system.log_dir)
@@ -40,7 +39,7 @@ def initialize_runtime(config_path: Path | None = None) -> None:
     unlink_stale_runtime_sockets(config.system.generated_dir)
     config = prepare_startup_letsencrypt(config, resolved_config_path, files)
     ConfigService(files).write_rendered_files(config)
-    NftablesService(config, files=files).apply()
+    _converge_kernel(config)
 
     certs = CertificateService(config, files=files)
     if not config.cert_path("ca.key").exists() or not config.cert_path("ca.crt").exists():
@@ -53,16 +52,13 @@ def initialize_runtime(config_path: Path | None = None) -> None:
             certs.create_server_certificate()
 
 
-def _require_startup_sysctls(config: AppConfig) -> None:
-    failed = [result for result in SysctlService(config).apply_global() if not result.ok]
-    if not failed:
-        return
-    details = "\n".join(
-        f"{' '.join(result.argv)} -> exit {result.returncode}: "
-        f"{result.stderr or result.stdout}".rstrip()
-        for result in failed
-    )
-    raise SystemExit(f"failed to apply required sysctl settings:\n{details}")
+def _converge_kernel(config: AppConfig) -> None:
+    """One reconciler pass before anything starts: the sysctls, rules and
+    kill-switch must be in place first. Failure is fatal."""
+    try:
+        NetService(config).converge()
+    except (NetApplyError, OSError) as exc:
+        raise SystemExit(f"failed to converge kernel networking state:\n{exc}") from exc
 
 
 def prepare_startup_letsencrypt(

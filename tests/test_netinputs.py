@@ -7,9 +7,13 @@ from typing import Any
 
 from kornode.config.models import AppConfig
 from kornode.net.compile import TunnelFact
-from kornode.renderers.nftables import carrier_state_dir
 from kornode.services.command import CommandResult
-from kornode.services.netinputs import HubNetInputs, resolved_state_dir
+from kornode.services.netinputs import (
+    HubNetInputs,
+    active_profile_file,
+    carrier_state_dir,
+    resolved_state_dir,
+)
 
 LINKS = [
     {"ifname": "lo", "flags": ["LOOPBACK", "UP"]},
@@ -126,3 +130,32 @@ def test_upstream_disabled_has_no_tunnels(tmp_path: Path) -> None:
 
     assert inputs.facts().tunnels == {}
     assert [exit_.name for exit_ in compiled.exits] == ["local"]
+
+
+def test_runtime_switched_profile_drives_the_policy(tmp_path: Path) -> None:
+    config = _config(tmp_path, upstream=UPSTREAM, routing={"client_policy": "full"})
+    marker = active_profile_file(config)
+    marker.parent.mkdir(parents=True)
+    marker.write_text("backup\n", encoding="utf-8")
+    inputs = HubNetInputs(config, runner=FakeRunner(), proc_sys=_proc(tmp_path, "0"))
+
+    rules = {rule.id: rule.via for rule in inputs.policy().egress}
+
+    assert rules["clients-full"] == "upstream:backup"
+
+
+def test_disabled_runtime_profile_leaves_no_active_upstream(tmp_path: Path) -> None:
+    upstream = {
+        **UPSTREAM,
+        "profiles": [
+            {"name": "main", "server": "203.0.113.2", "username": "u"},
+            {"name": "backup", "server": "203.0.113.3", "username": "u", "enabled": False},
+        ],
+    }
+    config = _config(tmp_path, upstream=upstream, routing={"client_policy": "full"})
+    marker = active_profile_file(config)
+    marker.parent.mkdir(parents=True)
+    marker.write_text("backup\n", encoding="utf-8")
+    inputs = HubNetInputs(config, runner=FakeRunner(), proc_sys=_proc(tmp_path, "0"))
+
+    assert {rule.id for rule in inputs.policy().egress} == {"clients-local"}

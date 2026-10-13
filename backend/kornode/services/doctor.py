@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import ipaddress
-import json
+from typing import Any
 
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult, CommandRunner
-from kornode.services.routing import RoutingService
-from kornode.services.sysctl import SysctlService
-from kornode.services.upstream import CARRIER_EXCLUSION_PRIORITY, UpstreamService
+from kornode.services.net import NetService
 from kornode.services.upstream_pushed import PushedRoutingStore
 
 
@@ -22,15 +20,23 @@ class DoctorService:
     it's reported through.
     """
 
-    def __init__(self, config: AppConfig, runner: CommandRunner | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        runner: CommandRunner | None = None,
+        net: NetService | None = None,
+    ) -> None:
         self.config = config
         self.runner = runner or CommandRunner()
+        self.net = net or NetService(config, runner=self.runner)
+        self._cached_plan: dict[str, Any] | None = None
 
     def run(self) -> dict[str, CommandResult]:
         checks = (
+            ("kernel-plan", self._check_kernel_plan),
             ("sysctl", self._check_sysctl),
             ("overlapping-subnets", self._check_overlapping_subnets),
-            ("policy-tables", self._check_policy_tables),
+            ("policy-tables", self._check_exit_tables),
             ("nft-version", self._check_nft_version),
             ("carrier-exclusions", self._check_carrier_exclusions),
         )
@@ -43,13 +49,9 @@ class DoctorService:
         return results
 
     def _check_sysctl(self) -> CommandResult:
-        status = SysctlService(self.config, self.runner).check()
-        bad = sorted(key for key, ok in status.items() if not ok)
-        if bad:
-            return CommandResult(
-                ("sysctl", "check"), 1, "", f"not applied: {', '.join(bad)}", False
-            )
-        return CommandResult(("sysctl", "check"), 0, "all required sysctls are applied", "", False)
+        return self._verdict(
+            ("sysctl", "check"), self._pending({"SetSysctl"}), "all required sysctls are applied"
+        )
 
     def _check_overlapping_subnets(self) -> CommandResult:
         argv = ("ip", "route", "show", "table", "all")
@@ -84,36 +86,45 @@ class DoctorService:
             )
         return CommandResult(argv, 0, f"no route overlaps VPN pool {pool}", "", False)
 
-    def _table_routes(self, table_id: int) -> list[str]:
-        result = self.runner.run(
-            ["ip", "route", "show", "table", str(table_id)], check=False, timeout=5
-        )
-        if not result.ok:
-            return []
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    def _pending(self, kinds: set[str]) -> list[str]:
+        plan = self._plan()
+        return [str(op["text"]) for op in plan["ops"] if op["op"] in kinds]
 
-    def _check_policy_tables(self) -> CommandResult:
-        argv = ("ip", "route", "show", "table", "<policy-table>")
-        targets = RoutingService(self.config).list_targets(
-            default_interface=self.config.routing.main_interface
+    def _plan(self) -> dict[str, Any]:
+        if self._cached_plan is None:
+            self._cached_plan = self.net.plan()
+        return self._cached_plan
+
+    def _verdict(self, argv: tuple[str, ...], pending: list[str], ok: str) -> CommandResult:
+        if not pending:
+            return CommandResult(argv, 0, ok, "", False)
+        shown = "; ".join(pending[:5])
+        if len(pending) > 5:
+            shown += f"; ... {len(pending)} in total"
+        return CommandResult(argv, 1, "", f"kernel differs from the policy: {shown}", False)
+
+    def _check_kernel_plan(self) -> CommandResult:
+        return self._verdict(
+            ("net", "plan"),
+            [str(op["text"]) for op in self._plan()["ops"]],
+            "the kernel matches the compiled policy",
         )
-        upstream = UpstreamService(self.config, runner=self.runner)
-        problems: list[str] = []
-        checked = 0
-        for target in targets:
-            if target.profile is None or not upstream.is_profile_connected(target.profile):
-                continue
-            checked += 1
-            routes = self._table_routes(target.table_id)
-            has_default = any(line.startswith("default ") for line in routes)
-            has_unreachable = any(line.startswith("unreachable default") for line in routes)
-            if not (has_default and has_unreachable):
-                problems.append(f"table {target.table_id} ('{target.name}') missing default routes")
-        if problems:
-            return CommandResult(argv, 1, "", "; ".join(problems), False)
-        if checked == 0:
-            return CommandResult(argv, 0, "no connected upstream profile to check", "", False)
-        return CommandResult(argv, 0, f"{checked} policy table(s) OK", "", False)
+
+    def _check_exit_tables(self) -> CommandResult:
+        # Exit tables (default via the tunnel + the killswitch route) are
+        # reconciler state: a missing or stale route is a pending plan op.
+        return self._verdict(
+            ("net", "plan", "routes"),
+            self._pending({"ReplaceRoute", "DelRoute"}),
+            f"{len(self._plan()['exits'])} exit(s), routes as planned",
+        )
+
+    def _check_carrier_exclusions(self) -> CommandResult:
+        return self._verdict(
+            ("net", "plan", "rules"),
+            self._pending({"AddRule", "DelRule"}),
+            "policy rules (carrier exclusions included) as planned",
+        )
 
     def _check_nft_version(self) -> CommandResult:
         nft_result = self.runner.run(["nft", "--version"], check=False, timeout=5)
@@ -129,40 +140,3 @@ class DoctorService:
         # actually back with real knowledge of every kernel/nft pairing.
         message = f"nft: {nft_result.stdout.strip()}; kernel: {kernel}"
         return CommandResult(("nft", "--version"), 0, message, "", False)
-
-    def _check_carrier_exclusions(self) -> CommandResult:
-        argv = ("ip", "-j", "rule", "show")
-        result = self.runner.run(list(argv), check=False, timeout=5)
-        installed: set[str] = set()
-        if result.ok:
-            try:
-                rules = json.loads(result.stdout or "[]")
-            except json.JSONDecodeError:
-                rules = []
-            for rule in rules if isinstance(rules, list) else []:
-                if not isinstance(rule, dict):
-                    continue
-                if rule.get("priority") != CARRIER_EXCLUSION_PRIORITY:
-                    continue
-                dst = rule.get("dst")
-                if isinstance(dst, str):
-                    installed.add(dst.split("/")[0])
-        upstream = UpstreamService(self.config, runner=self.runner)
-        problems: list[str] = []
-        checked = 0
-        for profile in self.config.upstream.profiles:
-            if not upstream.is_profile_connected(profile):
-                continue
-            checked += 1
-            missing = [
-                addr
-                for addr in upstream.resolved_carrier_addresses(profile)
-                if addr not in installed
-            ]
-            if missing:
-                problems.append(f"{profile.name}: missing exclusion for {', '.join(missing)}")
-        if problems:
-            return CommandResult(argv, 1, "", "; ".join(problems), False)
-        if checked == 0:
-            return CommandResult(argv, 0, "no connected upstream profiles", "", False)
-        return CommandResult(argv, 0, f"{checked} profile(s) excluded", "", False)

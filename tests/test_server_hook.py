@@ -4,31 +4,30 @@ import pytest
 
 from kornode import cli
 from kornode.config.models import AppConfig
-from kornode.services.command import CommandResult
 
 
-class FakeSysctlService:
-    interfaces: list[str] = []
+class FakeNetService:
+    wakes = 0
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
 
-    def apply_interface(self, iface: str) -> list[CommandResult]:
-        self.interfaces.append(iface)
-        return [CommandResult(("sysctl", "-w", f"net.ipv4.conf.{iface}.rp_filter=2"), 0, "", "")]
+    def wake(self) -> bool:
+        FakeNetService.wakes += 1
+        return True
 
 
-def test_server_hook_applies_sysctl_to_ocserv_device(
+def test_server_hook_wakes_the_reconciler_for_a_new_ocserv_device(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    FakeSysctlService.interfaces = []
+    FakeNetService.wakes = 0
     monkeypatch.setenv("DEVICE", "vpns0")
     monkeypatch.setattr(cli, "get_config", lambda: AppConfig.model_validate({}))
-    monkeypatch.setattr(cli, "SysctlService", FakeSysctlService)
+    monkeypatch.setattr(cli, "NetService", FakeNetService)
 
     cli.server_hook()
 
-    assert FakeSysctlService.interfaces == ["vpns0"]
+    assert FakeNetService.wakes == 1
 
 
 def test_server_hook_fails_without_device(monkeypatch: pytest.MonkeyPatch) -> None:

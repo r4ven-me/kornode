@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
-from tests.test_upstream_service import _spawn_fake_openconnect
 
 from kornode import cli
-from kornode.api.app import create_app
+from kornode.api import routes_diagnostics
+from kornode.api.auth import require_admin
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult
 from kornode.services.doctor import DoctorService
-from kornode.services.upstream import UpstreamService
 from kornode.services.upstream_pushed import PushedRouting, PushedRoutingStore
 
 
@@ -52,17 +50,22 @@ def _fail(stderr: str = "") -> CommandResult:
     return CommandResult(argv=(), returncode=1, stdout="", stderr=stderr)
 
 
-SYSCTL_OK = {
-    ("sysctl", "-n", "net.ipv4.ip_forward"): _ok("1"),
-    ("sysctl", "-n", "net.ipv4.conf.all.src_valid_mark"): _ok("1"),
-    ("sysctl", "-n", "net.ipv4.conf.all.rp_filter"): _ok("2"),
-    ("sysctl", "-n", "net.ipv4.conf.default.rp_filter"): _ok("2"),
-}
+class FakeNet:
+    def __init__(
+        self,
+        ops: list[dict[str, str]] | None = None,
+        exits: list[str] | None = None,
+    ) -> None:
+        self._plan = {"ops": ops or [], "exits": exits or []}
+        self.calls = 0
+
+    def plan(self) -> dict[str, object]:
+        self.calls += 1
+        return self._plan
 
 
 def test_sysctl_check_passes_when_all_values_match(tmp_path: Path) -> None:
-    runner = FakeRunner({**SYSCTL_OK, ("ip",): _ok("[]"), ("nft",): _ok(), ("uname",): _ok()})
-    service = DoctorService(_config(tmp_path), runner=runner)
+    service = DoctorService(_config(tmp_path), runner=FakeRunner({}), net=FakeNet())
 
     results = service.run()
 
@@ -70,27 +73,48 @@ def test_sysctl_check_passes_when_all_values_match(tmp_path: Path) -> None:
 
 
 def test_sysctl_check_fails_when_a_value_is_wrong(tmp_path: Path) -> None:
-    bad = {**SYSCTL_OK, ("sysctl", "-n", "net.ipv4.ip_forward"): _ok("0")}
-    runner = FakeRunner({**bad, ("ip",): _ok("[]"), ("nft",): _ok(), ("uname",): _ok()})
-    service = DoctorService(_config(tmp_path), runner=runner)
+    service = DoctorService(
+        _config(tmp_path),
+        runner=FakeRunner({}),
+        net=FakeNet([{"op": "SetSysctl", "text": "set net.ipv4.ip_forward=1"}]),
+    )
 
     results = service.run()
 
     assert not results["sysctl"].ok
     assert "net.ipv4.ip_forward" in results["sysctl"].stderr
+    assert "kernel differs from the policy" in results["sysctl"].stderr
+
+
+def test_kernel_plan_fails_when_any_reconciler_op_is_pending(tmp_path: Path) -> None:
+    service = DoctorService(
+        _config(tmp_path),
+        runner=FakeRunner({}),
+        net=FakeNet([{"op": "UpdateElements", "text": "replace nft set split"}]),
+    )
+
+    results = service.run()
+
+    assert not results["kernel-plan"].ok
+    assert "replace nft set split" in results["kernel-plan"].stderr
+
+
+def test_kernel_plan_reuses_one_net_plan_for_derived_checks(tmp_path: Path) -> None:
+    net = FakeNet()
+    service = DoctorService(_config(tmp_path), runner=FakeRunner({}), net=net)
+
+    service.run()
+
+    assert net.calls == 1
 
 
 def test_overlapping_subnets_ignores_own_pool_route(tmp_path: Path) -> None:
     runner = FakeRunner(
         {
-            **SYSCTL_OK,
             ("ip", "route", "show", "table", "all"): _ok("10.10.10.0/24 dev lo\n"),
-            ("ip",): _ok("[]"),
-            ("nft",): _ok(),
-            ("uname",): _ok(),
         }
     )
-    service = DoctorService(_config(tmp_path), runner=runner)
+    service = DoctorService(_config(tmp_path), runner=runner, net=FakeNet())
 
     results = service.run()
 
@@ -100,14 +124,10 @@ def test_overlapping_subnets_ignores_own_pool_route(tmp_path: Path) -> None:
 def test_overlapping_subnets_detects_conflicting_route(tmp_path: Path) -> None:
     runner = FakeRunner(
         {
-            **SYSCTL_OK,
             ("ip", "route", "show", "table", "all"): _ok("10.10.10.128/25 dev docker0\n"),
-            ("ip",): _ok("[]"),
-            ("nft",): _ok(),
-            ("uname",): _ok(),
         }
     )
-    service = DoctorService(_config(tmp_path), runner=runner)
+    service = DoctorService(_config(tmp_path), runner=runner, net=FakeNet())
 
     results = service.run()
 
@@ -134,14 +154,10 @@ def test_overlapping_subnets_detects_pushed_route_conflict(tmp_path: Path) -> No
     PushedRoutingStore(config).save(profile, PushedRouting(routes=["10.10.10.64/28"]))
     runner = FakeRunner(
         {
-            **SYSCTL_OK,
             ("ip", "route", "show", "table", "all"): _ok(""),
-            ("ip",): _ok("[]"),
-            ("nft",): _ok(),
-            ("uname",): _ok(),
         }
     )
-    service = DoctorService(config, runner=runner)
+    service = DoctorService(config, runner=runner, net=FakeNet())
 
     results = service.run()
 
@@ -152,13 +168,12 @@ def test_overlapping_subnets_detects_pushed_route_conflict(tmp_path: Path) -> No
 def test_nft_version_reports_both_versions(tmp_path: Path) -> None:
     runner = FakeRunner(
         {
-            **SYSCTL_OK,
             ("ip",): _ok("[]"),
             ("nft", "--version"): _ok("nftables v1.0.9"),
             ("uname", "-r"): _ok("6.1.0-kornode"),
         }
     )
-    service = DoctorService(_config(tmp_path), runner=runner)
+    service = DoctorService(_config(tmp_path), runner=runner, net=FakeNet())
 
     results = service.run()
 
@@ -170,13 +185,12 @@ def test_nft_version_reports_both_versions(tmp_path: Path) -> None:
 def test_nft_version_fails_when_nft_missing(tmp_path: Path) -> None:
     runner = FakeRunner(
         {
-            **SYSCTL_OK,
             ("ip",): _ok("[]"),
             ("nft", "--version"): _fail("command not found"),
             ("uname", "-r"): _ok("6.1.0-kornode"),
         }
     )
-    service = DoctorService(_config(tmp_path), runner=runner)
+    service = DoctorService(_config(tmp_path), runner=runner, net=FakeNet())
 
     results = service.run()
 
@@ -204,147 +218,78 @@ def _connected_profile_config(tmp_path: Path, server: str = "203.0.113.10") -> A
 
 
 def test_policy_tables_reports_missing_routes_for_connected_profile(tmp_path: Path) -> None:
-    config = _connected_profile_config(tmp_path)
-    upstream = UpstreamService(config)
-    process = _spawn_fake_openconnect(tmp_path)
-    try:
-        path = upstream._pid_file(config.upstream.profiles[0])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(process.pid))
+    service = DoctorService(
+        _connected_profile_config(tmp_path),
+        runner=FakeRunner({}),
+        net=FakeNet(
+            [{"op": "ReplaceRoute", "text": "replace default in table 1201 via oc-primary"}]
+        ),
+    )
 
-        runner = FakeRunner(
-            {
-                **SYSCTL_OK,
-                ("ip", "route", "show", "table", "1201"): _ok(""),
-                ("ip",): _ok("[]"),
-                ("nft",): _ok(),
-                ("uname",): _ok(),
-            }
-        )
-        service = DoctorService(config, runner=runner)
+    results = service.run()
 
-        results = service.run()
-
-        assert not results["policy-tables"].ok
-        assert "1201" in results["policy-tables"].stderr
-    finally:
-        process.terminate()
-        process.wait(timeout=5)
+    assert not results["policy-tables"].ok
+    assert "1201" in results["policy-tables"].stderr
 
 
 def test_policy_tables_passes_when_routes_present(tmp_path: Path) -> None:
-    config = _connected_profile_config(tmp_path)
-    upstream = UpstreamService(config)
-    process = _spawn_fake_openconnect(tmp_path)
-    try:
-        path = upstream._pid_file(config.upstream.profiles[0])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(process.pid))
+    service = DoctorService(
+        _connected_profile_config(tmp_path),
+        runner=FakeRunner({}),
+        net=FakeNet(),
+    )
 
-        runner = FakeRunner(
-            {
-                **SYSCTL_OK,
-                ("ip", "route", "show", "table", "1201"): _ok(
-                    "default dev oc-primary\nunreachable default metric 4096\n"
-                ),
-                ("ip",): _ok("[]"),
-                ("nft",): _ok(),
-                ("uname",): _ok(),
-            }
-        )
-        service = DoctorService(config, runner=runner)
+    results = service.run()
 
-        results = service.run()
-
-        assert results["policy-tables"].ok
-    finally:
-        process.terminate()
-        process.wait(timeout=5)
+    assert results["policy-tables"].ok
 
 
 def test_carrier_exclusions_detects_missing_rule_for_connected_profile(tmp_path: Path) -> None:
-    config = _connected_profile_config(tmp_path, server="203.0.113.10")
-    upstream = UpstreamService(config)
-    process = _spawn_fake_openconnect(tmp_path)
-    try:
-        path = upstream._pid_file(config.upstream.profiles[0])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(process.pid))
+    service = DoctorService(
+        _connected_profile_config(tmp_path, server="203.0.113.10"),
+        runner=FakeRunner({}),
+        net=FakeNet([{"op": "AddRule", "text": "add carrier exclusion for 203.0.113.10/32"}]),
+    )
 
-        runner = FakeRunner(
-            {
-                **SYSCTL_OK,
-                ("ip", "-j", "rule", "show"): _ok("[]"),
-                ("ip", "route"): _ok(""),
-                ("nft",): _ok(),
-                ("uname",): _ok(),
-            }
-        )
-        service = DoctorService(config, runner=runner)
+    results = service.run()
 
-        results = service.run()
-
-        assert not results["carrier-exclusions"].ok
-        assert "203.0.113.10" in results["carrier-exclusions"].stderr
-    finally:
-        process.terminate()
-        process.wait(timeout=5)
+    assert not results["carrier-exclusions"].ok
+    assert "203.0.113.10" in results["carrier-exclusions"].stderr
 
 
 def test_carrier_exclusions_passes_when_rule_present(tmp_path: Path) -> None:
-    config = _connected_profile_config(tmp_path, server="203.0.113.10")
-    upstream = UpstreamService(config)
-    process = _spawn_fake_openconnect(tmp_path)
-    try:
-        path = upstream._pid_file(config.upstream.profiles[0])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(process.pid))
-
-        rules = json.dumps([{"priority": 95, "dst": "203.0.113.10/32", "table": "main"}])
-        runner = FakeRunner(
-            {
-                **SYSCTL_OK,
-                ("ip", "-j", "rule", "show"): _ok(rules),
-                ("ip", "route"): _ok(""),
-                ("nft",): _ok(),
-                ("uname",): _ok(),
-            }
-        )
-        service = DoctorService(config, runner=runner)
-
-        results = service.run()
-
-        assert results["carrier-exclusions"].ok
-    finally:
-        process.terminate()
-        process.wait(timeout=5)
-
-
-def test_carrier_exclusions_passes_when_no_profile_connected(tmp_path: Path) -> None:
-    config = _connected_profile_config(tmp_path)
-    runner = FakeRunner(
-        {
-            **SYSCTL_OK,
-            ("ip",): _ok("[]"),
-            ("nft",): _ok(),
-            ("uname",): _ok(),
-        }
+    service = DoctorService(
+        _connected_profile_config(tmp_path, server="203.0.113.10"),
+        runner=FakeRunner({}),
+        net=FakeNet(),
     )
-    service = DoctorService(config, runner=runner)
 
     results = service.run()
 
     assert results["carrier-exclusions"].ok
-    assert "no connected" in results["carrier-exclusions"].stdout
+
+
+def test_carrier_exclusions_passes_when_no_profile_connected(tmp_path: Path) -> None:
+    service = DoctorService(
+        _connected_profile_config(tmp_path),
+        runner=FakeRunner({}),
+        net=FakeNet(),
+    )
+
+    results = service.run()
+
+    assert results["carrier-exclusions"].ok
+    assert "policy rules" in results["carrier-exclusions"].stdout
 
 
 def test_run_returns_every_check(tmp_path: Path) -> None:
-    runner = FakeRunner({**SYSCTL_OK, ("ip",): _ok("[]"), ("nft",): _ok(), ("uname",): _ok()})
-    service = DoctorService(_config(tmp_path), runner=runner)
+    runner = FakeRunner({("ip",): _ok("[]"), ("nft",): _ok(), ("uname",): _ok()})
+    service = DoctorService(_config(tmp_path), runner=runner, net=FakeNet())
 
     results = service.run()
 
     assert set(results) == {
+        "kernel-plan",
         "sysctl",
         "overlapping-subnets",
         "policy-tables",
@@ -353,7 +298,9 @@ def test_run_returns_every_check(tmp_path: Path) -> None:
     }
 
 
-def test_doctor_api_route_returns_every_check(tmp_path: Path) -> None:
+def test_doctor_api_route_returns_every_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config = AppConfig.model_validate(
         {
             "web": {"admin_password": "secret"},
@@ -365,13 +312,21 @@ def test_doctor_api_route_returns_every_check(tmp_path: Path) -> None:
             },
         }
     )
-    client = TestClient(create_app(config=config))
+    results = {
+        "kernel-plan": CommandResult((), 0, "the kernel matches the compiled policy", ""),
+        "sysctl": CommandResult((), 0, "all required sysctls are applied", ""),
+        "overlapping-subnets": CommandResult((), 0, "no route overlaps VPN pool", ""),
+        "policy-tables": CommandResult((), 0, "0 exit(s), routes as planned", ""),
+        "nft-version": CommandResult((), 0, "nft: test; kernel: test", ""),
+        "carrier-exclusions": CommandResult((), 0, "policy rules as planned", ""),
+    }
+    monkeypatch.setattr(routes_diagnostics, "DoctorService", FakeDoctorService(results))
 
-    response = client.get("/api/diagnostics/doctor", auth=("admin", "secret"))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))
+    body = routes_diagnostics.doctor(request)  # type: ignore[arg-type]
 
-    assert response.status_code == 200
-    body = response.json()
     assert set(body) == {
+        "kernel-plan",
         "sysctl",
         "overlapping-subnets",
         "policy-tables",
@@ -382,23 +337,11 @@ def test_doctor_api_route_returns_every_check(tmp_path: Path) -> None:
         assert set(check) == {"argv", "returncode", "stdout", "stderr", "ok"}
 
 
-def test_doctor_api_route_requires_admin(tmp_path: Path) -> None:
-    config = AppConfig.model_validate(
-        {
-            "web": {"admin_password": "secret"},
-            "system": {
-                "data_dir": str(tmp_path / "data"),
-                "generated_dir": str(tmp_path / "generated"),
-                "log_dir": str(tmp_path / "logs"),
-                "secrets_dir": str(tmp_path / "secrets"),
-            },
-        }
+def test_doctor_api_route_requires_admin() -> None:
+    assert any(
+        dependency.dependency is require_admin
+        for dependency in routes_diagnostics.router.dependencies
     )
-    client = TestClient(create_app(config=config))
-
-    response = client.get("/api/diagnostics/doctor")
-
-    assert response.status_code == 401
 
 
 class FakeDoctorService:

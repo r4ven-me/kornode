@@ -236,7 +236,7 @@ export function App() {
             onReloadServer={dashboard.reloadServer}
             onRestartServer={dashboard.restartServer}
             onWriteConfig={dashboard.writeConfig}
-            onApplyNft={dashboard.applyNft}
+            onApplyNet={dashboard.applyNet}
           />
         )}
 

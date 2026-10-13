@@ -3,8 +3,7 @@
 # session connects, passing no positional arguments — only environment
 # variables (DEVICE, USERNAME, ...), per ocserv's connect-script interface.
 # The DEVICE environment variable is the per-session tunnel interface;
-# kornode reasserts interface-local sysctls for it through the Python
-# service layer. The connect script must exit 0 or ocserv refuses the
+# kornode wakes the reconciler, which sets interface-local sysctls for it. The connect script must exit 0 or ocserv refuses the
 # connection, so failures here are deliberately swallowed.
 
 korctl_bin="$(command -v korctl || echo /usr/local/bin/korctl)"

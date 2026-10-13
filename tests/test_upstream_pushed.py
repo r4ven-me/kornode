@@ -1,5 +1,5 @@
 """Server-pushed routing for upstream profiles (the former korclient):
-handshake/sync parsing, storage, routing/nftables/dnsmasq integration and
+handshake/sync parsing, storage, routing/dnsmasq integration and
 the UpstreamService plumbing around it."""
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from pydantic import ValidationError
 
 from kornode.config.models import AppConfig, UpstreamProfileConfig
 from kornode.renderers.dnsmasq import DnsmasqConfigRenderer
-from kornode.renderers.nftables import NftablesConfigRenderer
 from kornode.services.command import CommandResult
+from kornode.services.net import NetApplyError
 from kornode.services.routing import RoutingService
 from kornode.services.upstream import UpstreamService
 from kornode.services.upstream_pushed import (
@@ -50,19 +50,23 @@ class FakeRunner:
         self.calls.append(argv)
         if argv[0] in self.responses:
             return self.responses[argv[0]]
-        if tuple(argv[:5]) == ("nft", "list", "chain", "ip", "filter"):
-            return CommandResult(tuple(argv), 1, "", "No such file or directory")
         return CommandResult(tuple(argv), 0, "", "")
 
 
-class FakeSysctl:
-    def __init__(self) -> None:
-        self.interfaces: list[str] = []
+class FakeNet:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls: list[str] = []
+        self.fail = fail
 
-    def apply_interface(self, iface: str, *, dry_run: bool = False) -> list[CommandResult]:
-        del dry_run
-        self.interfaces.append(iface)
-        return [CommandResult(("sysctl", "-w", f"net.ipv4.conf.{iface}.rp_filter=2"), 0, "", "")]
+    def converge(self) -> dict[str, object]:
+        self.calls.append("converge")
+        if self.fail:
+            raise NetApplyError("kernel did not converge: simulated failure")
+        return {"applied": True, "status": {"last_error": None}}
+
+    def wake(self) -> bool:
+        self.calls.append("wake")
+        return True
 
 
 def _config(tmp_path: Path, **profile: object) -> AppConfig:
@@ -244,19 +248,6 @@ def test_list_targets_creates_host_target_from_pushed_lists_alone(tmp_path: Path
     assert names == ["default", "office"]
 
 
-def test_nftables_render_puts_pushed_ipv6_routes_into_the_v6_host_set(tmp_path: Path) -> None:
-    config = _config(tmp_path)
-    _store_pushed(config, routes=["10.20.0.0/16", "2001:db8:10::/48"])
-
-    rendered = NftablesConfigRenderer().render(config)
-
-    v4_block = rendered.split("set host_v4_office_static {", 1)[1].split("}", 2)
-    v6_block = rendered.split("set host_v6_office_static {", 1)[1].split("}", 2)
-    assert "10.20.0.0/16" in v4_block[0] + v4_block[1]
-    assert "2001:db8:10::/48" not in v4_block[0] + v4_block[1]
-    assert "2001:db8:10::/48" in v6_block[0] + v6_block[1]
-
-
 def test_dnsmasq_render_resolves_pushed_domains_through_upstream_dns(tmp_path: Path) -> None:
     config = _config(tmp_path, host_domains=["own.example"])
     _store_pushed(config, domains=["corp.example.com"], dns=["172.16.0.53"])
@@ -265,7 +256,7 @@ def test_dnsmasq_render_resolves_pushed_domains_through_upstream_dns(tmp_path: P
 
     assert "server=/corp.example.com/172.16.0.53" in rendered
     # The admin's own host domains keep resolving through the normal DNS --
-    # dnsmasq needs nothing for either domain's nftables set, that's
+    # dnsmasq needs nothing for either domain's resolved set, that's
     # DomainResolverService's job now (see tests/test_domain_resolver.py).
     assert "server=/own.example/" not in rendered
 
@@ -279,25 +270,26 @@ def test_accepting_server_routes_keeps_dnsmasq_running(tmp_path: Path) -> None:
 
 def test_record_vpnc_event_stores_handshake_for_the_matching_profile(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    sysctl = FakeSysctl()
-    service = UpstreamService(config, runner=FakeRunner(), sysctl=sysctl)
+    service = UpstreamService(config, runner=FakeRunner(), net=FakeNet())
 
     profile = service.record_vpnc_event("connect", HANDSHAKE_ENV)
 
     assert profile is not None and profile.name == "office"
-    assert sysctl.interfaces == ["oc-middle0"]
     assert service.pushed.load(profile).domains == ["corp.example.com", "git.example.org"]
 
 
-def test_record_vpnc_event_sets_interface_sysctl_on_reconnect(tmp_path: Path) -> None:
+def test_record_vpnc_event_stores_handshake_on_reconnect(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    sysctl = FakeSysctl()
-    service = UpstreamService(config, runner=FakeRunner(), sysctl=sysctl)
+    service = UpstreamService(config, runner=FakeRunner(), net=FakeNet())
 
     profile = service.record_vpnc_event("reconnect", HANDSHAKE_ENV)
 
     assert profile is not None and profile.name == "office"
-    assert sysctl.interfaces == ["oc-middle0"]
+    assert service.pushed.load(profile).routes == [
+        "10.20.0.0/16",
+        "192.0.2.10/32",
+        "2001:db8:10::/48",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -308,11 +300,9 @@ def test_record_vpnc_event_ignores_other_events_and_interfaces(
     tmp_path: Path, reason: str, tundev: str
 ) -> None:
     config = _config(tmp_path)
-    sysctl = FakeSysctl()
-    service = UpstreamService(config, runner=FakeRunner(), sysctl=sysctl)
+    service = UpstreamService(config, runner=FakeRunner(), net=FakeNet())
 
     assert service.record_vpnc_event(reason, {**HANDSHAKE_ENV, "TUNDEV": tundev}) is None
-    assert sysctl.interfaces == []
     assert service.pushed.load(config.upstream.profiles[0]) == PushedRouting()
 
 
@@ -382,30 +372,31 @@ def test_refresh_server_routes_skips_disconnected_and_recently_synced_profiles(
     assert any(call[0] == "curl" for call in runner.calls)
 
 
-def test_apply_server_routing_only_reloads_on_change(tmp_path: Path) -> None:
+def test_apply_server_routing_only_converges_on_change(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runner = FakeRunner()
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
 
     assert service.apply_server_routing_if_changed() == []
+    assert net.calls == []
 
     _store_pushed(config, routes=["10.20.0.0/16"])
     service.apply_server_routing_if_changed()
-    nft_loads = [call for call in runner.calls if call[:2] == ["nft", "-f"]]
-    assert len(nft_loads) == 1
-    rendered = (tmp_path / "generated" / "nftables.nft").read_text()
-    assert "10.20.0.0/16" in rendered
+    assert net.calls == ["converge"]
+    assert service.pushed.applied_fingerprint() == service.pushed.fingerprint()
 
     assert service.apply_server_routing_if_changed() == []
+    assert net.calls == ["converge"]
 
 
-def test_apply_server_routing_retries_after_a_failed_reload(tmp_path: Path) -> None:
+def test_apply_server_routing_retries_after_a_failed_converge(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    runner = FakeRunner({"nft": CommandResult(("nft",), 1, "", "boom")})
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=FakeRunner(), net=FakeNet(fail=True))
     _store_pushed(config, routes=["10.20.0.0/16"])
 
-    service.apply_server_routing_if_changed()
+    with pytest.raises(NetApplyError, match="simulated failure"):
+        service.apply_server_routing_if_changed()
 
     assert service.pushed.applied_fingerprint() == ""
 

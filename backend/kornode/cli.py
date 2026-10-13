@@ -33,7 +33,6 @@ from kornode.services.host_dns import HostDnsService
 from kornode.services.internal_dns import InternalDnsService
 from kornode.services.logs import LogRotationService, LogService
 from kornode.services.net import NetService, run_reconciler
-from kornode.services.nftables import NftablesService
 from kornode.services.otp import OtpService
 from kornode.services.password_hash import hash_password
 from kornode.services.routing import RoutingService
@@ -41,7 +40,6 @@ from kornode.services.secrets import collect_config_secrets, mask_text
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificateService
 from kornode.services.sessions import SessionService
-from kornode.services.sysctl import SysctlService
 from kornode.services.upstream import UpstreamService
 from kornode.services.users import UserConfig, UserService
 
@@ -64,7 +62,6 @@ identity_app = typer.Typer(help="Manage identity providers and group policies")
 identity_oidc_app = typer.Typer(help="Manage OIDC connector settings")
 identity_group_app = typer.Typer(help="Manage VPN group policies")
 identity_group_config_app = typer.Typer(help="Manage ocserv config-per-group files")
-nft_app = typer.Typer(help="Manage project-owned nftables state")
 net_app = typer.Typer(help="Routing core: plan, apply, explain, run the reconciler")
 host_dns_app = typer.Typer(help="Point the host's resolver at the built-in dnsmasq")
 web_app = typer.Typer(help="Manage Web GUI security")
@@ -209,8 +206,8 @@ def server_hook() -> None:
     if not device:
         typer.echo("server hook failed: DEVICE is not set", err=True)
         raise typer.Exit(1)
-    for result in SysctlService(get_config()).apply_interface(device):
-        echo_result(result)
+    # The reconciler sets the device's sysctls (netlink event or this wake).
+    NetService(get_config()).wake()
 
 
 @server_process_app.command("list")
@@ -616,7 +613,10 @@ def upstream_hook(
     openconnect's own connect sequence.
     """
     try:
-        profile = UpstreamService(get_config()).record_vpnc_event(reason)
+        config = get_config()
+        profile = UpstreamService(config).record_vpnc_event(reason)
+        if profile is not None:
+            NetService(config).wake()
     except Exception as exc:  # noqa: BLE001 - must never break the tunnel
         typer.echo(f"upstream hook failed: {exc}", err=True)
         return
@@ -700,12 +700,6 @@ def upstream_watch(
         if config.upstream.enabled:
             selected = service.selected_profile()
             if selected is not None:
-                # Restore fwmark tables before probing. The kernel removes a
-                # route as soon as its tunnel device disappears; probing
-                # first can therefore create a bootstrap deadlock where the
-                # failed probe triggers another reconnect before the route
-                # gets a chance to be restored.
-                service.ensure_policy_routing()
                 healthy, failure_reason = service.health_status()
                 if healthy:
                     consecutive_failures = 0
@@ -847,8 +841,8 @@ def routes_delete(route: str) -> None:
 def routes_reload(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    for result in NftablesService(get_config()).apply(dry_run=dry_run):
-        echo_result(result)
+    """Converge the kernel with the route lists (same as `net apply`)."""
+    _echo_net_apply(NetService(get_config()).apply(dry_run=dry_run), dry_run=dry_run)
 
 
 @domains_app.command("list")
@@ -873,10 +867,10 @@ def domains_delete(domain: str) -> None:
 def domains_reload(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
+    """Re-resolve the domain lists and converge the kernel."""
     config = get_config()
-    ConfigService().write_rendered_files(config)
-    for result in NftablesService(config).apply(dry_run=dry_run):
-        echo_result(result)
+    DomainResolverService(config).refresh(dry_run=dry_run)
+    _echo_net_apply(NetService(config).apply(dry_run=dry_run), dry_run=dry_run)
 
 
 @domains_app.command("resolve")
@@ -884,18 +878,18 @@ def domains_resolve(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """One-shot: resolve every configured split/profile/host domain and
-    refresh their nftables *_dynamic sets. See DomainResolverService."""
+    record the addresses for the reconciler. See DomainResolverService."""
     outcome = DomainResolverService(get_config()).refresh(dry_run=dry_run)
-    if outcome.result is not None:
-        echo_result(outcome.result)
-    else:
+    if not outcome.resolved:
         typer.echo("no domains configured; nothing to resolve")
+    for item in outcome.resolved:
+        typer.echo(f"{item.name}: {len(item.ips)} addresses")
 
 
 @domains_app.command("watch")
 def domains_watch() -> None:
     """Supervisor entrypoint: periodically resolve configured split/profile/
-    host domains into their nftables *_dynamic sets, independent of which
+    host domains for the reconciler's dynamic sets, independent of which
     resolver VPN clients or the host actually use for their own lookups
     (see services/domain_resolver.py). Reloads config every cycle, like
     host-dns guard / upstream watch. The interval follows the lowest TTL
@@ -919,8 +913,6 @@ def domains_watch() -> None:
         try:
             outcome = DomainResolverService(get_config()).refresh()
             interval = outcome.next_interval_seconds
-            if outcome.result is not None and not outcome.result.ok:
-                typer.echo(f"domain resolve: nft apply failed: {outcome.result.stderr}", err=True)
         except Exception as exc:  # noqa: BLE001 - keep watching
             typer.echo(f"domain resolve failed: {exc}", err=True)
         deadline = time.monotonic() + interval
@@ -1188,19 +1180,6 @@ def identity_group_config_delete(name: str) -> None:
     typer.echo("deleted" if deleted else "not found")
 
 
-@nft_app.command("apply")
-def nft_apply(
-    dry_run: bool = typer.Option(False, "--dry-run"),
-) -> None:
-    config = get_config()
-    secrets = collect_config_secrets(config)
-    for result in NftablesService(config).apply(dry_run=dry_run):
-        if result.stdout:
-            typer.echo(mask_text(result.stdout.rstrip(), secrets))
-        else:
-            echo_result(result)
-
-
 @net_app.command("plan")
 def net_plan(as_json: bool = typer.Option(False, "--json")) -> None:
     """What the reconciler would change in the kernel right now."""
@@ -1220,16 +1199,7 @@ def net_plan(as_json: bool = typer.Option(False, "--json")) -> None:
         typer.echo(f"  {op['text']}")
 
 
-@net_app.command("apply")
-def net_apply(
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    as_json: bool = typer.Option(False, "--json"),
-) -> None:
-    """Converge the kernel now (wakes the reconciler, or runs one pass)."""
-    result = NetService(get_config()).apply(dry_run=dry_run)
-    if as_json:
-        typer.echo(json.dumps(result, indent=2))
-        return
+def _echo_net_apply(result: dict[str, Any], *, dry_run: bool) -> None:
     if dry_run:
         for op in result["ops"]:
             typer.echo(f"dry-run: {op['text']}")
@@ -1239,6 +1209,19 @@ def net_apply(
     if status.get("last_error"):
         typer.echo(f"error: {status['last_error']}", err=True)
         raise typer.Exit(1)
+
+
+@net_app.command("apply")
+def net_apply(
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Converge the kernel now (one reconciler pass, awaited)."""
+    result = NetService(get_config()).apply(dry_run=dry_run)
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+        return
+    _echo_net_apply(result, dry_run=dry_run)
 
 
 @net_app.command("explain")
@@ -1261,19 +1244,6 @@ def net_explain(
 def net_run() -> None:
     """Run the reconciler (supervisor program; not a management action)."""
     run_reconciler(STATE.get("config_path") or DEFAULT_CONFIG_PATH, STATE.get("env_file"))
-
-
-@nft_app.command("show")
-def nft_show() -> None:
-    echo_result(NftablesService(get_config()).show())
-
-
-@nft_app.command("cleanup")
-def nft_cleanup(
-    dry_run: bool = typer.Option(False, "--dry-run"),
-) -> None:
-    for result in NftablesService(get_config()).cleanup(dry_run=dry_run):
-        echo_result(result)
 
 
 @app.command("diagnose")
@@ -1351,7 +1321,6 @@ app.add_typer(upstream_app, name="upstream")
 app.add_typer(routes_app, name="routes")
 app.add_typer(domains_app, name="domains")
 app.add_typer(internal_dns_app, name="internal-dns")
-app.add_typer(nft_app, name="nft")
 app.add_typer(net_app, name="net")
 app.add_typer(host_dns_app, name="host-dns")
 app.add_typer(web_app, name="web")

@@ -1113,24 +1113,6 @@ export function reloadRouting(token: string, dryRun: boolean): Promise<CommandRe
   });
 }
 
-export function fetchNft(token: string): Promise<CommandResult> {
-  return requestJson<CommandResult>("/api/routing/nft", token);
-}
-
-export function applyNft(token: string, dryRun: boolean): Promise<CommandResult[]> {
-  return requestJson<CommandResult[]>("/api/routing/nft/apply", token, {
-    method: "POST",
-    body: dryRunBody(dryRun)
-  });
-}
-
-export function cleanupNft(token: string, dryRun: boolean): Promise<CommandResult[]> {
-  return requestJson<CommandResult[]>("/api/routing/nft/cleanup", token, {
-    method: "POST",
-    body: dryRunBody(dryRun)
-  });
-}
-
 export type InternalDnsBlocklistFileStatus = {
   path: string;
   exists: boolean;

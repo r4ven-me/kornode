@@ -50,7 +50,17 @@ def upstream_exit(profile: UpstreamProfileConfig) -> str:
     return f"upstream:{profile_slug(profile.name)}"
 
 
-def legacy_policy(config: AppConfig, lists: LegacyLists) -> EgressPolicy:
+_UNSET: Any = object()
+
+
+def legacy_policy(
+    config: AppConfig,
+    lists: LegacyLists,
+    active_profile: UpstreamProfileConfig | None = _UNSET,
+) -> EgressPolicy:
+    """`active_profile` is the runtime-switched active profile (the
+    `active-upstream` marker; None = nothing active). Left out, the config's
+    own selection is used."""
     routing = config.routing
     upstream = config.upstream
     profiles = list(upstream.profiles)
@@ -60,7 +70,9 @@ def legacy_policy(config: AppConfig, lists: LegacyLists) -> EgressPolicy:
 
     sets: dict[str, dict[str, Any]] = {}
     egress: list[dict[str, Any]] = []
-    active = upstream.selected_profile() if upstream.enabled else None
+    if active_profile is _UNSET:
+        active_profile = upstream.selected_profile()
+    active = active_profile if upstream.enabled else None
 
     def add_set(name: str, routes: list[str], domains: list[str]) -> bool:
         if not routes and not domains:

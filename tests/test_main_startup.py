@@ -6,25 +6,18 @@ import pytest
 
 from kornode.config.models import AppConfig
 from kornode.main import initialize_runtime
-from kornode.services.command import CommandResult
+from kornode.services.net import NetApplyError
 
 
-class FailingSysctlService:
+class FailingNetService:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
 
-    def apply_global(self) -> list[CommandResult]:
-        return [
-            CommandResult(
-                argv=("sysctl", "-w", "net.ipv4.ip_forward=1"),
-                returncode=1,
-                stdout="",
-                stderr="permission denied",
-            )
-        ]
+    def converge(self) -> dict[str, object]:
+        raise NetApplyError("kernel did not converge: OSError: permission denied")
 
 
-def test_initialize_runtime_aborts_when_required_sysctls_fail(
+def test_initialize_runtime_aborts_when_the_kernel_does_not_converge(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = AppConfig.model_validate(
@@ -38,14 +31,11 @@ def test_initialize_runtime_aborts_when_required_sysctls_fail(
         }
     )
     monkeypatch.setattr("kornode.main.load_config", lambda _path: config)
-    monkeypatch.setattr("kornode.main.SysctlService", FailingSysctlService)
-    monkeypatch.setattr(
-        "kornode.main.FileManager",
-        lambda: pytest.fail("startup continued after sysctl failure"),
-    )
+    monkeypatch.setattr("kornode.main.NetService", FailingNetService)
+    monkeypatch.setattr("kornode.main.prepare_startup_letsencrypt", lambda cfg, *_a: cfg)
 
     with pytest.raises(SystemExit) as exc:
         initialize_runtime(tmp_path / "config.yaml")
 
-    assert "failed to apply required sysctl settings" in str(exc.value)
+    assert "failed to converge kernel networking state" in str(exc.value)
     assert "permission denied" in str(exc.value)

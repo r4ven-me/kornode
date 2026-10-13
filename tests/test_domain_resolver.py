@@ -5,7 +5,6 @@ from pathlib import Path
 
 from kornode.config.loader import load_config
 from kornode.config.models import AppConfig
-from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.domain_resolver import (
     MAX_INTERVAL_SECONDS,
     MIN_INTERVAL_SECONDS,
@@ -13,6 +12,7 @@ from kornode.services.domain_resolver import (
     DomainResolverService,
     domain_groups,
 )
+from kornode.services.netinputs import resolved_state_dir
 
 
 def _config(tmp_path: Path, overrides: dict[str, object] | None = None) -> AppConfig:
@@ -46,24 +46,29 @@ class FakeLookup(DnsLookup):
         return (ips_v4 if rdtype == "A" else ips_v6), ttl
 
 
-class RecordingRunner(CommandRunner):
+class FakeNet:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, ...]] = []
+        self.wake_calls = 0
 
-    def run(
-        self,
-        argv: Sequence[str],
-        *,
-        timeout: int = 30,
-        input_text: str | None = None,
-        env: dict[str, str] | None = None,
-        check: bool = True,
-        dry_run: bool = False,
-        extra_secrets: Sequence[str] | None = None,
-    ) -> CommandResult:
-        del timeout, input_text, env, check, extra_secrets
-        self.calls.append(tuple(argv))
-        return CommandResult(tuple(argv), 0, "", "", dry_run)
+    def wake(self) -> bool:
+        self.wake_calls += 1
+        return True
+
+
+def _upstream_enabled() -> dict[str, object]:
+    return {
+        "upstream": {
+            "enabled": True,
+            "profiles": [
+                {
+                    "name": "primary",
+                    "server": "vpn.example.com",
+                    "auth_type": "password",
+                    "username": "user",
+                }
+            ],
+        }
+    }
 
 
 def test_domain_groups_includes_default_target_only_when_client_policy_is_split(
@@ -72,18 +77,24 @@ def test_domain_groups_includes_default_target_only_when_client_policy_is_split(
     split = domain_groups(
         _config(
             tmp_path,
-            {"routing": {"client_policy": "split", "split": {"domains": ["example.com"]}}},
+            {
+                **_upstream_enabled(),
+                "routing": {"client_policy": "split", "split": {"domains": ["example.com"]}},
+            },
         )
     )
-    assert any(group.set_v4 == "split_v4_dynamic" for group in split)
+    assert any(group.name == "split" for group in split)
 
     full = domain_groups(
         _config(
             tmp_path,
-            {"routing": {"client_policy": "full", "split": {"domains": ["example.com"]}}},
+            {
+                **_upstream_enabled(),
+                "routing": {"client_policy": "full", "split": {"domains": ["example.com"]}},
+            },
         )
     )
-    assert not any(group.set_v4 == "split_v4_dynamic" for group in full)
+    assert not any(group.name == "split" for group in full)
 
 
 def test_domain_groups_includes_named_target_domains_regardless_of_client_policy(
@@ -109,7 +120,7 @@ def test_domain_groups_includes_named_target_domains_regardless_of_client_policy
             },
         )
     )
-    matching = [g for g in groups if g.set_v4 == "split_v4_finance_dynamic"]
+    matching = [g for g in groups if g.name == "p_finance"]
     assert len(matching) == 1
     assert matching[0].domains == ("finance-internal.corp",)
 
@@ -142,7 +153,7 @@ def test_domain_groups_host_domains_use_profile_dns_when_configured(tmp_path: Pa
     )
 
     groups = domain_groups(config)
-    host_group = next(g for g in groups if g.set_v4 == "host_v4_office_dynamic")
+    host_group = next(g for g in groups if g.name == "p_office_host")
     assert set(host_group.domains) == {"own.example", "corp.example.com"}
     assert host_group.nameservers == ("172.16.0.53",)
 
@@ -153,75 +164,83 @@ def test_domain_groups_includes_global_host_split_only_when_host_policy_is_split
     split = domain_groups(
         _config(
             tmp_path,
-            {"routing": {"host_policy": "split", "host_split": {"domains": ["intranet.example"]}}},
+            {
+                **_upstream_enabled(),
+                "routing": {
+                    "host_policy": "split",
+                    "host_split": {"domains": ["intranet.example"]},
+                },
+            },
         )
     )
-    assert any(
-        g.set_v4 == "host_split_v4_dynamic" and g.domains == ("intranet.example",) for g in split
-    )
+    assert any(g.name == "host_split" and g.domains == ("intranet.example",) for g in split)
 
     off = domain_groups(
         _config(
             tmp_path,
-            {"routing": {"host_policy": "off", "host_split": {"domains": ["intranet.example"]}}},
+            {
+                **_upstream_enabled(),
+                "routing": {
+                    "host_policy": "off",
+                    "host_split": {"domains": ["intranet.example"]},
+                },
+            },
         )
     )
-    assert not any(g.set_v4 == "host_split_v4_dynamic" for g in off)
+    assert not any(g.name == "host_split" for g in off)
 
 
 def test_refresh_is_a_noop_when_nothing_is_configured_to_resolve(tmp_path: Path) -> None:
-    runner = RecordingRunner()
-    outcome = DomainResolverService(_config(tmp_path), runner=runner).refresh()
+    net = FakeNet()
+    outcome = DomainResolverService(_config(tmp_path), net=net).refresh()
 
-    assert outcome.result is None
     assert outcome.resolved == []
+    assert not outcome.changed
     assert outcome.next_interval_seconds == MAX_INTERVAL_SECONDS
-    assert runner.calls == []
+    assert net.wake_calls == 0
 
 
-def test_refresh_writes_flush_and_add_for_resolved_domains(tmp_path: Path) -> None:
+def test_refresh_writes_resolved_addresses_and_wakes_net(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
-        {"routing": {"client_policy": "split", "split": {"domains": ["example.com"]}}},
+        {
+            **_upstream_enabled(),
+            "routing": {"client_policy": "split", "split": {"domains": ["example.com"]}},
+        },
     )
     lookup = FakeLookup({"example.com": (["203.0.113.5", "203.0.113.6"], ["2001:db8::1"], 120)})
-    runner = RecordingRunner()
+    net = FakeNet()
 
-    outcome = DomainResolverService(config, lookup=lookup, runner=runner).refresh()
+    outcome = DomainResolverService(config, lookup=lookup, net=net).refresh()
 
-    assert outcome.result is not None and outcome.result.ok
+    assert outcome.changed
     assert outcome.next_interval_seconds == 120
-    assert len(runner.calls) == 1
-    assert runner.calls[0][:2] == ("nft", "-f")
-    script_path = Path(runner.calls[0][2])
-    content = script_path.read_text(encoding="utf-8")
-    assert "flush set inet kornode_filter split_v4_dynamic" in content
-    assert (
-        "add element inet kornode_filter split_v4_dynamic { 203.0.113.5, 203.0.113.6 }" in content
+    assert net.wake_calls == 1
+    assert (resolved_state_dir(config) / "split.txt").read_text(encoding="utf-8") == (
+        "2001:db8::1\n203.0.113.5\n203.0.113.6\n"
     )
-    assert "flush set inet kornode_filter split_v6_dynamic" in content
-    assert "add element inet kornode_filter split_v6_dynamic { 2001:db8::1 }" in content
 
 
-def test_refresh_flushes_with_nothing_to_add_when_domain_list_is_now_empty(tmp_path: Path) -> None:
-    # A domain removed from config must drop out of its set on the next
-    # cycle -- unlike the old dnsmasq nftset= approach, which only ever
-    # added IPs and left stale ones behind forever.
-    config = _config(tmp_path, {"routing": {"client_policy": "split", "split": {"domains": []}}})
-    runner = RecordingRunner()
+def test_refresh_removes_stale_files_when_domain_list_is_now_empty(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    stale = resolved_state_dir(config) / "split.txt"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("203.0.113.5\n", encoding="utf-8")
+    net = FakeNet()
 
-    outcome = DomainResolverService(config, lookup=FakeLookup({}), runner=runner).refresh()
+    outcome = DomainResolverService(config, lookup=FakeLookup({}), net=net).refresh()
 
-    assert outcome.result is not None and outcome.result.ok
-    content = Path(runner.calls[0][2]).read_text(encoding="utf-8")
-    assert "flush set inet kornode_filter split_v4_dynamic" in content
-    assert "add element" not in content
+    assert outcome.changed
+    assert outcome.resolved == []
+    assert not stale.exists()
+    assert net.wake_calls == 1
 
 
 def test_refresh_interval_is_clamped_between_min_and_max(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
         {
+            **_upstream_enabled(),
             "routing": {
                 "client_policy": "split",
                 "split": {"domains": ["short.example", "long.example"]},
@@ -235,7 +254,7 @@ def test_refresh_interval_is_clamped_between_min_and_max(tmp_path: Path) -> None
         }
     )
 
-    outcome = DomainResolverService(config, lookup=lookup, runner=RecordingRunner()).refresh()
+    outcome = DomainResolverService(config, lookup=lookup, net=FakeNet()).refresh()
 
     assert outcome.next_interval_seconds == MIN_INTERVAL_SECONDS
 
@@ -243,13 +262,16 @@ def test_refresh_interval_is_clamped_between_min_and_max(tmp_path: Path) -> None
 def test_refresh_dry_run_does_not_touch_the_runner_or_filesystem(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
-        {"routing": {"client_policy": "split", "split": {"domains": ["example.com"]}}},
+        {
+            **_upstream_enabled(),
+            "routing": {"client_policy": "split", "split": {"domains": ["example.com"]}},
+        },
     )
     lookup = FakeLookup({"example.com": (["203.0.113.5"], [], 60)})
-    runner = RecordingRunner()
+    net = FakeNet()
 
-    outcome = DomainResolverService(config, lookup=lookup, runner=runner).refresh(dry_run=True)
+    outcome = DomainResolverService(config, lookup=lookup, net=net).refresh(dry_run=True)
 
-    assert outcome.result is not None and outcome.result.dry_run
-    assert runner.calls == []
-    assert not config.generated_path("nftables-dynamic-refresh.nft").exists()
+    assert outcome.changed
+    assert net.wake_calls == 0
+    assert not resolved_state_dir(config).exists()

@@ -17,7 +17,6 @@ from kornode.config.models import AppConfig, UpstreamProfileConfig
 from kornode.net.compile import Compiled, NodeFacts, TunnelFact, compile_policy
 from kornode.net.model import EgressPolicy
 from kornode.net.state import DesiredState
-from kornode.renderers.nftables import carrier_state_dir
 from kornode.services.command import CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.network_stats import NetworkStatsService
@@ -31,6 +30,30 @@ def resolved_state_dir(config: AppConfig) -> Path:
     """Where DomainResolverService records resolved addresses per egress set
     (one `<set>.txt` per set); read back into NodeFacts.resolved (D-25)."""
     return config.system.generated_dir / "resolved"
+
+
+def carrier_state_dir(config: AppConfig) -> Path:
+    """Per-profile `<profile>.addrs` files: the literal addresses each
+    profile's carrier connection dials (excluded from marking, D-20)."""
+    return config.system.generated_dir / "upstream-carrier"
+
+
+def active_profile_file(config: AppConfig) -> Path:
+    """Runtime-switched active profile (written by UpstreamService.switch_profile)."""
+    return config.system.generated_dir / "active-upstream"
+
+
+def selected_profile(config: AppConfig, files: FileManager) -> UpstreamProfileConfig | None:
+    """The runtime-switched active profile, or the config's default if nothing
+    was switched at runtime. A disabled profile is never returned, even if it
+    is still the on-disk marker (see UpstreamConfig.selected_profile)."""
+    profiles = {profile.name: profile for profile in config.upstream.profiles}
+    for line in files.read_lines(active_profile_file(config)):
+        name = line.strip()
+        if name and name in profiles:
+            profile = profiles[name]
+            return profile if profile.enabled else None
+    return config.upstream.selected_profile()
 
 
 class RoutingLists:
@@ -96,7 +119,11 @@ class HubNetInputs:
         self.proc_sys = proc_sys
 
     def policy(self) -> EgressPolicy:
-        return legacy_policy(self.config, RoutingLists(self.config, self.files))
+        return legacy_policy(
+            self.config,
+            RoutingLists(self.config, self.files),
+            selected_profile(self.config, self.files),
+        )
 
     def facts(self) -> NodeFacts:
         config = self.config

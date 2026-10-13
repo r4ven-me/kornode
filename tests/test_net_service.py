@@ -138,3 +138,48 @@ def test_cli_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     out: Any = capsys.readouterr().out
     assert "exit upstream:main: mark 0x0c000100 table 12001 (up)" in out
     assert "add rule ipv4 90: from all lookup main suppress_prefixlength 0" in out
+
+
+class FailingKernel(FakeKernel):
+    def apply(self, plan: Plan) -> None:
+        raise OSError("read-only /proc/sys")
+
+
+def test_converge_raises_when_the_pass_failed(tmp_path: Path) -> None:
+    from kornode.services.net import NetApplyError
+
+    service = _service(tmp_path, FailingKernel())
+
+    with pytest.raises(NetApplyError, match="did not converge.*read-only /proc/sys"):
+        service.converge()
+    # `apply` (the CLI/API surface) still reports instead of raising.
+    assert "read-only" in service.apply()["status"]["last_error"]
+
+
+def test_converge_returns_the_result_when_it_worked(tmp_path: Path) -> None:
+    assert _service(tmp_path).converge()["via"] == "in-process"
+
+
+def test_apply_waits_for_a_running_reconciler(tmp_path: Path) -> None:
+    from kornode.net.reconciler import Reconciler, serve_control
+    from kornode.services.net import reconciler_socket
+
+    config = _config(tmp_path)
+    kernel = FakeKernel()
+    service = NetService(config, runner=FakeRunner(), kernel=kernel)  # type: ignore[arg-type]
+    reconciler = Reconciler(service.inputs.desired, kernel)
+    reconciler_socket(config).parent.mkdir(parents=True)
+    server = serve_control(reconciler, reconciler_socket(config))
+    try:
+        result = service.apply()
+
+        assert result["via"] == "reconciler"
+        assert result["status"]["running"] and result["status"]["last_error"] is None
+        assert service.plan()["ops"] == []  # converged before apply() returned
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_wake_without_a_reconciler_is_a_quiet_noop(tmp_path: Path) -> None:
+    assert _service(tmp_path).wake() is False

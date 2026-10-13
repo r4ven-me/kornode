@@ -7,7 +7,6 @@ from pathlib import Path
 from kornode.config.models import AppConfig
 from kornode.renderers import (
     DnsmasqConfigRenderer,
-    NftablesConfigRenderer,
     OcservConfigRenderer,
     SupervisorConfigRenderer,
 )
@@ -28,7 +27,6 @@ class ConfigService:
         self.file_manager = file_manager or FileManager()
         self.ocserv_renderer = OcservConfigRenderer()
         self.dnsmasq_renderer = DnsmasqConfigRenderer()
-        self.nftables_renderer = NftablesConfigRenderer()
         self.supervisor_renderer = SupervisorConfigRenderer()
 
     def render_files(self, config: AppConfig) -> list[RenderedFile]:
@@ -43,10 +41,6 @@ class ConfigService:
             RenderedFile(
                 self.ocserv_renderer.target_path(config),
                 self.ocserv_renderer.render(config),
-            ),
-            RenderedFile(
-                self.nftables_renderer.target_path(config),
-                self.nftables_renderer.render(config),
             ),
             RenderedFile(
                 self.supervisor_renderer.target_path(config),

@@ -137,7 +137,7 @@ capabilities:
     ui: null
     exempt: "per-process status probe is not exposed in the current panel; Dashboard shows aggregate process health only."
   - id: server.hook
-    service: kornode.services.sysctl.SysctlService.apply_interface
+    service: kornode.services.net.NetService.wake
     cli: "server hook"
     api: null
     ui: null
@@ -538,11 +538,11 @@ capabilities:
     ui: routes.sources.refresh
     exempt: "v1 gap: route URL refresh is panel/API-only; no CLI refresh command."
   - id: routes.reload
-    service: kornode.services.nftables.NftablesService.apply
+    service: kornode.services.net.NetService.apply
     cli: "routes reload"
     api: "POST /api/routing/reload"
     ui: null
-    exempt: "route reload is not exposed as a separate panel action; Network apply and nft apply cover runtime convergence."
+    exempt: "route reload is not exposed as a separate panel action; Network apply covers runtime convergence."
   - id: domains.list
     service: kornode.services.routing.RoutingService.list_domains
     cli: "domains list"
@@ -577,7 +577,7 @@ capabilities:
     ui: domains.sources.refresh
     exempt: "v1 gap: domain URL refresh is panel/API-only; no CLI refresh command."
   - id: domains.reload
-    service: kornode.services.nftables.NftablesService.apply
+    service: kornode.services.net.NetService.apply
     cli: "domains reload"
     api: null
     ui: null
@@ -671,23 +671,6 @@ capabilities:
     api: null
     ui: null
     exempt: "Supervisor host DNS guard entrypoint, not an admin management capability."
-  - id: nft.show
-    service: kornode.services.nftables.NftablesService.show
-    cli: "nft show"
-    api: "GET /api/routing/nft"
-    ui: null
-    exempt: "raw nftables ruleset display is not exposed in the current panel; diagnostics show firewall health."
-  - id: nft.apply
-    service: kornode.services.nftables.NftablesService.apply
-    cli: "nft apply"
-    api: "POST /api/routing/nft/apply"
-    ui: nft.apply
-  - id: nft.cleanup
-    service: kornode.services.nftables.NftablesService.cleanup
-    cli: "nft cleanup"
-    api: "POST /api/routing/nft/cleanup"
-    ui: null
-    exempt: "nftables cleanup is a destructive maintenance action and is not exposed in the current panel."
 
   - id: internal_dns.status
     service: kornode.services.internal_dns.InternalDnsService.status

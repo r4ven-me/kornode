@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,12 +12,11 @@ from pathlib import Path
 import pytest
 from tests.netlab.helpers import http_get, tcp_check
 from tests.netlab.kornode_nodes import (
-    FWMARK,
-    POLICY_TABLE,
     UPSTREAM_INTERFACE,
     HubServerHandle,
     UpstreamHandle,
     connect_node_upstream,
+    korctl,
     start_hub_server,
 )
 from tests.netlab.lab import Namespace
@@ -82,7 +83,7 @@ def test_carrier_exclusion_keeps_full_host_tunnel_alive(
     body = http_get(topology.node3, f"http://{HUB_LAN_ADDR}:{HUB_STUB_PORT}/", timeout=3.0)
     rules = topology.node3.run(["ip", "rule"]).stdout
     route = topology.node3.run(
-        ["ip", "route", "get", HUB_ADDR, "mark", FWMARK],
+        ["ip", "route", "get", HUB_ADDR, "mark", connected_node3.fwmark],
         check=False,
     ).stdout
 
@@ -104,11 +105,32 @@ def test_kill_switch_keeps_unreachable_default_and_blocks_uplink_leak(
     finally:
         _terminate(traffic)
 
-    routes = topology.node3.run(["ip", "route", "show", "table", POLICY_TABLE]).stdout
+    routes = topology.node3.run(["ip", "route", "show", "table", connected_node3.table]).stdout
 
-    assert "unreachable default metric 4096" in routes
+    # The reconciler installs it via netlink (`proto static`).
+    assert re.search(r"unreachable default .*metric 4096", routes)
     assert not tcp_check(topology.node3, INET_HTTP_ADDR, HTTP_PORT, timeout=1.0)
     assert packets == 0
+
+
+@pytest.mark.netlab
+def test_kernel_after_connect_matches_the_plan(
+    topology: Topology,
+    connected_node3: UpstreamHandle,
+) -> None:
+    # connect() converges through the reconciler (carrier written, pass,
+    # dial, pass): nothing is left for the next pass to change.
+    plan = json.loads(
+        korctl(
+            topology.node3, connected_node3.config_path, "net", "plan", "--json"
+        ).stdout
+    )
+
+    assert [op["text"] for op in plan["ops"]] == []
+    exit_ = next(item for item in plan["exits"] if item["name"] == "upstream:hub")
+    assert exit_["up"] is True
+    assert exit_["mark"] == connected_node3.fwmark
+    assert str(exit_["table"]) == connected_node3.table
 
 
 @pytest.mark.netlab
@@ -150,14 +172,14 @@ def test_mss_clamp_rule_covers_host_traffic_leaving_the_tunnel(
     topology: Topology,
     connected_node3: UpstreamHandle,
 ) -> None:
-    # This node is host-only (client_policy: off), so kornode renders no
-    # forward chain at all; the forward-chain clamp is covered by the
-    # render unit tests and by later client-traffic scenarios.
-    ruleset = topology.node3.run(["nft", "list", "ruleset"]).stdout
-    output_chain = ruleset.split("chain output {", 1)[1].split("}", 1)[0]
+    # Host traffic leaves through the inet kornode table's postrouting chain
+    # (the host kill-switch lives there too); the forward-chain clamp for
+    # client traffic is covered by the golden ruleset tests.
+    table = topology.node3.run(["nft", "list", "table", "inet", "kornode"]).stdout
+    postrouting = table.split("chain postrouting {", 1)[1].split("\n\t}", 1)[0]
 
-    assert f'oifname "{UPSTREAM_INTERFACE}"' in output_chain
-    assert "tcp option maxseg size set rt mtu" in output_chain
+    assert "tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu" in postrouting
+    assert f"meta mark & 0xffffff00 == {connected_node3.fwmark}" in postrouting
 
 
 def _default_route_device(ns: Namespace) -> str:

@@ -241,3 +241,30 @@ def test_supervisor_render_enables_proxy_headers_for_trusted_proxies(tmp_path: P
 
     assert "--proxy-headers" in rendered
     assert "--forwarded-allow-ips 127.0.0.1,172.18.0.0/16" in rendered
+
+
+def test_supervisor_render_runs_the_reconciler_before_everything_else(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "generated_dir": str(tmp_path / "generated"),
+                "log_dir": str(tmp_path / "logs"),
+            },
+            "upstream": {
+                "enabled": True,
+                "profiles": [{"name": "main", "server": "203.0.113.2", "username": "u"}],
+            },
+        },
+        environ={},
+    )
+
+    rendered = SupervisorConfigRenderer().render(config)
+
+    section = rendered.split("[program:reconciler]")[1].split("\n[")[0]
+    assert "command=/usr/local/bin/korctl net run" in section
+    assert "autorestart=true" in section
+    # supervisor starts lower priorities first; the default is 999.
+    priority = int(section.split("priority=")[1].split()[0])
+    assert priority < 999
+    assert "priority=" not in rendered.split("[program:upstream-watchdog]")[1].split("\n[")[0]

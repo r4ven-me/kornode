@@ -18,7 +18,7 @@ export function DashboardView({
   onReloadServer,
   onRestartServer,
   onWriteConfig,
-  onApplyNft,
+  onApplyNet,
   commandOutput,
   onClearCommand
 }: {
@@ -32,7 +32,7 @@ export function DashboardView({
   onReloadServer: () => void;
   onRestartServer: () => void;
   onWriteConfig: () => void;
-  onApplyNft: () => void;
+  onApplyNet: () => void;
   commandOutput: CommandResult | CommandResult[] | null;
   onClearCommand: () => void;
 }) {
@@ -131,10 +131,10 @@ export function DashboardView({
               <ActionButton
                 label="Apply firewall/NAT"
                 icon={Terminal}
-                title="Apply generated nftables firewall, split-routing and VPN masquerade rules"
-                busy={busy === "apply-nft"}
-                onClick={onApplyNft}
-                data-capability="nft.apply"
+                title="Apply generated network policy, split-routing and VPN masquerade rules"
+                busy={busy === "apply-net"}
+                onClick={onApplyNet}
+                data-capability="net.apply"
               />
             </div>
           </section>

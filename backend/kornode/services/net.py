@@ -22,6 +22,12 @@ from kornode.net.reconciler import Reconciler, control_request, serve_control, w
 from kornode.services.command import CommandRunner
 from kornode.services.netinputs import HubNetInputs
 
+APPLY_TIMEOUT_SECONDS = 30.0
+
+
+class NetApplyError(RuntimeError):
+    """The reconciler could not converge the kernel (its last pass failed)."""
+
 
 def reconciler_socket(config: AppConfig) -> Path:
     return config.system.generated_dir / "reconciler.sock"
@@ -70,8 +76,12 @@ class NetService:
         sock = reconciler_socket(self.config)
         if sock.exists():
             try:
-                control_request(sock, "wake")
-                return {"applied": True, "via": "reconciler", "status": self.status()}
+                reply = control_request(sock, "apply", timeout=APPLY_TIMEOUT_SECONDS)
+                return {
+                    "applied": True,
+                    "via": "reconciler",
+                    "status": {"running": True, **reply.get("status", {})},
+                }
             except OSError:
                 pass  # stale socket: fall through to an in-process pass
         reconciler = Reconciler(self.inputs.desired, self.kernel)
@@ -82,6 +92,25 @@ class NetService:
             "ops": _plan_dict(plan),
             "status": reconciler.status(),
         }
+
+    def wake(self) -> bool:
+        """Fire-and-forget nudge for callers that only changed an input
+        (domain resolver, vpnc/ocserv hooks). No reconciler running is fine:
+        it converges on its own start and on its 10 s timer."""
+        try:
+            control_request(reconciler_socket(self.config), "wake")
+        except OSError:
+            return False
+        return True
+
+    def converge(self) -> dict[str, Any]:
+        """`apply` for internal callers: a failed pass is an error, not a
+        silent success (a missing kill-switch must stop a connect)."""
+        result = self.apply()
+        error = result.get("status", {}).get("last_error")
+        if error:
+            raise NetApplyError(f"kernel did not converge: {error}")
+        return result
 
     def status(self) -> dict[str, Any]:
         sock = reconciler_socket(self.config)

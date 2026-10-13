@@ -186,3 +186,20 @@ def test_serve_control_replaces_a_stale_socket(tmp_path: Path, stale: bool) -> N
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_control_socket_apply_is_synchronous(tmp_path: Path) -> None:
+    kernel = FakeKernel()
+    reconciler = Reconciler(lambda: DESIRED, kernel)
+    path = tmp_path / "reconciler.sock"
+    server = serve_control(reconciler, path)
+    try:
+        reply = control_request(path, "apply")
+
+        # No run_forever loop: the pass happened inside the request.
+        assert reply["ok"] and reply["ops"] == 3
+        assert reply["status"]["passes"] == 1 and reply["status"]["last_error"] is None
+        assert kernel.state.rules == {RULE}
+    finally:
+        server.shutdown()
+        server.server_close()

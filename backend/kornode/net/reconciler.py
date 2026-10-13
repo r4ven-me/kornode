@@ -202,6 +202,15 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             if op == "wake":
                 self.server.reconciler.wake()
                 reply: dict[str, Any] = {"ok": True}
+            elif op == "apply":
+                # Synchronous pass: callers that must not proceed before the
+                # kernel converged (kill-switch before dialing a tunnel).
+                plan = self.server.reconciler.run_once()
+                reply = {
+                    "ok": True,
+                    "ops": len(plan.ops),
+                    "status": self.server.reconciler.status(),
+                }
             elif op == "status":
                 reply = {"ok": True, "status": self.server.reconciler.status()}
             else:
@@ -220,8 +229,9 @@ class _ControlServer(socketserver.ThreadingUnixStreamServer):
 
 
 def serve_control(reconciler: Reconciler, path: Path) -> _ControlServer:
-    """Unix socket `{"op": "wake"}` / `{"op": "status"}` (one JSON line in,
-    one out). Owner-only permissions: only root/the service may poke it."""
+    """Unix socket `{"op": "wake"|"apply"|"status"}` (one JSON line in,
+    one out; "wake" is asynchronous, "apply" runs one pass and waits).
+    Owner-only permissions: only root/the service may poke it."""
     with contextlib.suppress(FileNotFoundError):
         path.unlink()
     server = _ControlServer(str(path), reconciler)

@@ -20,7 +20,6 @@ class DiagnosticsService:
         self.runner = runner or CommandRunner()
 
     def probes(self) -> list[DiagnosticProbe]:
-        prefix = self.config.routing.nft_prefix
         occtl = SessionService(self.config, runner=self.runner)
         return [
             DiagnosticProbe("ip addr", ("ip", "addr")),
@@ -28,11 +27,8 @@ class DiagnosticsService:
             DiagnosticProbe("ip route table all", ("ip", "route", "show", "table", "all")),
             DiagnosticProbe("ip rule", ("ip", "rule")),
             DiagnosticProbe("nft ruleset", ("nft", "list", "ruleset")),
-            DiagnosticProbe(
-                "nft filter table",
-                ("nft", "list", "table", "inet", f"{prefix}_filter"),
-            ),
-            DiagnosticProbe("nft nat table", ("nft", "list", "table", "ip", f"{prefix}_nat")),
+            DiagnosticProbe("nft filter table", ("nft", "list", "table", "inet", "kornode")),
+            DiagnosticProbe("nft nat table", ("nft", "list", "table", "ip", "kornode_nat")),
             DiagnosticProbe("ss listeners", ("ss", "-lntup")),
             DiagnosticProbe("occtl users", tuple(occtl.occtl_argv("show", "users"))),
             DiagnosticProbe("occtl status", tuple(occtl.occtl_argv("show", "status"))),
@@ -48,7 +44,7 @@ class DiagnosticsService:
                 result.argv,
                 0,
                 "project-owned nftables table is not installed yet; "
-                "run korctl nft apply to create it",
+                "run korctl net apply to create it",
                 "",
                 result.dry_run,
             )

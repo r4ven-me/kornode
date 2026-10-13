@@ -25,8 +25,6 @@ VPN_POOL = "10.250.0.0/24"
 SERVER_PORT = 443
 UPSTREAM_PROFILE = "hub"
 UPSTREAM_INTERFACE = "oc-middle0"
-POLICY_TABLE = "1201"
-FWMARK = "0x0c01"
 
 
 @dataclass(frozen=True)
@@ -59,8 +57,10 @@ class UpstreamHandle:
     namespace: Namespace
     profile: str = UPSTREAM_PROFILE
     interface: str = UPSTREAM_INTERFACE
-    table: str = POLICY_TABLE
-    fwmark: str = FWMARK
+    # The reconciler derives both from the exit's position in the compiled
+    # policy, so they are read from `korctl net plan`, never hardcoded.
+    table: str = ""
+    fwmark: str = ""
 
     def disconnect(self) -> None:
         korctl(
@@ -219,14 +219,20 @@ def connect_node_upstream(
                 "client_policy": client_policy,
                 "host_policy": host_policy,
                 "main_interface": "auto",
-                "fwmark": FWMARK,
-                "table_id": int(POLICY_TABLE),
             },
         },
     )
     initialize_runtime(ns, root.config_path)
     korctl(ns, root.config_path, "config", "render")
-    handle = UpstreamHandle(config_path=root.config_path, root=root, namespace=ns)
+    exits = json.loads(korctl(ns, root.config_path, "net", "plan", "--json").stdout)["exits"]
+    exit_ = next(item for item in exits if item["name"] == f"upstream:{UPSTREAM_PROFILE}")
+    handle = UpstreamHandle(
+        config_path=root.config_path,
+        root=root,
+        namespace=ns,
+        table=str(exit_["table"]),
+        fwmark=exit_["mark"],
+    )
     try:
         korctl(ns, root.config_path, "upstream", "connect", UPSTREAM_PROFILE)
         _wait_until(lambda: _interface_exists(ns, handle.interface), f"{handle.interface} exists")

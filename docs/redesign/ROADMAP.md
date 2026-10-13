@@ -69,6 +69,8 @@ Done when: the suite runs in CI in under 10 minutes and P1-06 is red on
 | P2-10 | CLI/API/Web: `korctl net plan|apply|explain|doctor`, `/api/net/*`, panel "Network" page with the plan diff and an explain form. |
 | P2-11 | Parity manifest `parity.yaml`, `tests/test_parity.py`, `make parity`, `data-capability` attributes in the panel (`docs/spec/08-interfaces-parity.md`). Backfill existing capabilities. |
 
+Status 2026-10-13: P2-01…P2-11 done (hub cut-over included; decisions D-29…D-31).
+
 Done when:
 - `nft` and rule/route mutations exist in exactly one module [unit, grep test];
 - a manually deleted policy route is restored in ≤ 2 s [netlab];

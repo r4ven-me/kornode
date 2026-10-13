@@ -24,6 +24,30 @@ incidents, without changing the model itself.
 - Added the default netlab topology fixture with routed hub/node/cli namespaces and HTTP/DNS
   stubs for baseline no-NAT connectivity scenarios.
 
+### Changed (P2-08/P2-09: hub cut-over to the reconciler)
+
+- `kornode.net.kernel` is now the only code that touches nftables, `ip rule`/`ip route` and
+  sysctl (`tests/test_kernel_single_writer.py`). Removed: `NftablesService`,
+  `PolicyRoutingService`, `SysctlService`, the nft renderer/templates, `korctl nft *`,
+  `/api/routing/nft*`; `UpstreamService.ensure_policy_routing` is gone (the reconciler keeps
+  routes itself). No migration of the old state (D-29).
+- `UpstreamService` (`connect`/`disconnect`/`switch_profile`/`recover`/server-pushed routes)
+  only updates reconciler inputs (active-profile marker, `upstream-carrier/<profile>.addrs`,
+  pushed routes) and runs a converge pass. `connect` writes the carrier addresses, converges
+  (kill-switch), then dials, then converges again; a failed pass is an error, no longer a
+  silent success.
+- The reconciler control socket gains a synchronous `apply` op; `NetService.apply` uses it,
+  `NetService.converge` raises `NetApplyError` on a failed pass, `NetService.wake` is the
+  fire-and-forget nudge used by the vpnc/ocserv hooks.
+- The runtime-switched active profile (`active-upstream`) is now a reconciler input.
+- Domain resolver writes `generated_dir/resolved/<set>.txt` per policy set and wakes the
+  reconciler instead of loading nft sets.
+- `initialize_runtime` runs one converge pass instead of sysctl + nft apply; failure is fatal.
+- `reconciler` supervisor program (`korctl net run`, starts first).
+- `korctl doctor` / `/api/diagnostics/doctor` report from `NetService.plan()` (kernel-plan,
+  sysctl, policy tables, carrier exclusions); `routes reload`/`domains reload` converge via
+  `net apply`; the routing-settings save response key `nft` is now `net`.
+
 ### Added
 
 - `korctl net plan|apply|explain|run` and `GET /api/net/plan`, `POST /api/net/apply`,

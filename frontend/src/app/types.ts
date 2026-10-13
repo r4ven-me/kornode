@@ -25,7 +25,7 @@ export type ConfigSection =
 
 // "routing" is no longer its own nav section (its settings live inside the
 // "upstream" section's Profiles/Routing tabs, see views/upstream/UpstreamView.tsx)
-// but is kept as a distinct command-output/busy key so its nftables/route
+// but is kept as a distinct command-output/busy key so its network/route
 // actions don't clobber the Profiles tab's own last-command panel.
 export type CommandOutputKey = Tab | ConfigSection | "routing";
 
