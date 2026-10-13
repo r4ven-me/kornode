@@ -86,6 +86,12 @@ incidents, without changing the model itself.
 
 ### Fixed
 
+- Connections whose exit was removed by a policy change (profile switch, upstream disabled,
+  rules reordered) kept a stale mark and left via the uplink without NAT; such marks are now
+  rejected toward the uplink (D-32).
+- A failed op in a reconciler pass (sysctl, a tunnel vanishing mid-pass) no longer prevents
+  the rules and the nft kill-switch from being installed; any exception is an errored pass
+  instead of killing the reconciler; the ocserv connect hook reports a failed pass (D-33).
 - `routing.main_interface` is validated as `auto` or a kernel interface name; it is quoted
   into the nft kill-switch, and an arbitrary string could inject rules that bypass it.
   `kornode.net` also refuses to render any interface name that is not an ifname.

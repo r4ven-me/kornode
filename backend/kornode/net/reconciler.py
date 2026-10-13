@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from kornode.net.diff import Plan, diff
-from kornode.net.errors import NetError
 from kornode.net.state import ActualState, DesiredState
 
 DEBOUNCE_SECONDS = 0.2
@@ -131,7 +130,10 @@ class Reconciler:
                 status.consecutive_errors = 0
                 self._backoff = 0.0
                 return plan
-            except (NetError, OSError, ValueError) as exc:
+            except Exception as exc:  # noqa: BLE001
+                # Any failure (netlink read, broken config in the provider)
+                # is an errored pass: a dead loop would stop reconciling and
+                # leave `apply` callers without a reply.
                 status.last_error = f"{type(exc).__name__}: {exc}"
                 status.consecutive_errors += 1
                 self._backoff = min(

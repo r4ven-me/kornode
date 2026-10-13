@@ -13,7 +13,7 @@ class FakeNetService:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
 
-    def apply(self) -> dict[str, object]:
+    def converge(self) -> dict[str, object]:
         FakeNetService.applies += 1
         return {"applied": True}
 
@@ -44,8 +44,9 @@ def test_server_hook_reports_but_survives_a_failed_pass(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class Failing(FakeNetService):
-        def apply(self) -> dict[str, object]:
-            raise NetApplyError("reconciler did not answer: timed out")
+        def converge(self) -> dict[str, object]:
+            # converge, not apply: a pass that ran but failed is reported too.
+            raise NetApplyError("kernel did not converge: ApplyError: timed out")
 
     monkeypatch.setenv("DEVICE", "vpns0")
     monkeypatch.setattr(cli, "get_config", lambda: AppConfig.model_validate({}))

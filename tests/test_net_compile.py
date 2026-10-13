@@ -175,6 +175,24 @@ def test_kill_switch_is_strict_when_uplink_unknown() -> None:
 
 
 
+def test_stale_own_marks_never_leave_via_the_uplink() -> None:
+    # D-32: every current exit's mark, kill-switch or not, is exempt; any
+    # other kornode mark (an exit removed under established flows) is not.
+    policy, facts = hub_case()
+    stale = (
+        "meta mark & 0xff000000 == 0x0c000000 "
+        "meta mark & 0xffffff00 != { 0x0c000100, 0x0c000200, 0x0c000300 }"
+    )
+
+    script = compile_policy(policy, facts).script
+    strict = compile_policy(policy, dataclasses.replace(facts, uplink=None)).script
+
+    assert f'{stale} oifname "eth0" reject with icmpx admin-prohibited' in script
+    assert f'{stale} oifname "eth0" drop' in script
+    assert f"{stale} reject with icmpx admin-prohibited" in strict
+    assert f"{stale} drop" in strict
+
+
 def test_uplink_that_is_not_an_ifname_is_rejected_not_rendered() -> None:
     policy, facts = hub_case()
     facts = dataclasses.replace(facts, uplink='eth0" accept')

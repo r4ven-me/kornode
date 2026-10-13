@@ -110,6 +110,22 @@ def test_invalid_inputs_are_an_error_not_a_crash() -> None:
     assert reconciler.status()["last_error"] == "PolicyError: unknown upstream 'office'"
 
 
+def test_any_failure_in_a_pass_is_an_error_not_a_dead_loop() -> None:
+    # e.g. pyroute2's NetlinkError on read, or a YAML error in the provider:
+    # neither is a NetError/OSError/ValueError.
+    class NetlinkLike(Exception):
+        pass
+
+    def provider() -> DesiredState:
+        raise NetlinkLike("(16, 'Device or resource busy')")
+
+    reconciler = Reconciler(provider, FakeKernel())
+
+    assert reconciler.run_once().is_empty
+    assert reconciler.status()["last_error"] == "NetlinkLike: (16, 'Device or resource busy')"
+    assert reconciler.status()["consecutive_errors"] == 1
+
+
 def _start(reconciler: Reconciler) -> threading.Thread:
     thread = threading.Thread(target=reconciler.run_forever, daemon=True)
     thread.start()

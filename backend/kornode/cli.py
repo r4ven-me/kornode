@@ -210,7 +210,7 @@ def server_hook() -> None:
     # must not send traffic through a device with default sysctls. The connect
     # script's wrapper swallows failures (ocserv needs exit 0), so only report.
     try:
-        NetService(get_config()).apply()
+        NetService(get_config()).converge()
     except NetApplyError as exc:
         typer.echo(f"server hook: {exc}", err=True)
 

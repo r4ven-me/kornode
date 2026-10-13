@@ -61,6 +61,11 @@ tests snapshot the output for every example in `docs/spec/examples/`.
   `NftElements` only.
 - Apply is idempotent; applying the same plan twice is a no-op on the second
   run (asserted in tests).
+- A failed op does not abort the pass (D-33): the remaining ops that only add
+  state (sysctls, routes, rules, nft with the kill-switch) still run, the
+  deletions after the failure are skipped, and all failures are raised
+  together at the end. One bad sysctl or a tunnel vanishing mid-pass must not
+  leave the node without its fail-closed rules.
 
 ## Reconciler loop
 
@@ -70,7 +75,7 @@ triggers:  inputs_changed (in-process event / file watch / control-plane push)
                     RTM_NEWRULE/DELRULE, address changes on tunnel/source ifaces
            timer: every 10 s (full read + diff)
 debounce:  200 ms; single-flight (one apply at a time; a trigger during apply schedules one more pass)
-on error:  exponential backoff 1 s → 30 s, keep last good state, emit event
+on error:  any exception is an errored pass (never a dead loop); exponential backoff 1 s → 30 s, emit event
 ```
 
 Metrics/state exposed (`reconciler.status()`): last apply time, last plan size,

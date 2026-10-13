@@ -83,6 +83,19 @@ def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> li
     ]
 
 
+def _stale_marks(exits: tuple[Exit, ...], uplink: str | None, action: str) -> list[str]:
+    """D-32: established flows keep the ct mark of the exit they started on.
+    Once that exit is gone from the policy its mark has no ip rule and no
+    kill-switch, so the flow would fall through to main and leave via the
+    uplink without NAT. Any own mark that is not a current exit's never
+    leaves via the uplink (anywhere at all when the uplink is unknown)."""
+    own = "meta mark & 0xff000000 == 0x0c000000"
+    marks = ", ".join(_hex(exit_.mark) for exit_ in exits)
+    current = f" meta mark & {MARK_MASK} != {{ {marks} }}" if marks else ""
+    oif = f' oifname "{_ifname(uplink)}"' if uplink else ""
+    return [f"    {own}{current}{oif} {action}"]
+
+
 def _ifname(value: str) -> str:
     """Interface names are quoted into the script: anything but a kernel
     ifname could close the quote and inject rules."""
@@ -152,7 +165,9 @@ def render_script(
     # it in postrouting (nft -c does not catch this), so host traffic is
     # dropped there (D-28).
     kill_forward = _kill_switch(exits, facts.uplink, REJECT)
+    kill_forward += _stale_marks(exits, facts.uplink, REJECT)
     kill_postrouting = _kill_switch(exits, facts.uplink, "drop")
+    kill_postrouting += _stale_marks(exits, facts.uplink, "drop")
     lines += [
         "  }",
         "  chain forward {",

@@ -77,6 +77,10 @@ def _sysctl_path(proc_sys: Path, key: str) -> Path:
     return proc_sys.joinpath(*key.split("."))
 
 
+# Skipped once an op in the same pass failed.
+DESTRUCTIVE_OPS = (DelRule, DelRoute, DeleteForeignRule)
+
+
 class Kernel:
     def __init__(self, *, nft: str = "nft", proc_sys: Path = Path("/proc/sys")) -> None:
         self.nft = nft
@@ -215,29 +219,43 @@ class Kernel:
 
     def apply(self, plan: Plan) -> None:
         """Apply `plan` in order. Consecutive nft ops go out as one
-        transaction. The first failure raises ApplyError; ops before it stay
-        applied (the next reconcile pass diffs from what is really there)."""
+        transaction. A failed op does not stop the ops that only add state
+        (sysctls, routes, rules, the nft ruleset with the kill-switch): one
+        bad sysctl or a tunnel vanishing mid-pass must not leave the node
+        without its fail-closed rules. Deletions after a failure are skipped,
+        so nothing is torn down on top of a half-applied pass. All failures
+        are raised together as one ApplyError at the end; the next pass diffs
+        from what is really there."""
         ops = list(plan.ops)
+        errors: list[str] = []
         index = 0
         with IPRoute() as ipr:
             while index < len(ops):
                 op = ops[index]
-                if isinstance(op, (InsertForeignRule, DeleteForeignRule)):
-                    self._apply_foreign(op)
+                if errors and isinstance(op, DESTRUCTIVE_OPS):
                     index += 1
                     continue
-                if isinstance(op, (NftLoad, UpdateElements)):
-                    batch: list[NftLoad | UpdateElements] = []
-                    while index < len(ops) and isinstance(ops[index], (NftLoad, UpdateElements)):
-                        batch.append(ops[index])  # type: ignore[arg-type]
-                        index += 1
-                    self._apply_nft(batch)
-                    continue
                 try:
-                    self._apply_one(ipr, op)
+                    if isinstance(op, (InsertForeignRule, DeleteForeignRule)):
+                        index += 1
+                        self._apply_foreign(op)
+                    elif isinstance(op, (NftLoad, UpdateElements)):
+                        batch: list[NftLoad | UpdateElements] = []
+                        while index < len(ops) and isinstance(
+                            ops[index], (NftLoad, UpdateElements)
+                        ):
+                            batch.append(ops[index])  # type: ignore[arg-type]
+                            index += 1
+                        self._apply_nft(batch)
+                    else:
+                        index += 1
+                        self._apply_one(ipr, op)
+                except ApplyError as exc:
+                    errors.append(str(exc))
                 except (NetlinkError, OSError) as exc:
-                    raise ApplyError(f"{op}: {exc}") from exc
-                index += 1
+                    errors.append(f"{op}: {exc}")
+        if errors:
+            raise ApplyError("; ".join(errors))
 
     def _apply_one(self, ipr: Any, op: Op) -> None:
         if isinstance(op, SetSysctl):

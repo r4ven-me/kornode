@@ -62,7 +62,9 @@ table inet kornode {
                        ct state new iifname @tunnel_ifaces ct mark set <mark of that iface's exit> }
   chain forward      { type filter hook forward priority filter; policy accept;
                        tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-                       meta mark & 0xffffff00 != 0 meta mark & 0xffffff00 . oifname != @exit_ok … reject }
+                       meta mark & 0xffffff00 != 0 meta mark & 0xffffff00 . oifname != @exit_ok … reject
+                       meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { <every exit's mark> }
+                         oifname "<uplink>" reject }   # stale marks, D-32
   chain postrouting  { type filter hook postrouting priority filter; policy accept;
                        oifname "lo" accept
                        tcp flags syn / syn,rst tcp option maxseg size set rt mtu
@@ -82,6 +84,13 @@ Notes:
   packet of a connection (`ct mark set meta mark`), and later packets restore
   from `ct mark`. Routing decisions are thus stable for the life of a
   connection even if sets change (no mid-connection path flips).
+- Stale marks (D-32): a connection keeps the ct mark of the exit it started
+  on. When a policy change removes that exit (profile switch, upstream
+  disabled, rules reordered), the mark has no ip rule and no kill-switch any
+  more and would fall through to main. Forward and postrouting therefore
+  reject/drop any kornode mark that is not a current exit's toward the uplink
+  (on every interface when the uplink is unknown). Such connections break
+  instead of leaking; new connections are classified by the new policy.
 - The input chain records inbound connections arriving through a tunnel so
   replies use the same tunnel (existing behaviour, kept).
 - The `local` exit also gets a mark (no ip rule needed: unmatched marks fall
