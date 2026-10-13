@@ -29,8 +29,9 @@ NL scenario the same way v1 did (where v1 was correct).
   (replaced by implicit rules + first-match chain);
 - per-target `*_static`/`*_dynamic` set families and
   `nftables-static-refresh.nft.j2` / `nftables-dynamic-refresh.nft.j2`;
-- `PolicyRoutingService` and every kernel call in `UpstreamService`,
-  `upstream watch`, `apply_server_routing_if_changed`;
+- (removed earlier, in P2, per D-29: `NftablesService`, `PolicyRoutingService`,
+  `SysctlService` and every kernel call in `UpstreamService`, `upstream watch`,
+  `apply_server_routing_if_changed`);
 - `RoutingTarget` / `list_targets()`.
 
 ## Nodes → agents

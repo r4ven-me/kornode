@@ -77,9 +77,21 @@ Metrics/state exposed (`reconciler.status()`): last apply time, last plan size,
 last error, drift events count by type, current schema hash.
 
 Hub: supervisor program `reconciler` (`korctl net run`). Other hub processes
-signal it through a Unix socket (`generated_dir/reconciler.sock`, JSON
-`{"op": "wake"}` / `{"op": "status"}`) — `korctl net apply` and the API use the
-same socket. Agent: the reconciler runs inside the agent process.
+signal it through a Unix socket (`generated_dir/reconciler.sock`, one JSON
+line in, one out): `{"op": "wake"}` (asynchronous nudge: hooks, domain
+resolver), `{"op": "apply"}` (runs one pass inside the request and replies with
+the status — callers that must not proceed before the kernel converged, e.g.
+the kill-switch before dialing a tunnel; `korctl net apply`, the API and
+`UpstreamService` use it) and `{"op": "status"}`. A failed pass is an error for
+`apply` callers (`NetService.converge` raises), never a silent success. With no
+reconciler running, `apply` falls back to one in-process pass. Agent: the
+reconciler runs inside the agent process.
+
+Hub inputs that are files, all re-read on every pass: the runtime-switched
+active profile (`generated_dir/active-upstream`, overrides
+`upstream.active_profile`; a disabled profile is never active), per-profile
+carrier addresses (`upstream-carrier/<profile>.addrs`), server-pushed routes,
+and resolved domain addresses (`resolved/<set>.txt`).
 
 ## Explain
 

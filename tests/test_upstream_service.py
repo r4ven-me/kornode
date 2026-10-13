@@ -1143,22 +1143,29 @@ def test_connect_installs_carrier_exclusion_before_dialing(tmp_path: Path) -> No
                 events.append("dial")
             return super().run(argv, **kwargs)
 
+    carrier_file: list[Path] = []
+    carrier_at_converge: list[bool] = []
+
     class EventNet(FakeNet):
         def converge(self) -> dict[str, object]:
             events.append("converge")
+            carrier_at_converge.append(carrier_file[0].exists())
             return super().converge()
 
     runner = EventRunner(tmp_path)
     net = EventNet()
     service = UpstreamService(config, runner=runner, net=net)
+    state_path = service._carrier_exclusion_state_path(config.upstream.profiles[0])
+    carrier_file.append(state_path)
     try:
         service.connect()
     finally:
         runner.close()
 
-    state_path = service._carrier_exclusion_state_path(config.upstream.profiles[0])
     assert state_path.read_text(encoding="utf-8") == "203.0.113.10\n"
-    assert events[:2] == ["converge", "dial"]
+    # carrier recorded -> converge (kill-switch) -> dial -> converge again
+    assert events[:3] == ["converge", "dial", "converge"]
+    assert carrier_at_converge[0] is True
 
 
 def test_disconnect_removes_carrier_exclusion(tmp_path: Path) -> None:
@@ -2345,3 +2352,30 @@ def test_recover_never_selects_external_interface_as_a_failover_target(
 
     assert service.selected_profile() is not None
     assert service.selected_profile().name == "backup"
+
+
+def test_watchdog_recover_survives_a_failed_reconciler_pass(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    runner = FakeRunner(tmp_path)
+    service = UpstreamService(config, runner=runner, net=FakeNet(fail=True))
+    try:
+        assert service.recover() is False
+    finally:
+        runner.close()
+
+
+def test_disconnect_of_a_dead_process_drops_its_stale_carrier_exemption(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    net = FakeNet()
+    service = UpstreamService(config, runner=FakeRunner(), net=net)
+    profile = config.upstream.profiles[0]
+    service.install_carrier_exclusion(profile)
+
+    service.disconnect()
+
+    assert not service._carrier_exclusion_state_path(profile).exists()
+    assert net.calls == ["converge"]

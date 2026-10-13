@@ -12,7 +12,7 @@ from kornode.services.apply import apply_dns_configuration, client_dns_signature
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
 from kornode.services.host_dns import HostDnsService
-from kornode.services.net import NetService
+from kornode.services.net import NetApplyError, NetService
 from kornode.services.routing import RoutingService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -273,7 +273,10 @@ def save_routing_settings(
         reconnect_clients=reconnect_required,
     )
     # RUNTIME: one reconciler pass over the live kernel state.
-    net_result = NetService(loaded_config).apply()
+    try:
+        net_result: dict[str, object] = NetService(loaded_config).apply()
+    except NetApplyError as exc:
+        net_result = {"applied": False, "error": str(exc)}
     # Apply right away instead of waiting for host-dns-guard's next cycle.
     # RUNTIME: touches the mounted host resolver files, if any.
     host_dns = HostDnsService(loaded_config).apply()
@@ -366,4 +369,7 @@ def reload_routing(
     payload: DryRunRequest | None = None,
 ) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    return NetService(config).apply(dry_run=payload.dry_run if payload else False)
+    try:
+        return NetService(config).apply(dry_run=payload.dry_run if payload else False)
+    except NetApplyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

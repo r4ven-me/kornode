@@ -32,7 +32,7 @@ from kornode.services.groups import GroupConfigService
 from kornode.services.host_dns import HostDnsService
 from kornode.services.internal_dns import InternalDnsService
 from kornode.services.logs import LogRotationService, LogService
-from kornode.services.net import NetService, run_reconciler
+from kornode.services.net import NetApplyError, NetService, run_reconciler
 from kornode.services.otp import OtpService
 from kornode.services.password_hash import hash_password
 from kornode.services.routing import RoutingService
@@ -206,8 +206,13 @@ def server_hook() -> None:
     if not device:
         typer.echo("server hook failed: DEVICE is not set", err=True)
         raise typer.Exit(1)
-    # The reconciler sets the device's sysctls (netlink event or this wake).
-    NetService(get_config()).wake()
+    # The reconciler sets the device's sysctls. Wait for that pass: the client
+    # must not send traffic through a device with default sysctls. The connect
+    # script's wrapper swallows failures (ocserv needs exit 0), so only report.
+    try:
+        NetService(get_config()).apply()
+    except NetApplyError as exc:
+        typer.echo(f"server hook: {exc}", err=True)
 
 
 @server_process_app.command("list")
@@ -1217,7 +1222,11 @@ def net_apply(
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Converge the kernel now (one reconciler pass, awaited)."""
-    result = NetService(get_config()).apply(dry_run=dry_run)
+    try:
+        result = NetService(get_config()).apply(dry_run=dry_run)
+    except NetApplyError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1) from exc
     if as_json:
         typer.echo(json.dumps(result, indent=2))
         return

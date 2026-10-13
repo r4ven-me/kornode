@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from kornode.api.auth import require_admin
 from kornode.config.models import AppConfig
 from kornode.net.errors import NetError
-from kornode.services.net import NetService
+from kornode.services.net import NetApplyError, NetService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -41,6 +41,8 @@ def net_apply(payload: ApplyRequest, request: Request) -> dict[str, Any]:
         return _service(request).apply(dry_run=payload.dry_run)
     except NetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except NetApplyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/explain")

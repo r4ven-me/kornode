@@ -134,6 +134,34 @@ def test_kernel_after_connect_matches_the_plan(
 
 
 @pytest.mark.netlab
+def test_reconciler_pass_during_a_tunnel_outage_does_not_open_the_uplink(
+    topology: Topology,
+    connected_node3: UpstreamHandle,
+) -> None:
+    # Reconciler passes (here: explicit `net apply`, as after a restart or on
+    # its 10 s timer) while the tunnel is gone must keep failing closed.
+    uplink = _default_route_device(topology.node3)
+    topology.node3.run(["ip", "link", "delete", UPSTREAM_INTERFACE])
+    for _ in range(2):
+        korctl(topology.node3, connected_node3.config_path, "net", "apply")
+    traffic = _start_connect_loop(topology.node3.full_name, INET_HTTP_ADDR, HTTP_PORT)
+    try:
+        packets = _capture_packets(topology.node3.full_name, uplink, f"host {INET_HTTP_ADDR}")
+    finally:
+        _terminate(traffic)
+
+    routes = topology.node3.run(["ip", "route", "show", "table", connected_node3.table]).stdout
+    plan = json.loads(
+        korctl(topology.node3, connected_node3.config_path, "net", "plan", "--json").stdout
+    )
+
+    assert re.search(r"unreachable default .*metric 4096", routes)
+    assert "dev" not in routes.split("unreachable", 1)[0]  # no default via the dead tunnel
+    assert plan["ops"] == []
+    assert packets == 0
+
+
+@pytest.mark.netlab
 def test_suppress_rule_keeps_connected_routes_ahead_of_policy_table(
     topology: Topology,
     connected_node3: UpstreamHandle,

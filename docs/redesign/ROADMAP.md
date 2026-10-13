@@ -127,7 +127,7 @@ Done when:
 | --- | --- |
 | P5-01 | Egress editor in the panel (ordered list, drag to reorder, dead-rule warnings, explain inline) + `korctl egress ...` + API (parity). |
 | P5-02 | `korctl config migrate` writes the compiled egress policy back to YAML; legacy keys emit deprecation warnings. |
-| P5-03 | Remove legacy keys and code listed in `docs/spec/10-migration.md` (last-mark-wins, per-target static/dynamic set families, static/dynamic refresh templates, policy re-application in `UpstreamService`/watchdog). |
+| P5-03 | Remove legacy keys and code listed in `docs/spec/10-migration.md` (last-mark-wins, per-target static/dynamic set families, static/dynamic refresh templates; the `UpstreamService`/watchdog policy re-application already went in P2, D-29). |
 | P5-04 | `korctl migrate-to-agent` for existing full kornode nodes. |
 | P5-05 | Documentation rewrite: README, `docs/architecture.md`, `docs/networking.md`, examples. |
 

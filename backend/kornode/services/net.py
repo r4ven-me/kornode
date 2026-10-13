@@ -77,20 +77,30 @@ class NetService:
         if sock.exists():
             try:
                 reply = control_request(sock, "apply", timeout=APPLY_TIMEOUT_SECONDS)
+            except (FileNotFoundError, ConnectionRefusedError):
+                pass  # stale socket, nobody listens: one in-process pass below
+            except (OSError, ValueError) as exc:
+                # Somebody listens but did not answer (timeout, garbage): a
+                # second in-process writer would race the reconciler's pass.
+                raise NetApplyError(f"reconciler did not answer: {exc}") from exc
+            else:
+                status = reply.get("status")
+                if reply.get("ok") is not True or not isinstance(status, dict):
+                    detail = reply.get("error") or "empty reply"
+                    raise NetApplyError(f"reconciler refused the pass: {detail}")
                 return {
-                    "applied": True,
+                    "applied": status.get("last_error") is None,
                     "via": "reconciler",
-                    "status": {"running": True, **reply.get("status", {})},
+                    "status": {"running": True, **status},
                 }
-            except OSError:
-                pass  # stale socket: fall through to an in-process pass
         reconciler = Reconciler(self.inputs.desired, self.kernel)
         plan = reconciler.run_once()
+        status = reconciler.status()
         return {
-            "applied": True,
+            "applied": status["last_error"] is None,
             "via": "in-process",
             "ops": _plan_dict(plan),
-            "status": reconciler.status(),
+            "status": status,
         }
 
     def wake(self) -> bool:

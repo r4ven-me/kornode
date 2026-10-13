@@ -42,6 +42,9 @@ SYNC_TIMEOUT_SECONDS = 20
 SYNC_MAX_BYTES = 1024 * 1024
 SYNC_USER_AGENT = "kornode-client-sync/1.0"
 VPNC_CONNECT_REASONS = {"connect", "reconnect"}
+# What a watchdog tick survives: a failed dial, an unknown profile, or a
+# reconciler pass that did not converge (retried on the next tick).
+_RECOVERABLE = (ValueError, CommandError, NetApplyError)
 
 
 @dataclass(frozen=True)
@@ -774,6 +777,13 @@ class UpstreamService:
         with self._locked():
             pid = self._read_pid(profile) if profile is not None else None
             if profile is None or pid is None or not self._is_running(pid):
+                if profile is not None and not dry_run:
+                    # The process died on its own: its carrier exemption must
+                    # not outlive it.
+                    state_path = self._carrier_exclusion_state_path(profile)
+                    if state_path.exists():
+                        self.remove_carrier_exclusion(profile)
+                        self.net.converge()
                 return CommandResult(
                     argv=("kill", "-TERM", "<upstream-pid>"),
                     returncode=0,
@@ -900,7 +910,10 @@ class UpstreamService:
                     # mean routing was already torn down, so disconnect()
                     # (idempotent) always runs for this kind regardless.
                     if connected or profile.kind == "external_interface":
-                        results.append(self.disconnect(profile.name))
+                        try:
+                            results.append(self.disconnect(profile.name))
+                        except NetApplyError as exc:
+                            self._append_log(f"disconnect of '{profile.name}': {exc}")
                     continue
                 if profile.name == active_name:
                     continue
@@ -914,7 +927,7 @@ class UpstreamService:
                 # was already up before kornode started observing it.
                 try:
                     results.append(self.connect(profile.name))
-                except (ValueError, CommandError):
+                except _RECOVERABLE:
                     self._append_log(f"standby connect to '{profile.name}' failed")
             return results
 
@@ -975,23 +988,27 @@ class UpstreamService:
                     # checks: a live-but-unhealthy process must be torn down
                     # before redialing, and a dead one leaves nothing to
                     # keep.
-                    if self._profile_connected(profile):
-                        self.disconnect(name)
                     try:
+                        if self._profile_connected(profile):
+                            self.disconnect(name)
                         self.connect(name)
-                    except (ValueError, CommandError):
+                    except _RECOVERABLE:
                         self._append_log(f"reconnect attempt to '{name}' failed")
                         continue
                 elif not self._profile_connected(profile):
                     try:
                         self.connect(name)
-                    except (ValueError, CommandError):
+                    except _RECOVERABLE:
                         self._append_log(f"failover connect to '{name}' failed")
                         continue
                 if is_current_and_active:
                     self._append_log(f"reconnected to '{name}'")
                 else:
-                    self.switch_profile(name)
+                    try:
+                        self.switch_profile(name)
+                    except NetApplyError as exc:
+                        self._append_log(f"failover switch to '{name}' failed: {exc}")
+                        continue
                     self._append_log(f"failed over to '{name}' (redirection rules switched)")
                 return True
             self._append_log("all reconnect attempts failed")

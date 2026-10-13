@@ -183,3 +183,69 @@ def test_apply_waits_for_a_running_reconciler(tmp_path: Path) -> None:
 
 def test_wake_without_a_reconciler_is_a_quiet_noop(tmp_path: Path) -> None:
     assert _service(tmp_path).wake() is False
+
+
+def _serve(path: Path, handler: Any) -> Any:
+    import socket
+    import threading
+
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(path))
+    server.listen(1)
+
+    def run() -> None:
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            handler(conn)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return server
+
+
+@pytest.mark.parametrize("reply", [b"\n", b'{"ok": false, "error": "unknown op"}\n'])
+def test_converge_fails_closed_on_an_empty_or_refusing_reconciler(
+    tmp_path: Path, reply: bytes
+) -> None:
+    from kornode.services.net import NetApplyError, reconciler_socket
+
+    kernel = FakeKernel()
+    service = _service(tmp_path, kernel)
+    reconciler_socket(service.config).parent.mkdir(parents=True)
+    server = _serve(reconciler_socket(service.config), lambda conn: conn.sendall(reply))
+    try:
+        with pytest.raises(NetApplyError, match="reconciler"):
+            service.converge()
+        assert kernel.state == ActualState()  # no second writer
+    finally:
+        server.close()
+
+
+def test_a_reconciler_that_does_not_answer_is_not_replaced_by_a_second_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from kornode.services import net as net_module
+    from kornode.services.net import NetApplyError, reconciler_socket
+
+    monkeypatch.setattr(net_module, "APPLY_TIMEOUT_SECONDS", 0.2)
+    kernel = FakeKernel()
+    service = _service(tmp_path, kernel)
+    reconciler_socket(service.config).parent.mkdir(parents=True)
+    release = threading.Event()
+    server = _serve(reconciler_socket(service.config), lambda conn: release.wait(5))
+    try:
+        with pytest.raises(NetApplyError, match="did not answer"):
+            service.apply()
+        assert kernel.state == ActualState()
+    finally:
+        release.set()
+        server.close()
+
+
+def test_a_failed_pass_is_not_reported_as_applied(tmp_path: Path) -> None:
+    result = _service(tmp_path, FailingKernel()).apply()
+
+    assert result["applied"] is False
