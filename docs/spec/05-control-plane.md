@@ -37,8 +37,9 @@ CREATE TABLE nodes (
   seal_pubkey   BLOB,                               -- X25519 public key (32 bytes)
   policy        TEXT NOT NULL DEFAULT '{}',         -- JSON: egress, sources, sets (02)
   transport     TEXT NOT NULL DEFAULT '{}',         -- JSON: transport, dpd, keepalive, camouflage
-  desired_version INTEGER NOT NULL DEFAULT 0,
-  applied_version INTEGER NOT NULL DEFAULT 0,
+  desired_version INTEGER NOT NULL DEFAULT 0,       -- latest stored bundle version
+  applied_version INTEGER NOT NULL DEFAULT 0,       -- from the last report
+  high_water_version INTEGER NOT NULL DEFAULT 0,    -- highest version the agent ever accepted (D-37)
   last_seen     TEXT,
   created_at    TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -76,7 +77,8 @@ CREATE TABLE enroll_tokens (
 );
 CREATE TABLE bundles (
   node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  version INTEGER NOT NULL, sha256 TEXT NOT NULL, body BLOB NOT NULL, signature BLOB NOT NULL,
+  version INTEGER NOT NULL, sha256 TEXT NOT NULL, body BLOB NOT NULL, signature TEXT NOT NULL,
+  content_hash TEXT NOT NULL, key_id TEXT NOT NULL,  -- dedup and signing key (Bundle)
   created_at TEXT NOT NULL, reason TEXT NOT NULL,
   PRIMARY KEY (node_id, version)
 );
@@ -97,8 +99,9 @@ CREATE TABLE audit (                                 -- reuse existing audit ser
 ```
 
 All writes go through `RegistryService` (one class, used by CLI, admin API and
-control API). Any mutation affecting an agent's bundle increments
-`desired_version` in the same transaction and enqueues bundle compilation.
+control API). Any mutation affecting an agent's bundle recompiles it in the
+same transaction (see Bundle → Compilation); `desired_version` moves only
+when the compiled content changed.
 
 ## Enrollment
 
@@ -118,26 +121,108 @@ control API). Any mutation affecting an agent's bundle increments
    client cert yet) with `{token_id, secret, csr_pem, seal_pubkey_b64, facts}`.
 4. Hub verifies secret, signs CSR with CN=`agent-<id>`, OU=`agents`, lifetime
    `cert_lifetime_days`; marks token used; deletes the enroll ocserv user;
-   sets node `active`; returns `{cert_pem, ca_pem, node_id, hub_signing_pubkey,
-   first bundle + signature}`.
-5. Agent disconnects the enroll session, connects with its certificate,
-   applies the first bundle with confirm, starts the run loop.
+   sets node `active`; returns `{cert_pem, ca_pem, node_id, signing_keys:
+   [{key_id, pubkey_b64}], bundle: {version, body_b64, signature}}`.
+5. Agent writes `agent.yaml` (bootstrap), disconnects the enroll session,
+   connects with its certificate, applies the first bundle with confirm
+   (on rollback it stays in the bootstrap state, 06), starts the run loop.
 
 Failure modes: expired/used token → 410; wrong secret → 403 + audit; node not
 pending → 409. Enroll endpoint rate-limited per source address (5/min).
 
 ## Bundle
 
-- Body: JSON per `schemas/bundle.v1.schema.json`, UTF-8, keys sorted,
-  no insignificant whitespace (canonical form so `sha256` is stable).
-- Signature: Ed25519 over the exact body bytes, delivered as header
-  `X-Kornode-Signature: ed25519:<b64>` and stored next to the cache file.
-- Sealed secrets: values in `secrets` objects are
-  `{"alg":"x25519-hkdf-sha256-chacha20poly1305","epk":"<b64>","nonce":"<b64>","ct":"<b64>"}`,
-  HKDF info `kornode-bundle-secret-v1|<node_id>|<field path>`.
-- Versions are per node, strictly increasing; the hub never reuses a number.
-- Compilation is triggered by any relevant registry change and debounced 1 s;
-  a new version is created only if the body differs from the latest.
+Shared code lives in `backend/kornode/bundle/` (models, canonical encoding,
+sign/verify, seal/unseal). It imports only stdlib, `pydantic`,
+`cryptography` and `kornode.net`, enforced by an AST import test like
+`tests/test_net_imports.py`; the hub compiler and the agent both use it (D-34).
+
+### Body
+
+- JSON per `schemas/bundle.v1.schema.json`, encoded as
+  `json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()`.
+  No floats anywhere in the body. Maximum size 1 MiB; the agent refuses a
+  larger body before verifying it.
+- The canonical form matters only to the hub (stable `sha256`, dedup). The
+  agent never re-encodes: it verifies, caches and parses the exact bytes it
+  received.
+- `generated_at` is informational. Nothing on the agent depends on time
+  (bundles never expire, D-08).
+
+### Signature (D-35)
+
+- Ed25519 over `b"kornode.bundle.v1\x00" + body` (domain separation: the
+  signing key can never be tricked into signing something that is also a
+  valid message for another purpose).
+- Envelope string: `ed25519:<key_id>:<b64 signature>`, where `key_id` is the
+  first 16 hex chars of `sha256(raw public key)`. It travels as header
+  `X-Kornode-Signature` (`/bundle`), as the `signature` field (`/poll`, enroll
+  result) and is stored next to the cached body as `<version>.sig`.
+- The signing key is `control.signing_key` (PKCS#8 PEM, 0600), created on first
+  start. The hub's processes that mutate the registry (admin API, `korctl`,
+  control API) compile and sign; they run as the same user.
+
+### Sealed secrets (D-16, D-36)
+
+Every value of a field typed `sealed` in the schema is
+`{"alg":"x25519-hkdf-sha256-chacha20poly1305","epk":"<b64>","nonce":"<b64>","ct":"<b64>"}`:
+
+- fresh ephemeral X25519 key per value; `shared = X25519(eph, agent seal_pubkey)`;
+- `key = HKDF-SHA256(ikm=shared, salt=epk || seal_pubkey, info=I, length=32)`;
+- `I = "kornode-bundle-secret-v1|<node_id>|<path>"`, where `<path>` is the
+  RFC 6901 JSON pointer of the sealed object in the body
+  (`/tunnels/upstreams/0/password`);
+- `ct = ChaCha20-Poly1305(key, nonce = 12 random bytes, plaintext, aad = I)`.
+
+Binding the path in both `info` and `aad` stops a hub-side bug or an attacker
+with write access to the cache from moving a ciphertext into another field.
+Plaintext is UTF-8 text; binary material (keys) is PEM.
+
+### Versions and dedup (D-37)
+
+- Versions are per node, strictly increasing, gaps allowed; the hub never
+  reuses a number. The next version is
+  `max(latest bundle version, nodes.desired_version, nodes.high_water_version) + 1`,
+  where `high_water_version` is the highest version the agent reports having
+  accepted (see Recovery).
+- Sealing is randomized, so two compilations of the same input differ byte
+  for byte. Dedup uses `content_hash = sha256` of the canonical body with
+  `version` and `generated_at` removed and every sealed object replaced by
+  `{"hmac": HMAC-SHA256(master_key, I || 0x00 || plaintext)}`. A new version
+  is stored only when `content_hash` differs from the latest one.
+  `bundles` gains columns `content_hash TEXT NOT NULL` and
+  `key_id TEXT NOT NULL`.
+
+### Compilation (D-38)
+
+`BundleService.compile(node_id, reason)` is a pure function of the registry
+(read inside the caller's transaction) plus the hub's YAML settings (hub
+host/port/pin, fabric). It runs synchronously in the same transaction as
+every registry mutation that can affect a bundle (a fabric-wide change, such
+as a new node's prefixes, recompiles every active agent; that is at most 253
+small JSON documents), on hub YAML save, and once at control API startup.
+No queue, no debounce: content-hash dedup makes recompiling unchanged nodes
+free, and `desired_version` is never ahead of the stored bundle.
+
+Before storing, the compiler runs the agent-side validator (below) on its
+own output and refuses to store a bundle that would fail it; the mutation
+is rolled back with an `invalid` error.
+
+### Validator (shared, agent and hub)
+
+A bundle is valid only if, in this order:
+
+1. the body is ≤ 1 MiB and the signature verifies with a trusted key (before
+   any JSON parsing);
+2. it parses into the pydantic `Bundle` model (mirror of the JSON schema;
+   a unit test checks every example against both);
+3. `format`, `node_id` match; `version > high_water_version`;
+   `min_agent_version ≤` the running agent version;
+4. every sealed value unseals;
+5. `kornode.net` compiles `policy` with the bundle's addresses and the
+   validator reports no errors;
+6. the fabric tunnel and the `fabric` exit are present (a bundle cannot
+   remove the agent's path to the hub, 11).
 
 ## Control API (agent-facing, mTLS, `/agent/v1`)
 
@@ -147,15 +232,24 @@ against `nodes.state == 'active'` and CRL.
 | Method & path | Request | Response |
 | --- | --- | --- |
 | `POST /agent/v1/enroll` | see Enrollment (no client cert) | 200 enrollment result |
-| `GET /agent/v1/bundle?since=<v>&wait=<s>` | — | 200 body + signature header + `X-Kornode-Version`; 304 if no newer version within `wait` (≤ `long_poll_seconds`) |
-| `POST /agent/v1/report` | report JSON (below) | 204; 409 if `applied_version` > `desired_version` (agent ahead — hub restored from backup), see Recovery |
+| `GET /agent/v1/ping` | — | 204; the agent's `fabric` health check (06) |
+| `GET /agent/v1/bundle?since=<v>&wait=<s>` | — | 200 raw body bytes + `X-Kornode-Signature` + `X-Kornode-Version`; 304 if no newer version within `wait` (≤ `long_poll_seconds`) |
+| `POST /agent/v1/report` | report JSON (below) | 204 |
 | `GET /agent/v1/commands?wait=<s>` | — | 200 list of commands (marks delivered); 204 none |
 | `POST /agent/v1/commands/<id>/result` | `{ok, output, artefact_b64?}` (≤ 5 MB) | 204 |
 | `POST /agent/v1/renew` | `{csr_pem}` | 200 `{cert_pem}`; allowed when ≥ 2/3 of lifetime elapsed |
 
 Agents may combine bundle and command polling: `GET /agent/v1/poll?since=<v>&wait=<s>`
-returns `{bundle?: {...}, commands: [...]}`; it is the default client path,
-the two separate endpoints exist for diagnostics.
+returns `{"bundle": {"version": 43, "body_b64": "...", "signature": "ed25519:..."} | null,
+"commands": [...]}`; it is the default client path, the two separate endpoints
+exist for diagnostics. The body travels base64-encoded so the exact signed
+bytes survive the JSON envelope.
+
+Long-poll waiters live in the control API process and re-check
+`nodes.desired_version` every 500 ms (the registry is written by other
+processes; SQLite is the only shared channel). A request with `since` greater
+than the hub's latest version triggers a recompile (see Recovery) and is
+answered with the new version.
 
 Errors: JSON `{"error": "<code>", "message": "..."}`; codes: `unauthorized`,
 `revoked`, `not_found`, `conflict`, `rate_limited`, `invalid`, `internal`.
@@ -165,7 +259,7 @@ Errors: JSON `{"error": "<code>", "message": "..."}`; codes: `unauthorized`,
 ```json
 {
   "node_id": 3, "agent_version": "2.0.0", "time": "2026-10-11T12:00:00Z",
-  "applied_version": 42, "pending_version": null,
+  "applied_version": 42, "pending_version": null, "high_water_version": 43,
   "last_apply": {"version": 42, "result": "confirmed", "at": "...", "error": null},
   "rollbacks": [{"from": 43, "to": 42, "at": "...", "reason": "health: hub unreachable"}],
   "tunnels": [{"name": "fabric", "iface": "oc-hub0", "up": true, "since": "...",
@@ -197,13 +291,18 @@ Commands expire after 10 minutes undelivered. No free-form shell exists.
 
 ## Recovery and edge cases
 
-- Hub restored from an older backup: agent reports `applied_version` greater
-  than the hub's latest; hub responds 409 and bumps `desired_version` to
-  `applied_version + 1`, recompiling from current registry, so versions stay
-  monotonic for the agent.
+- Hub restored from an older backup: the agent reports (or polls with) a
+  version greater than the hub's latest. The hub stores it as
+  `nodes.high_water_version` and recompiles; the next version is above it
+  (D-37), so versions stay monotonic for the agent without any error
+  round-trip. A bundle compiled before the hub learned the high-water mark
+  is rejected by the agent as a replay, which reports again; the loop
+  converges in one poll.
 - Signing key rotation: `korctl control rotate-signing-key` creates a new key,
   next bundles carry `next_signing_pubkey` for 7 days signed by the old key,
   then switch. Agents accept a key change only via a bundle signed by the
-  current key.
+  current key, and add `next_signing_pubkey` to their trust store only when
+  that bundle is confirmed. The old key is kept only to verify cached bundles
+  it signed (06, trust store).
 - Agent deleted on hub: node `revoked`, cert added to CRL, prefixes released
   (id quarantined, 01).
