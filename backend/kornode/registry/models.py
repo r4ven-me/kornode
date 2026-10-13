@@ -47,6 +47,27 @@ class EnrollToken:
     used_at: str | None
 
 
+@dataclass(frozen=True)
+class StoredBundle:
+    node_id: int
+    version: int
+    sha256: str
+    body: bytes
+    signature: str
+    content_hash: str
+    key_id: str
+    created_at: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class External:
+    node_id: int
+    name: str
+    spec: dict[str, Any]
+    secrets: bytes | None
+
+
 def utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

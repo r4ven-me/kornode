@@ -17,11 +17,13 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from kornode.bundle.errors import BundleError
 from kornode.config.models import AppConfig
 from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.models import EnrollToken, Node
 from kornode.registry.repository import Registry, RegistryNotFound
 from kornode.services.audit import AuditService
+from kornode.services.bundle import BundleService
 from kornode.services.cert_pin import certificate_file_pin
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandRunner
@@ -90,6 +92,7 @@ class EnrollmentService:
         self._reload_ocserv = reload_ocserv
         self.hub = hub or f"{config.server.cn}:{config.server.port}"
         self._clock = clock or (lambda: datetime.now(UTC))
+        self.bundles = BundleService(config, clock=self._clock)
 
     # ------------------------------------------------------------------ tokens
 
@@ -211,6 +214,12 @@ class EnrollmentService:
                     seal_pubkey=seal_pubkey,
                     last_seen=_iso(now),
                 )
+                try:
+                    # Its prefixes now reach every other active agent too.
+                    bundles = self.bundles.compile_all(registry, f"enroll node {node.id}")
+                    first_bundle = bundles[node.id]
+                except BundleError as exc:
+                    raise EnrollmentError(500, "internal", f"bundle: {exc.message}") from exc
         # The registry is already committed and the token spent, so a failure
         # below must not turn into a 500 the agent cannot retry. The group
         # files are re-synced by maintain(); the enroll user expires anyway.
@@ -233,9 +242,12 @@ class EnrollmentService:
             "cert_pem": issued["cert_pem"],
             "ca_pem": self.config.cert_path("ca.crt").read_text(encoding="utf-8"),
             "node_id": node.id,
-            "signing_keys": [],
-            # P3-04 replaces this placeholder with the first signed bundle.
-            "bundle": None,
+            "signing_keys": self.bundles.signing_keys(),
+            "bundle": {
+                "version": first_bundle.version,
+                "body_b64": base64.b64encode(first_bundle.body).decode("ascii"),
+                "signature": first_bundle.signature,
+            },
         }
 
     def renew(self, node_id: int, csr_pem: str) -> dict[str, Any]:
@@ -294,6 +306,24 @@ class EnrollmentService:
             except Exception as exc:  # every step must run; failures are reported below
                 failures.append(f"{step}: {exc}")
 
+        def recompile() -> None:
+            # Released prefixes change other agents' bundles. A refused bundle
+            # must never block the revocation itself, so this is a late step.
+            # One transaction per node: a refused bundle leaves the others fresh.
+            problems: list[str] = []
+            with self._registry() as fresh:
+                for other in fresh.list_nodes():
+                    if other.state != "active" or other.seal_pubkey is None:
+                        continue
+                    try:
+                        with transaction(fresh.conn):
+                            self.bundles.compile_node(fresh, other.id, f"revoke node {node_id}")
+                    except BundleError as exc:
+                        problems.append(f"node {other.id}: {exc.message}")
+            if problems:
+                raise RuntimeError("; ".join(problems))
+
+        attempt("recompile bundles", recompile)
         for item in tokens:
             attempt("enroll user", partial(self._drop_enroll_user, item.ocserv_user))
         certs = sorted((self.certificates.cert_dir / "agents").glob(f"agent-{node_id}-*.crt"))

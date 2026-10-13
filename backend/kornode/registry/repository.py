@@ -9,10 +9,12 @@ from typing import Any, cast
 from kornode.registry.db import RegistryError, transaction
 from kornode.registry.models import (
     EnrollToken,
+    External,
     Node,
     NodePrefix,
     NodeState,
     PrefixKind,
+    StoredBundle,
     decode_json_array,
     decode_json_object,
     encode_json,
@@ -235,6 +237,102 @@ class Registry:
                 "DELETE FROM enroll_tokens WHERE id = ?", [(item,) for item in token_ids]
             )
 
+    def add_bundle(
+        self,
+        *,
+        node_id: int,
+        version: int,
+        body: bytes,
+        signature: str,
+        sha256: str,
+        content_hash: str,
+        key_id: str,
+        reason: str,
+    ) -> StoredBundle:
+        try:
+            with self._write():
+                self.conn.execute(
+                    """
+                    INSERT INTO bundles (
+                      node_id, version, sha256, body, signature, content_hash,
+                      key_id, created_at, reason
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        node_id,
+                        version,
+                        sha256,
+                        body,
+                        signature,
+                        content_hash,
+                        key_id,
+                        utc_now_iso(),
+                        reason,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise RegistryConflict(str(exc)) from exc
+        return self.get_bundle(node_id, version)
+
+    def get_bundle(self, node_id: int, version: int) -> StoredBundle:
+        row = self.conn.execute(
+            "SELECT * FROM bundles WHERE node_id = ? AND version = ?", (node_id, version)
+        ).fetchone()
+        if row is None:
+            raise RegistryNotFound(f"bundle {node_id}/{version} not found")
+        return _bundle_from_row(row)
+
+    def latest_bundle(self, node_id: int) -> StoredBundle | None:
+        row = self.conn.execute(
+            "SELECT * FROM bundles WHERE node_id = ? ORDER BY version DESC LIMIT 1", (node_id,)
+        ).fetchone()
+        return None if row is None else _bundle_from_row(row)
+
+    def list_bundles(self, node_id: int) -> list[StoredBundle]:
+        rows = self.conn.execute(
+            "SELECT * FROM bundles WHERE node_id = ? ORDER BY version DESC", (node_id,)
+        ).fetchall()
+        return [_bundle_from_row(row) for row in rows]
+
+    def prune_bundles(self, node_id: int, keep: int) -> int:
+        with self._write():
+            cursor = self.conn.execute(
+                """
+                DELETE FROM bundles WHERE node_id = ? AND version NOT IN (
+                  SELECT version FROM bundles WHERE node_id = ? ORDER BY version DESC LIMIT ?
+                )
+                """,
+                (node_id, node_id, keep),
+            )
+        return cursor.rowcount
+
+    def set_external(
+        self, node_id: int, name: str, spec: Mapping[str, Any], secrets: bytes | None = None
+    ) -> External:
+        self.get_node(node_id)
+        with self._write():
+            self.conn.execute(
+                "INSERT OR REPLACE INTO externals (node_id, name, spec, secrets)"
+                " VALUES (?, ?, ?, ?)",
+                (node_id, name, encode_json(dict(spec)), secrets),
+            )
+        return next(item for item in self.list_externals(node_id) if item.name == name)
+
+    def list_externals(self, node_id: int) -> list[External]:
+        rows = self.conn.execute(
+            "SELECT * FROM externals WHERE node_id = ? ORDER BY name", (node_id,)
+        ).fetchall()
+        return [
+            External(
+                node_id=int(row["node_id"]),
+                name=str(row["name"]),
+                spec=decode_json_object(str(row["spec"])),
+                secrets=cast(bytes | None, row["secrets"]),
+            )
+            for row in rows
+        ]
+
     @contextmanager
     def _write(self) -> Iterator[None]:
         context = nullcontext() if self.conn.in_transaction else transaction(self.conn)
@@ -261,6 +359,20 @@ def _node_from_row(row: sqlite3.Row) -> Node:
         last_seen=cast(str | None, row["last_seen"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+    )
+
+
+def _bundle_from_row(row: sqlite3.Row) -> StoredBundle:
+    return StoredBundle(
+        node_id=int(row["node_id"]),
+        version=int(row["version"]),
+        sha256=str(row["sha256"]),
+        body=bytes(row["body"]),
+        signature=str(row["signature"]),
+        content_hash=str(row["content_hash"]),
+        key_id=str(row["key_id"]),
+        created_at=str(row["created_at"]),
+        reason=str(row["reason"]),
     )
 
 

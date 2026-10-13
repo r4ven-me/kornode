@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added (P3-04: bundle compiler)
+
+- `kornode.bundle` (stdlib + pydantic + cryptography + `kornode.net`, AST-checked): bundle
+  models, canonical JSON, Ed25519 signing with domain separation, per-value X25519 secret
+  sealing bound to the JSON pointer, and the single validator used by hub and agent.
+- `BundleService`: compiles a signed bundle per agent inside the registry transaction,
+  monotonic versions above the agent's high-water mark, dedup by content hash, refuses to
+  store a bundle its own validator rejects. `enroll` now returns the first bundle and the
+  signing keys; `revoke_node` recompiles the remaining agents.
+- Registry: `bundles` and `externals` accessors, history pruning (20 per node). D-48.
+
 ### Added (P3-03: agent enrollment)
 
 - `EnrollmentService`: one-shot enrollment tokens (1 h, secret stored hashed) with a

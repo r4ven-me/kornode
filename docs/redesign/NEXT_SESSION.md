@@ -1,7 +1,7 @@
-# Prompt for the next session — P3-04 onwards (control plane and agent)
+# Prompt for the next session — P3-05 onwards (control plane and agent)
 
 Paste everything below the line into a fresh Claude Code session started in
-`/home/lans/Cloud/Projects/public/kornode`. **Start on Opus in plan mode** (P3-04 is non-trivial: canonical bundle, Ed25519 signing, sealed secrets, compile-in-transaction),
+`/home/lans/Cloud/Projects/public/kornode`. **Start on Opus in plan mode** (P3-05 is non-trivial: mTLS control API, long-poll, supervisor program),
 switch to Sonnet for the code once the plan is agreed.
 
 ---
@@ -34,7 +34,7 @@ switch to Sonnet for the code once the plan is agreed.
 ## Состояние (на момент передачи, 2026-10-13)
 Ветка `redesign/p3-03-enrollment` (стек: архитектурные доки P3-04/P3-06 → P3-01 → спайки → P3-02 → P3-03), **не запушена**, `main` локально опережает `origin/main` на 44 коммита (ветки P3 ещё не влиты в `main`).
 Дерево чистое. Последние коммиты: `de1e305` (P3-02), `a9d2919` (P3-03). `make check`: 793 passed, 37 skipped (netlab); `make parity` зелёный; netlab 37/37 на VM.
-Следующая ветка — `redesign/p3-04-bundle-compiler` от `redesign/p3-03-enrollment`.
+**P3-04 готова** (ветка `redesign/p3-04-bundle-compiler`, D-48, `make check` 828 passed / 37 skipped): пакет `kornode.bundle`, `services/bundle.py` (`BundleService.compile_node/compile_all` внутри транзакции вызывающего), первый пакет и `signing_keys` в ответе `enroll`; отзыв пересобирает пакеты остальных per-node. Валидатор требует `expected_node_id`. Мастер-ключ — `data_dir/control/master.key`. Следующая ветка — `redesign/p3-05-control-api` от `redesign/p3-04-bundle-compiler`. P3-05 должна: заменить константы `BUNDLE_HISTORY`/`MIN_AGENT_VERSION`/порт на `control.*`, вызывать `compile_node` при `since` > последней версии (recovery, D-37), вызывать `compile_all` при сохранении YAML хаба и на старте.
 
 Сделано в P3 (подробности — `DECISIONS.md`, `docs/spec/05–07`, `ROADMAP.md`):
 - Архитектура P3-04/P3-06 согласована: D-34…D-40 (подпись Ed25519, sealing секретов, монотонные версии, apply-with-confirm, `state.json` агента).
@@ -73,7 +73,7 @@ switch to Sonnet for the code once the plan is agreed.
    - После мутаций реестра (создание/активация/отзыв узла) вызывать `FabricGroupsService.sync()`; `EnrollmentService` уже делает это сам.
    - `cert_lifetime_days` пока константа `CERT_LIFETIME_DAYS = 90`, порт enroll — `DEFAULT_CONTROL_PORT`; P3-05 вводит секцию `control.*` и заменяет обе.
    - Хвост (низкий приоритет): CRL ocserv перечитывается по SIGHUP — проверено в netlab; при смене `crl` в конфиге рестарт не нужен.
-2. **P3-04 (следующая, Opus, режим плана)** — компилятор пакета, по согласованной архитектуре D-34…D-40 (`bundle/` без зависимостей от остального `kornode`, AST-тест импортов; компиляция в `Registry.transaction()`; поле `bundle` в ответе `enroll` заменяет заглушку) → P3-05 (control API, mTLS, long-poll, привязка к `10.99.0.1`) → **хвосты P2** (ниже) → P3-06/07 (агент и его CLI) → P3-08 (паритет: `korctl agent`, `/api/agents/*`, панель; `parity.yaml` обновляется в той же задаче) → P3-09 (backup/restore) → P3-10 (e2e на 4 VM).
+2. ~~P3-04~~ — готова. Дальше: **P3-05 (Opus, режим плана)** — компилятор пакета, по согласованной архитектуре D-34…D-40 (`bundle/` без зависимостей от остального `kornode`, AST-тест импортов; компиляция в `Registry.transaction()`; поле `bundle` в ответе `enroll` заменяет заглушку) → P3-05 (control API, mTLS, long-poll, привязка к `10.99.0.1`) → **хвосты P2** (ниже) → P3-06/07 (агент и его CLI) → P3-08 (паритет: `korctl agent`, `/api/agents/*`, панель; `parity.yaml` обновляется в той же задаче) → P3-09 (backup/restore) → P3-10 (e2e на 4 VM).
 3. Спайк S-03 проверяй в netlab до P4-01; S-05/S-06 уже закрыты фреймворком.
 Хвосты P2 (пуш не блокируют, закрыть до P3-06 — агент работает на том же `kornode.net` без центра):
 netlab-сценарий для D-32 «exit убран, пока соединение живо» (0 пакетов на uplink); окно второго писателя ядра на старте демона;

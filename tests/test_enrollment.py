@@ -13,8 +13,10 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.x509.oid import NameOID
 
+from kornode.bundle.validator import validate
 from kornode.config.models import AppConfig
 from kornode.registry.db import migrate, open_registry
 from kornode.registry.repository import Registry
@@ -200,7 +202,20 @@ def test_enroll_issues_cert_with_hub_chosen_subject(env: Env) -> None:
     ca = x509.load_pem_x509_certificate(result["ca_pem"].encode())
     cert.verify_directly_issued_by(ca)
     assert result["node_id"] == 3
-    assert result["bundle"] is None
+    bundle = result["bundle"]
+    assert bundle["version"] == 1
+    trusted = {
+        item["key_id"]: Ed25519PublicKey.from_public_bytes(base64.b64decode(item["pubkey_b64"]))
+        for item in result["signing_keys"]
+    }
+    checked = validate(
+        base64.b64decode(bundle["body_b64"]),
+        bundle["signature"],
+        trusted=trusted,
+        high_water_version=0,
+        agent_version="2.0.0", expected_node_id=3,
+    )
+    assert checked.bundle.node_id == 3
 
     node = env.registry.get_node(3)
     assert node.state == "active"
@@ -450,3 +465,16 @@ def test_malformed_token_id_is_403(env: Env) -> None:
             seal_pubkey_b64=base64.b64encode(b"\x00" * 32).decode(),
         )
     assert exc.value.status == 403
+
+
+def test_enroll_recompiles_other_active_agents(env: Env) -> None:
+    env.registry.create_node(
+        id=2, name="node2", state="active", seal_pubkey=b"\x05" * 32
+    )
+    env.service.bundles.compile_node(env.registry, 2, "setup")
+    before = env.registry.get_node(2).desired_version
+    env.registry.set_prefixes(3, [{"prefix": "192.168.3.0/24", "kind": "lan"}])
+
+    env.enroll(env.token())
+
+    assert env.registry.get_node(2).desired_version == before + 1
