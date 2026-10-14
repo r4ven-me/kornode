@@ -5,13 +5,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from kornode.tunnels.argv import DialSpec, openconnect_argv
 from kornode_agent.agent import Agent, _component_versions
@@ -93,7 +96,22 @@ def _enroll(root: Path, text: str, *, force: bool) -> int:
     return EXIT_OK
 
 
+def _routed_through_enroll(host: str) -> bool:
+    try:
+        out = subprocess.run(
+            ["ip", "-j", "route", "get", host], capture_output=True, text=True, timeout=5
+        ).stdout
+        return bool(json.loads(out)[0].get("dev") == ENROLL_INTERFACE)
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError):
+        return False
+
+
 async def _exchange(root: Path, token: EnrollToken) -> None:
+    # The request is sent without server verification: it must stay inside the
+    # pinned enroll session, never leak to the uplink.
+    host = urlsplit(token.control_url).hostname or ""
+    if not _routed_through_enroll(host):
+        raise RuntimeError(f"{host} is not routed through {ENROLL_INTERFACE}; refusing to enroll")
     client = ControlClient.for_enroll(token.control_url)
     try:
         await enroll(root, token, client)

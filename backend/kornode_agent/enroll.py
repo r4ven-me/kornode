@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -43,9 +43,9 @@ class EnrollToken:
     control_url: str
     token_id: str
     user: str
-    secret: str
+    secret: str = field(repr=False)
     expires: datetime
-    camouflage: str | None
+    camouflage: str | None = field(repr=False)
 
 
 def parse_token(text: str) -> EnrollToken:
