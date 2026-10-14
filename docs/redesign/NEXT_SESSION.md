@@ -8,7 +8,7 @@ switch to Sonnet for the code once the plan is agreed.
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык общения — русский, обращайся ко мне «Ivan».
 Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (P3), раздел «Дальнейшие действия» в `docs/redesign/PLAN.ru.md`,
-`docs/redesign/DECISIONS.md` (особенно D-29…D-44, S-01…S-04), `docs/spec/05`, `06`, `07`, `11`, `docs/spec/schemas/bundle.v1.schema.json`,
+`docs/redesign/DECISIONS.md` (особенно D-29…D-52, S-01…S-04), `docs/spec/05`, `06`, `07`, `11`, `docs/spec/schemas/bundle.v1.schema.json`,
 затем память Serena проекта `kornode`: `redesign/p2-hub-cutover`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Правила работы (важно, это про стоимость)
@@ -31,10 +31,10 @@ switch to Sonnet for the code once the plan is agreed.
 - **Скажи мне, когда переключиться** между Opus и Sonnet, не переключайся молча.
 - Ревью перед коммитом задач, трогающих аутентификацию/ядро: агенты `security-reviewer` и `code-reviewer` (в этом проекте правило «тесты → секьюрити → коммит» для старых проектов формально выключено, но здесь ревью окупилось — делай).
 
-## Состояние (на момент передачи, 2026-10-13)
-Ветка `redesign/p3-03-enrollment` (стек: архитектурные доки P3-04/P3-06 → P3-01 → спайки → P3-02 → P3-03), **не запушена**, `main` локально опережает `origin/main` на 44 коммита (ветки P3 ещё не влиты в `main`).
-Дерево чистое. Последние коммиты: `de1e305` (P3-02), `a9d2919` (P3-03). `make check`: 793 passed, 37 skipped (netlab); `make parity` зелёный; netlab 37/37 на VM.
-**P3-04 готова** (ветка `redesign/p3-04-bundle-compiler`, D-48, `make check` 828 passed / 37 skipped): пакет `kornode.bundle`, `services/bundle.py` (`BundleService.compile_node/compile_all` внутри транзакции вызывающего), первый пакет и `signing_keys` в ответе `enroll`; отзыв пересобирает пакеты остальных per-node. Валидатор требует `expected_node_id`. Мастер-ключ — `data_dir/control/master.key`. Следующая ветка — `redesign/p3-05-control-api` от `redesign/p3-04-bundle-compiler`. P3-05 должна: заменить константы `BUNDLE_HISTORY`/`MIN_AGENT_VERSION`/порт на `control.*`, вызывать `compile_node` при `since` > последней версии (recovery, D-37), вызывать `compile_all` при сохранении YAML хаба и на старте.
+## Состояние (на момент передачи, 2026-10-14)
+Ветка `redesign/p3-05-control-api` (стек: доки P3-04/P3-06 → P3-01 → спайки → P3-02 → P3-03 → P3-04 → P3-05), последний коммит `1a7a7c1`, **не запушена**; `main` локально опережает `origin/main` на 44 коммита (ветки P3 ещё не влиты). Дерево чистое.
+`make check`: 856 passed, 39 skipped (netlab), `make parity` зелёный, netlab 39/39 на VM. Следующая ветка — `redesign/p3-06-agent` от `redesign/p3-05-control-api`.
+**Не сделано по P3-05:** `security-reviewer` и `code-reviewer` упали на лимите сессии — прогнать на дифе `30f611c..1a7a7c1` до пуша (правило «тесты → секьюрити → коммит» для этого проекта формально выключено, но на auth-задачах ревью окупалось).
 
 Сделано в P3 (подробности — `DECISIONS.md`, `docs/spec/05–07`, `ROADMAP.md`):
 - Архитектура P3-04/P3-06 согласована: D-34…D-40 (подпись Ed25519, sealing секретов, монотонные версии, apply-with-confirm, `state.json` агента).
@@ -56,6 +56,14 @@ switch to Sonnet for the code once the plan is agreed.
   - `korctl registry maintain` в supervisor-цикле рядом со снапшотом (строка в `parity.yaml` с exempt); `cryptography` стала runtime-зависимостью.
   - Token-документ расширен полем `id` (spec 05 обновлена).
   - Netlab: `tests/netlab/test_p3_enrollment.py` — enroll по CSR → вход в `agents`; отозванный сертификат не подключается и живая сессия рвётся (ocserv подхватывает CRL по SIGHUP); удалённый из реестра агент отклоняется; спуфинг source. Hub-вызовы идут скриптом в namespace хаба (`_hub_call`), пока нет Control API.
+- **P3-05** (D-49…D-52) — `kornode.control`, процесс `python -m kornode.control` (supervisor `control-api`, при `control.enabled`), `10.99.0.1:<control.port>`:
+  - mTLS на одном порту: `CERT_OPTIONAL` + `PeerCertProtocol` (подкласс `H11Protocol`, кладёт проверенный DER в состояние соединения) + `MutualTLSMiddleware` (сертификат обязателен везде, кроме `POST /agent/v1/enroll`; CN `agent-<id>` и OU `agents`, CRL с кэшем по mtime — нет/устарел → 503, `nodes.state`). Серверный сертификат `certs/control.crt` (IP SAN = адрес хаба).
+  - Эндпоинты `/agent/v1`: `ping`, `bundle`, `poll` (long-poll, перепроверка реестра раз в 500 мс; `since` выше последней версии → `compile_node(force=True)` и рост `high_water_version`), `report` (≤256 КиБ, схема, `node_id` из сертификата), `commands` + `commands/<id>/result`, `renew` (node_id из CN), `enroll` (5/мин на адрес). Ошибки `{"error", "message"}`.
+  - Секция `control.*` (порт, long-poll, интервалы, `cert_lifetime_days`, `enroll_token_ttl_minutes`, `bundle_history`, `min_agent_version`, `signing_key`) заменила константы; сохранение YAML хаба (`ConfigService.write_rendered_files`) пересобирает пакеты; `compile_all` на старте control API.
+  - `kornode.net`: примитив `Address` (только добавление), `NodeFacts.service_address` → `10.99.0.1/32` на `lo`; `Kernel.read(..., address_devs)`.
+  - Реестр: `add_report` (последние 500), очередь команд (`enqueue/claim/finish`, at-most-once, истечение 10 мин), `raise_high_water`. Поверхности CLI/API/панель для команд — P3-08.
+  - **D-51:** `enroll(end_session=False)`; VPN-сессию enroll закрывает control API через 5 с после ответа (иначе `occtl disconnect` рвал туннель с ответом — сертификат терялся). Потерянный ответ лечится отзывом и пересозданием узла.
+  - Netlab (`test_p3_enrollment.py`, `test_p3_groups.py`): control API запускается в namespace хаба, enroll/poll/ping/403 `revoked`/401 — реальный HTTPS; `_hub_call` остался только для `create`, `token`, `revoke`, `delete`.
 - Netlab-хелперы для ocserv: `tests/netlab/ocserv_peers.py` (`Peer` — сырой openconnect-клиент с паролем или сертификатом, `issue_client_cert`, `read_env`), сценарии `tests/netlab/test_p3_groups.py` (на отрендеренном конфиге) и `test_spike_p3_groups.py`.
 
 Решение о пуше (одним PR в `origin/main`, чтобы CI-netlab впервые прошёл на GitHub-раннере, либо напрямую в `main`) — за мной, не предлагай и не делай сам.
@@ -65,15 +73,10 @@ switch to Sonnet for the code once the plan is agreed.
   линтеры — `~/.local/bin/ruff`, `~/.local/bin/mypy`. `ruff format --check` на всём репо красный из-за старых файлов — форматируй только то, что меняешь.
 
 ## Порядок работы по P3
-1. ~~P3-03~~ — **готова** (см. выше). Переносы в P3-05/P3-08:
-   - `renew` не аутентифицирует вызывающего: в P3-05 `node_id` брать из CN клиентского сертификата mTLS, не из тела запроса.
-   - Удаление узла только через `EnrollmentService.revoke_node` (ключи SQLite переиспользуются: неотозванный `agent-N` подошёл бы новому узлу с тем же id); `Registry.delete_node` из API не вызывать напрямую.
-   - HTTP-обработчики `/agent/v1/enroll` и `/agent/v1/renew` — тонкие обёртки над сервисом; `EnrollmentError.status/code` → ответ `{"error": code, "message": ...}` по spec 05; rate limit 5/мин на адрес — в обвязке.
-   - Адрес хаба `10.99.0.1` на dummy-интерфейсе в netlab всё ещё ставится руками — объект желаемого состояния `kornode.net`, P3-05.
-   - После мутаций реестра (создание/активация/отзыв узла) вызывать `FabricGroupsService.sync()`; `EnrollmentService` уже делает это сам.
-   - `cert_lifetime_days` пока константа `CERT_LIFETIME_DAYS = 90`, порт enroll — `DEFAULT_CONTROL_PORT`; P3-05 вводит секцию `control.*` и заменяет обе.
-   - Хвост (низкий приоритет): CRL ocserv перечитывается по SIGHUP — проверено в netlab; при смене `crl` в конфиге рестарт не нужен.
-2. ~~P3-04~~ — готова. Дальше: **P3-05 (Opus, режим плана)** — компилятор пакета, по согласованной архитектуре D-34…D-40 (`bundle/` без зависимостей от остального `kornode`, AST-тест импортов; компиляция в `Registry.transaction()`; поле `bundle` в ответе `enroll` заменяет заглушку) → P3-05 (control API, mTLS, long-poll, привязка к `10.99.0.1`) → **хвосты P2** (ниже) → P3-06/07 (агент и его CLI) → P3-08 (паритет: `korctl agent`, `/api/agents/*`, панель; `parity.yaml` обновляется в той же задаче) → P3-09 (backup/restore) → P3-10 (e2e на 4 VM).
+1. ~~P3-03~~, ~~P3-04~~, ~~P3-05~~ — готовы. Переносы дальше:
+   - P3-08: `korctl agent ...`, `/api/agents/*`, панель; после мутаций реестра вызывать `FabricGroupsService.sync()` и `BundleService.compile_*`; `control.status` / `control.rotate_key` (spec 08); удаление узла только через `EnrollmentService.revoke_node`.
+   - Хвост (низкий приоритет): CRL ocserv перечитывается по SIGHUP — проверено в netlab.
+2. **P3-06 (Opus, режим плана)** — пакет `kornode_agent` + образ `kornode-agent`: enroll, run loop (`GET /agent/v1/poll`), кэш 3 версий, verify (`kornode.bundle.validator`), apply-with-confirm и откат, загрузка из кэша, отчёты (`POST /report`, 30 с), команды. Зависит только от `kornode.net` и `kornode.bundle` (AST-тест импортов). Затем P3-07 (CLI `kornode-agent`), P3-08, P3-09, P3-10.
 3. Спайк S-03 проверяй в netlab до P4-01; S-05/S-06 уже закрыты фреймворком.
 Хвосты P2 (пуш не блокируют, закрыть до P3-06 — агент работает на том же `kornode.net` без центра):
 netlab-сценарий для D-32 «exit убран, пока соединение живо» (0 пакетов на uplink); окно второго писателя ядра на старте демона;
@@ -83,10 +86,3 @@ netlab-сценарий для D-32 «exit убран, пока соединен
 ## Что нужно от меня для P3-10 (напомни заранее)
 4 VM (`hub`, `agent-a`, `agent-b`, `ext`), self-hosted runner на `hub` и инвентарь в secrets/variables репозитория. Runner лучше поднять заранее.
 Четвёртый адрес VM пока не определён (зарезервированы три: `192.168.122.173/.152/.237`); `192.168.122.30` — только netlab.
-
-
-## Обновление после P3-05 (2026-10-14)
-Ветка `redesign/p3-05-control-api` (от `redesign/p3-04-bundle-compiler`), D-49…D-52, не запушена. `make check`: 856 passed / 39 skipped, `make parity` зелёный, netlab 39/39 на VM.
-Сделано: `kornode.control` (mTLS `CERT_OPTIONAL` + middleware, long-poll, report, commands, renew, enroll), `control.*` в конфиге вместо констант, `10.99.0.1/32` на `lo` через reconciler (`Address`), reports/commands в реестре, supervisor-программа `control-api`, hub YAML save пересобирает пакеты.
-**Не сделано:** `security-reviewer`/`code-reviewer` упали на лимите сессии — прогнать на дифе P3-05 до пуша. Известное ограничение D-51: потерянный ответ enroll лечится отзывом и пересозданием узла.
-Следующее: P3-06 (пакет `kornode_agent`, образ, enroll/run loop/кэш/apply-with-confirm/rollback), клиент использует `GET /agent/v1/poll`.
