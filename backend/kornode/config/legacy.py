@@ -89,8 +89,12 @@ def legacy_policy(
                 f"p_{slug}", lists.profile_routes(profile), lists.profile_domains(profile)
             ):
                 egress.append(
-                    {"id": f"p-{slug}"[:31], "from": ["clients"], "to": {"set": f"p_{slug}"},
-                     "via": via}
+                    {
+                        "id": f"p-{slug}"[:31],
+                        "from": ["clients"],
+                        "to": {"set": f"p_{slug}"},
+                        "via": via,
+                    }
                 )
             if profile.route_host_enabled and add_set(
                 f"p_{slug}_host",
@@ -98,8 +102,12 @@ def legacy_policy(
                 lists.profile_host_domains(profile),
             ):
                 egress.append(
-                    {"id": f"p-{slug}-host"[:31], "from": ["host"],
-                     "to": {"set": f"p_{slug}_host"}, "via": via}
+                    {
+                        "id": f"p-{slug}-host"[:31],
+                        "from": ["host"],
+                        "to": {"set": f"p_{slug}_host"},
+                        "via": via,
+                    }
                 )
 
     if active is None:
@@ -112,16 +120,11 @@ def legacy_policy(
         elif routing.client_policy == "split":
             if add_set("split", lists.split_routes(), lists.split_domains()):
                 egress.append(
-                    {"id": "clients-split", "from": ["clients"], "to": {"set": "split"},
-                     "via": via}
+                    {"id": "clients-split", "from": ["clients"], "to": {"set": "split"}, "via": via}
                 )
-            egress.append(
-                {"id": "clients-local", "from": ["clients"], "to": "any", "via": "local"}
-            )
+            egress.append({"id": "clients-local", "from": ["clients"], "to": "any", "via": "local"})
         else:
-            egress.append(
-                {"id": "clients-local", "from": ["clients"], "to": "any", "via": "local"}
-            )
+            egress.append({"id": "clients-local", "from": ["clients"], "to": "any", "via": "local"})
         if routing.host_policy == "full":
             egress.append({"id": "host-full", "from": ["host"], "to": "any", "via": via})
         elif routing.host_policy == "split" and add_set(

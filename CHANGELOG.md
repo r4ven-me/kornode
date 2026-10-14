@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-### Added (P3-06: agent, parts 1–2)
+### Added (P3-06: agent)
 
 - `kornode.tunnels` (stdlib only): shared openconnect argv builder (`--pfs`, `--no-dtls`),
   carrier resolution, certificate pin and the interface-only vpnc-script; `UpstreamService`
@@ -12,6 +12,9 @@
 - `kornode_agent`: apply-with-confirm state machine (stage, health window, rollback, blame:
   `failed` vs `deferred`, boot from cache, local rollback), `AgentNetInputs`, tunnel manager
   (carrier + reconciler pass before every dial, backoff with jitter, hub failover), health checks.
+- `kornode-agent enroll|run|version`, `Dockerfile.agent`, `compose.agent.yaml`; run loop (long-poll,
+  reports, commands, renewal, deferred retry). Netlab: real agent enrolls, confirms its bundle,
+  reports and boots from cache with the control API down. D-54.
 - Enroll token carries `control` (control API URL); `validate(revalidate=True)` for cached bundles.
 
 ### Added (P3-05: control API)

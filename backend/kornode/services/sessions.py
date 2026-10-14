@@ -101,13 +101,16 @@ class SessionService:
             for key, value in item.items()
             if value is not None
         }
-        username = self._first_json_value(
-            normalized,
-            "username",
-            "user",
-            "name",
-            "login",
-        ) or default_username
+        username = (
+            self._first_json_value(
+                normalized,
+                "username",
+                "user",
+                "name",
+                "login",
+            )
+            or default_username
+        )
         if not username:
             return None
         # device (e.g. "oc-client0") and the connection timestamp are
@@ -430,9 +433,7 @@ class SessionService:
         matches = _DURATION_TOKEN_RE.findall(text)
         if not matches:
             return None
-        return sum(
-            int(value) * _DURATION_UNIT_SECONDS[unit[0].lower()] for value, unit in matches
-        )
+        return sum(int(value) * _DURATION_UNIT_SECONDS[unit[0].lower()] for value, unit in matches)
 
     # ocserv reports conn_time/session_start_time of 0 when unknown; anything
     # before this cutoff (2000-01-01) is such a placeholder, not a real start.

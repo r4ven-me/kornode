@@ -308,8 +308,15 @@ class Kernel:
         rule = op.rule
         if isinstance(op, InsertForeignRule):
             argv = [
-                self.nft, "insert", "rule", rule.family, rule.table, rule.chain,
-                *rule.expr.split(), "comment", f'"{COMPAT_COMMENT}"',
+                self.nft,
+                "insert",
+                "rule",
+                rule.family,
+                rule.table,
+                rule.chain,
+                *rule.expr.split(),
+                "comment",
+                f'"{COMPAT_COMMENT}"',
             ]
         else:
             tagged = f'{rule.expr} comment "{COMPAT_COMMENT}"'
@@ -321,8 +328,14 @@ class Kernel:
             if not handles:
                 return
             argv = [
-                self.nft, "delete", "rule", rule.family, rule.table, rule.chain,
-                "handle", handles[0],
+                self.nft,
+                "delete",
+                "rule",
+                rule.family,
+                rule.table,
+                rule.chain,
+                "handle",
+                handles[0],
             ]
         result = subprocess.run(argv, capture_output=True, text=True, check=False)
         if result.returncode != 0:
@@ -365,10 +378,7 @@ def _element_texts(elem: Any) -> list[str]:
         return [f"{elem['prefix']['addr']}/{elem['prefix']['len']}"]
     if "range" in elem:
         start, end = (ipaddress.ip_address(value) for value in elem["range"])
-        return [
-            str(net)
-            for net in ipaddress.summarize_address_range(start, end)
-        ]
+        return [str(net) for net in ipaddress.summarize_address_range(start, end)]
     if "elem" in elem:
         return _element_texts(elem["elem"]["val"])
     raise ApplyError(f"unexpected nft element {elem!r}")

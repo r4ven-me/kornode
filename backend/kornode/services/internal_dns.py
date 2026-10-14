@@ -271,11 +271,7 @@ def parse_blocklist_text(text: str) -> BlocklistParseResult:
         matched = False
         for candidate in candidates:
             domain = candidate.strip().lower().rstrip(".")
-            if (
-                domain
-                and domain not in HOSTS_FILE_NOISE
-                and BLOCKLIST_DOMAIN_RE.match(domain)
-            ):
+            if domain and domain not in HOSTS_FILE_NOISE and BLOCKLIST_DOMAIN_RE.match(domain):
                 matched = True
                 if domain not in seen:
                     domains.append(domain)

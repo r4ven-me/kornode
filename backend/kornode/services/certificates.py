@@ -14,9 +14,7 @@ from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.users import UserService
 
-_CERT_PEM_RE = re.compile(
-    r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.DOTALL
-)
+_CERT_PEM_RE = re.compile(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.DOTALL)
 
 # Serializes the read-modify-write cycle on revoked.pem, the same hazard
 # users.py's _PASSWD_REWRITE_LOCK protects against for ocpasswd: two

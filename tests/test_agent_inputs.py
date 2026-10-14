@@ -14,7 +14,9 @@ from kornode_agent.tunnels import specs_for
 
 CONFIG = AgentConfig(
     node_id=3,
-    hub=HubConfig(host="hub.example", port=443, pin="pin-sha256:AAA", control_url="https://x"),
+    hub=HubConfig(
+        host="hub.example", port=443, pin="pin-sha256:AAA", control_url="https://10.99.0.1:8444"
+    ),
     fabric=FabricConfig(),
 )
 
@@ -122,3 +124,22 @@ def test_health_needs_tunnel_hub_ping_and_check_host(tmp_path: Path) -> None:
     assert result["fabric"] is True
     assert result["upstream:office"] is False and probes  # check_host failed through the mark
     assert AgentHealth(FakeTunnels({"fabric"}), lambda: False).checks(None) == {"fabric": False}
+
+
+def test_bootstrap_routes_the_hub_through_the_fabric_exit_only() -> None:
+    inputs = AgentNetInputs(
+        AgentConfig(
+            node_id=3,
+            hub=HubConfig(
+                host="hub.example",
+                port=443,
+                pin="pin-sha256:AAA",
+                control_url="https://10.99.0.1:8444",
+            ),
+        ),
+        FakeProbes({"oc-hub0": True}),
+        FakeCarriers(),
+    )
+    desired = inputs.desired()
+    fabric_routes = [r for r in desired.routes if getattr(r, "dev", None) == "oc-hub0"]
+    assert [r.dst for r in fabric_routes] == ["10.99.0.1/32"]

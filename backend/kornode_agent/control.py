@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import ssl
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -72,14 +73,29 @@ class ControlClient:
         *,
         ssl_context: ssl.SSLContext | bool,
         timeout: float = 10.0,
+        local_address: Callable[[], str | None] = lambda: None,
     ) -> None:
-        self._http = httpx.AsyncClient(
-            base_url=control_url.rstrip("/") + API, verify=ssl_context, timeout=timeout
-        )
+        self._base = control_url.rstrip("/") + API
+        self._ssl = ssl_context
+        self._timeout = timeout
+        self._local_address = local_address
+        self._bound: str | None = None
+        self._http = self._build(None)
+
+    def _build(self, address: str | None) -> httpx.AsyncClient:
+        # Traffic to the hub is marked into the fabric exit, which does not
+        # NAT: it must leave with the agent's fabric address as its source.
+        transport = httpx.AsyncHTTPTransport(verify=self._ssl, local_address=address)
+        return httpx.AsyncClient(base_url=self._base, transport=transport, timeout=self._timeout)
 
     @classmethod
-    def enrolled(cls, control_url: str, tls_dir: Path) -> ControlClient:
-        return cls(control_url, ssl_context=mtls_context(tls_dir))
+    def enrolled(
+        cls,
+        control_url: str,
+        tls_dir: Path,
+        local_address: Callable[[], str | None] = lambda: None,
+    ) -> ControlClient:
+        return cls(control_url, ssl_context=mtls_context(tls_dir), local_address=local_address)
 
     @classmethod
     def for_enroll(cls, control_url: str) -> ControlClient:
@@ -94,8 +110,17 @@ class ControlClient:
     async def _request(
         self, method: str, path: str, *, timeout: float | None = None, **kwargs: Any
     ) -> httpx.Response:
+        address = self._local_address()
+        if address != self._bound:
+            old, self._http, self._bound = self._http, self._build(address), address
+            await old.aclose()
         try:
-            response = await self._http.request(method, path, timeout=timeout, **kwargs)
+            response = await self._http.request(
+                method,
+                path,
+                timeout=httpx.Timeout(timeout or self._timeout, connect=self._timeout),
+                **kwargs,
+            )
         except httpx.HTTPError as exc:
             raise HubUnreachable(str(exc) or type(exc).__name__) from exc
         if response.status_code >= 400:

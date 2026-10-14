@@ -42,6 +42,7 @@ Repository = "https://github.com/r4ven-me/kornode"
 [project.scripts]
 korctl = "kornode.cli:app"
 kornode = "kornode.main:run"
+kornode-agent = "kornode_agent.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "backend"}
@@ -51,6 +52,7 @@ where = ["backend"]
 
 [tool.setuptools.package-data]
 kornode = ["py.typed", "registry/migrations/*.sql", "tunnels/vpnc-script-kornode"]
+kornode_agent = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

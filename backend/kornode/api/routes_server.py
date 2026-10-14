@@ -135,8 +135,7 @@ def otp_settings_from_payload(
             if "otp_smtp_test_recipient" in payload.model_fields_set
             else current.auth.otp.smtp_test_recipient
         ),
-        "telegram_bot_token": payload.otp_telegram_bot_token
-        or current.auth.otp.telegram_bot_token,
+        "telegram_bot_token": payload.otp_telegram_bot_token or current.auth.otp.telegram_bot_token,
         "telegram_chat_id": (
             payload.otp_telegram_chat_id
             if "otp_telegram_chat_id" in payload.model_fields_set

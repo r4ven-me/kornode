@@ -86,7 +86,7 @@ Done when:
 | P3-03 | Enrollment: token issue/revoke, one-time `enroll` ocserv users restricted to the control API, CSR signing with the existing CA (`certtool`), cert renewal, revocation via CRL. **Done (service layer, D-45…D-47; API/CLI/panel surfaces in P3-08).** |
 | P3-04 | Bundle compiler on the hub: per-agent JSON per `schemas/bundle.v1.schema.json`, Ed25519 signature, secret sealing, monotonic versions, stored history. **Done (D-48).** |
 | P3-05 | Control API service (`kornode.control`): separate supervisor program bound to the hub fabric address, mTLS, long-poll, reports, command queue. Runs with `web.enabled: false`. **Done (D-49…D-52).** |
-| P3-06 | Agent package `kornode_agent` + image `kornode-agent`: enroll, run loop, cache (3 versions), verify, apply-with-confirm, rollback, boot from cache, report, commands. Depends only on `kornode.net` + small deps. |
+| P3-06 | Agent package `kornode_agent` + image `kornode-agent`: enroll, run loop, cache (3 versions), verify, apply-with-confirm, rollback, boot from cache, report, commands. Depends only on `kornode.net` + small deps. **Done (D-53, D-54; CLI beyond enroll/run/version is P3-07).** |
 | P3-07 | Agent CLI `kornode-agent` (`docs/spec/06-agent.md`). |
 | P3-08 | Hub management surfaces with parity: `korctl agent ...`, `/api/agents/*`, panel "Agents" section (list, detail, enroll dialog, bundle history/diff, commands, revoke). |
 | P3-09 | `korctl hub backup|restore` (+ API + panel), encrypted archive, restore test. |

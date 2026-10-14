@@ -13,7 +13,7 @@ class DialSpec:
     port: int | str
     interface: str
     pid_file: Path
-    script: Path
+    script: Path | None = None  # None: the distribution vpnc-script (enroll session only)
     auth_type: Literal["password", "cert", "p12"] = "password"
     username: str | None = None
     password: str | None = field(default=None, repr=False)
@@ -53,10 +53,11 @@ def openconnect_argv(
         "--non-inter",
         "--background",
         f"--pid-file={spec.pid_file}",
+    ]
+    if spec.script is not None:
         # Interface-only script: the distribution vpnc-script would apply the
         # server's pushed routes/resolv.conf to this namespace.
-        f"--script={spec.script}",
-    ]
+        argv.append(f"--script={spec.script}")
     # openconnect dropped --no-cert-check: an untrusted certificate can only
     # be accepted by pinning it.
     pin = spec.server_cert_pin or accepted_pin

@@ -81,10 +81,12 @@ def create_app(
         )
         if config.web.tls:
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if (
-            request.url.path.startswith("/api/")
-            and request.method in {"POST", "PUT", "PATCH", "DELETE"}
-        ):
+        if request.url.path.startswith("/api/") and request.method in {
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+        }:
             # Best-effort, same tradeoff as UpstreamService._append_log: the
             # mutating action itself already fully executed and its
             # response is already built by the time this runs -- disk

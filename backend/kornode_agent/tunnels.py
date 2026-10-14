@@ -305,7 +305,8 @@ class TunnelManager:
     def _prepare(self, spec: TunnelSpec, dial: DialSpec) -> None:
         run = self.root / "run"
         run.mkdir(parents=True, exist_ok=True, mode=0o700)
-        atomic_write(dial.script, vpnc_script_source().read_bytes(), 0o755)
+        if dial.script is not None:
+            atomic_write(dial.script, vpnc_script_source().read_bytes(), 0o755)
         for path, content in spec.files:
             path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             atomic_write(path, content, 0o600)

@@ -103,3 +103,38 @@ def test_mtls_client_without_enrolled_ca_cannot_talk(hub: Hub, tmp_path: Path) -
             await dead.aclose()
 
     asyncio.run(run())
+
+
+def test_certificate_renewal_waits_for_two_thirds_of_the_lifetime(hub: Hub, tmp_path: Path) -> None:
+    from datetime import timedelta
+
+    from cryptography import x509
+
+    from kornode_agent.agent import Agent
+
+    root = tmp_path / "agent"
+    token = _token(hub)
+
+    async def run() -> None:
+        client = ControlClient.for_enroll(token.control_url)
+        try:
+            await enroll(root, token, client, now=hub.env.clock())
+        finally:
+            await client.aclose()
+        agent = Agent(root)
+        agent.config = load_config(root)
+        agent.client = ControlClient.enrolled(token.control_url, root / "tls")
+        try:
+            cert = x509.load_pem_x509_certificate((root / "tls" / "cert.pem").read_bytes())
+            assert not await agent.renew_if_due(now=cert.not_valid_before_utc + timedelta(days=1))
+            before = (root / "tls" / "cert.pem").read_bytes()
+            # Both sides must agree: the hub's (test) clock moves with the agent's.
+            hub.env.clock.now += timedelta(days=70)
+            due = hub.env.clock()
+            assert await agent.renew_if_due(now=due)
+            assert (root / "tls" / "cert.pem").read_bytes() != before
+            await agent.client.ping()  # the rebuilt client still authenticates
+        finally:
+            await agent.client.aclose()
+
+    asyncio.run(run())

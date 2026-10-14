@@ -1,0 +1,29 @@
+# kornode-agent image (spec 06): the agent only, none of the hub.
+# Build: docker build -f Dockerfile.agent -t kornode-agent .
+FROM python:3.12-slim-trixie
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    KORNODE_AGENT_DIR=/var/lib/kornode-agent
+
+# openconnect/nftables/iproute2 are the data plane; vpnc-scripts is used by the
+# short-lived enroll session; iputils-ping backs the upstream check_host probe.
+# ocserv/dnsmasq (roles access / DNS) arrive with P4.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates iproute2 iputils-ping nftables openconnect supervisor vpnc-scripts \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/kornode
+COPY pyproject.toml README.md ./
+COPY backend ./backend
+# The agent imports only kornode.net/bundle/tunnels and kornode_agent, so the
+# hub's dependencies (FastAPI, uvicorn, typer, jinja2, ...) are not installed.
+RUN pip install --no-cache-dir 'cryptography>=42,<46' 'httpx>=0.27,<1' 'pydantic>=2.7,<3' \
+        'pyroute2>=0.7,<1' 'pyyaml>=6,<7' \
+    && pip install --no-cache-dir --no-deps . \
+    && kornode-agent version
+
+COPY agent/supervisord.conf /etc/supervisor/conf.d/kornode-agent.conf
+VOLUME /var/lib/kornode-agent
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/kornode-agent.conf"]

@@ -1,7 +1,7 @@
-# Prompt for the next session — P3-06 onwards (agent)
+# Prompt for the next session — P3-07 onwards (agent CLI)
 
 Paste everything below the line into a fresh Claude Code session started in
-`/home/lans/Cloud/Projects/public/kornode`. **Start on Opus in plan mode** (P3-06 is non-trivial: agent run loop, apply-with-confirm, rollback),
+`/home/lans/Cloud/Projects/public/kornode`. **Start on Opus in plan mode** (P3-07…P3-08),
 switch to Sonnet for the code once the plan is agreed.
 
 ---
@@ -86,3 +86,15 @@ netlab-сценарий для D-32 «exit убран, пока соединен
 ## Что нужно от меня для P3-10 (напомни заранее)
 4 VM (`hub`, `agent-a`, `agent-b`, `ext`), self-hosted runner на `hub` и инвентарь в secrets/variables репозитория. Runner лучше поднять заранее.
 Четвёртый адрес VM пока не определён (зарезервированы три: `192.168.122.173/.152/.237`); `192.168.122.30` — только netlab.
+
+
+## Обновление после P3-06 (2026-10-14)
+Ветка `redesign/p3-06-agent` (3 коммита поверх `redesign/p3-05-control-api`), не запушена. Готово: `kornode.tunnels`
+(общий диалер), `kornode_agent` (store/trust, control-клиент, enroll, apply-with-confirm, inputs, tunnels, health, run loop,
+отчёты, команды, renew), `kornode-agent enroll|run|version`, `Dockerfile.agent`, `compose.agent.yaml`, netlab
+`test_p3_agent.py`. Решения D-53, D-54. Осталось: P3-07 — `status/explain/doctor/bundle show|history|rollback/diag/reconnect`
+(в агенте уже есть `Agent._explain/_diag/_reconnect`, `Applier.rollback_to`; нужен способ достучаться до работающего процесса —
+unix-сокет агента), затем P3-08…P3-10. Пробелы агента (D-54): `resolved`-домены, `accept_server_routes`, p12, doctor.
+Известно: `tests/test_enrollment.py::test_renew_only_after_two_thirds…` и `…revoke_node_crl…` зависят от настенных часов
+(падают после ~12:00 UTC: `certtool` считает срок от реального времени, тест — от фиксированного) — отдельная задача.
+Образ `Dockerfile.agent` собран/проверен по размеру только если это отмечено в отчёте PR.

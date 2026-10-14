@@ -154,9 +154,7 @@ class LogRotationService:
             self._rotate_file(path, keep=settings.keep_files)
             state[name] = now
             rotated.append(name)
-        state = {
-            name: stamp for name, stamp in state.items() if (log_dir / name).is_file()
-        }
+        state = {name: stamp for name, stamp in state.items() if (log_dir / name).is_file()}
         self._save_state(state)
         return rotated
 

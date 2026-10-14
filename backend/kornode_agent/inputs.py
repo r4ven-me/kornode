@@ -6,6 +6,7 @@ The agent's counterpart of the hub's ``HubNetInputs``; the provider handed to
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import json
 import subprocess
@@ -13,15 +14,24 @@ import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from kornode.bundle.validator import Validated
 from kornode.net.compile import NodeFacts, SourceFact, TunnelFact, compile_policy
-from kornode.net.model import EgressPolicy
+from kornode.net.model import EgressPolicy, Rule
 from kornode.net.state import DesiredState
 from kornode_agent.config import AgentConfig
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 FABRIC = "fabric"
+HUB_NODE_ID = 1
+# Bootstrap policy: the host reaches the hub (control API) through the fabric
+# tunnel and nothing else is marked, so nothing can leak.
+BOOTSTRAP_POLICY = EgressPolicy(
+    egress=(
+        Rule.model_validate({"id": "to-fabric", "from": ["host"], "to": "fabric", "via": "fabric"}),
+    )
+)
 
 
 class Probes(Protocol):
@@ -84,6 +94,13 @@ class SystemProbes:
         routes.sort(key=lambda route: int(route.get("metric", 0)))
         return str(routes[0]["dev"]) if routes else None
 
+    def address(self, interface: str) -> str | None:
+        for link in _run_json(["ip", "-j", "-4", "addr", "show", "dev", interface]):
+            for info in link.get("addr_info", []):
+                if info.get("family") == "inet" and info.get("local"):
+                    return str(info["local"])
+        return None
+
     def rp_filter(self) -> str | None:
         try:
             return (self.proc_sys / "net/ipv4/conf/all/rp_filter").read_text().strip()
@@ -119,8 +136,7 @@ class AgentNetInputs:
 
     def policy(self) -> EgressPolicy:
         active = self.active
-        # Bootstrap: an empty policy marks nothing, so nothing can leak.
-        return active.bundle.policy if active else EgressPolicy()
+        return active.bundle.policy if active else BOOTSTRAP_POLICY
 
     def facts(self) -> NodeFacts:
         active = self.active
@@ -137,6 +153,12 @@ class AgentNetInputs:
         upstreams: list[str] = []
         sources: dict[str, SourceFact] = {}
         node_prefixes: dict[int, tuple[Network, ...]] = {}
+        if not active:
+            with contextlib.suppress(ValueError):
+                hub_address = ipaddress.ip_address(
+                    urlsplit(self.config.hub.control_url).hostname or ""
+                )
+                node_prefixes[HUB_NODE_ID] = (ipaddress.ip_network(f"{hub_address}/32"),)
         client_pool: ipaddress.IPv4Network | None = None
         node_id = self.config.node_id
         if active:

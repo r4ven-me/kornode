@@ -74,7 +74,9 @@ def _classify_source(
         if _within(address, (source.cidr,)):
             return source.name, address
     others = tuple(
-        prefix for node, prefixes in facts.node_prefixes.items() if node != facts.node_id
+        prefix
+        for node, prefixes in facts.node_prefixes.items()
+        if node != facts.node_id
         for prefix in prefixes
     )
     if _within(address, others):
@@ -111,8 +113,10 @@ def _route_for(exit_: Exit, compiled: Compiled, dst: Address) -> str:
             continue
         if route.type == "unicast":
             return f"{route.dst} dev {route.dev}"
-        return f"{route.type} {route.dst} (kill-switch)" if route.type == "unreachable" else (
-            f"{route.type} {route.dst}"
+        return (
+            f"{route.type} {route.dst} (kill-switch)"
+            if route.type == "unreachable"
+            else (f"{route.type} {route.dst}")
         )
     return "no route"
 

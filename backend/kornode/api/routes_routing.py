@@ -157,9 +157,7 @@ def host_routes_status(request: Request) -> dict[str, object]:
 
 
 @router.post("/host-routes/refresh")
-def refresh_host_routes_url(
-    request: Request, payload: ListUrlRefreshRequest
-) -> dict[str, object]:
+def refresh_host_routes_url(request: Request, payload: ListUrlRefreshRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     if payload.url not in config.routing.host_split.routes_urls:
         raise HTTPException(
@@ -206,9 +204,7 @@ def host_domains_status(request: Request) -> dict[str, object]:
 
 
 @router.post("/host-domains/refresh")
-def refresh_host_domains_url(
-    request: Request, payload: ListUrlRefreshRequest
-) -> dict[str, object]:
+def refresh_host_domains_url(request: Request, payload: ListUrlRefreshRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     if payload.url not in config.routing.host_split.domains_urls:
         raise HTTPException(
