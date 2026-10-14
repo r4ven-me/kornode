@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -16,12 +16,12 @@ class DialSpec:
     script: Path
     auth_type: Literal["password", "cert", "p12"] = "password"
     username: str | None = None
-    password: str | None = None
+    password: str | None = field(default=None, repr=False)
     server_cert_pin: str | None = None
     cert_path: Path | None = None
     key_path: Path | None = None
-    cert_pass: str | None = None
-    camouflage_secret: str | None = None
+    cert_pass: str | None = field(default=None, repr=False)
+    camouflage_secret: str | None = field(default=None, repr=False)
     transport: Literal["tcp", "auto"] = "auto"
     pfs: bool = False
 

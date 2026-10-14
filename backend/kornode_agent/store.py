@@ -225,6 +225,8 @@ class Store:
         keep = set(state.confirmed[:KEEP_CONFIRMED]) | {state.current}
         if state.pending is not None:
             keep |= {state.pending.version, state.pending.previous}
+        if state.deferred is not None:
+            keep.add(state.deferred.version)
         for version in self.cached_versions():
             if version not in keep:
                 for suffix in ("json", "sig"):
