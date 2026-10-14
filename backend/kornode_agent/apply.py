@@ -80,6 +80,7 @@ class Applier:
         """Lifecycle "start": recover from a crash inside a confirm window,
         then bring up the newest cached bundle that still verifies."""
         state = self.store.load_state()
+        self.state = state
         if state.pending is not None:
             pending = state.pending
             state.failed[str(pending.version)] = "restart during confirm"
@@ -203,8 +204,19 @@ class Applier:
         state.pending = Pending(version=version, started_at=self._stamp(), previous=state.current)
         self.store.save_state(state)
 
-        self.runtime.activate(target)
-        convergence = self.runtime.converge()
+        try:
+            self.runtime.activate(target)
+            convergence = self.runtime.converge()
+        except Exception as exc:  # a broken apply must still end in a rollback
+            return self._rollback(
+                target,
+                previous,
+                ("apply",),
+                (),
+                raise_high_water=raise_high_water,
+                retry=retry,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
         window = (
             target.bundle.settings.confirm_window_seconds
             if target.bundle.settings and target.bundle.settings.confirm_window_seconds
@@ -295,10 +307,11 @@ class Applier:
         *,
         raise_high_water: bool,
         retry: bool,
+        detail: str | None = None,
     ) -> Outcome:
         state = self.state
         version = target.bundle.version
-        error = "health: " + ", ".join(failed)
+        error = detail or "health: " + ", ".join(failed)
         self.runtime.activate(previous)
         self.runtime.converge()
         state.pending = None

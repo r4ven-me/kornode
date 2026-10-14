@@ -106,7 +106,10 @@ class Trust(_Model):
     def add_active(self, pubkey_b64: str, *, pending_rotation: bool = False) -> None:
         raw = _decode_pubkey(pubkey_b64)
         kid = key_id(raw)
-        if any(k.key_id == kid for k in self.active):
+        # A retired key never comes back (e.g. via a locally rolled-back bundle).
+        if any(k.key_id == kid for k in self.active) or any(
+            r.key.key_id == kid for r in self.retired
+        ):
             return
         self.active.append(
             TrustKey(key_id=kid, pubkey_b64=pubkey_b64, pending_rotation=pending_rotation)

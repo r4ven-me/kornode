@@ -43,6 +43,7 @@ RENEW_FRACTION = 2 / 3
 EXPIRY_WARNING = 14 * 86400
 MAX_DIAG_BYTES = 5 * 1024 * 1024
 RESTART_EXIT_CODE = 75
+INVALID_BUNDLE_PAUSE = 30.0
 
 
 class AgentRuntime:
@@ -121,13 +122,15 @@ class Agent:
             on_event=self._on_event,
         )
         self._versions = await asyncio.to_thread(_component_versions)
+        # Boot first: a reconciler pass before the cached bundle is active would
+        # drop the kill-switches the kernel still holds (fail closed).
+        await asyncio.to_thread(self.applier.boot)
         for target in (
             self.reconciler.run_forever,
             lambda: watch_netlink(self.reconciler, self._thread_stop),
             self._tunnel_loop,
         ):
             threading.Thread(target=target, daemon=True).start()
-        await asyncio.to_thread(self.applier.boot)
         log.info("agent %d started at version %d", self.config.node_id, self.applier.state.current)
         tasks = [
             asyncio.create_task(coro)
@@ -185,7 +188,7 @@ class Agent:
         if not self.revoked:
             self.revoked = True
             log.error("the hub reports this node as revoked: tunnels are not redialled")
-            self.tunnels.suspend("fabric")
+            self.loop.run_in_executor(None, self.tunnels.suspend, "fabric")
 
     def _on_event(self, event: dict[str, Any]) -> None:
         if event["type"] == "rolled_back":
@@ -221,16 +224,31 @@ class Agent:
                 await asyncio.sleep(_jitter(backoff))
                 backoff = min(60.0, backoff * 2)
                 continue
+            except Exception:
+                log.exception("poll failed")
+                await asyncio.sleep(_jitter(backoff))
+                backoff = min(60.0, backoff * 2)
+                continue
             backoff = 1.0
-            if result.bundle is not None and result.bundle.version > self.applier.state.high_water:
-                async with self._apply_lock:
-                    outcome = await asyncio.to_thread(
-                        self.applier.apply_bundle, result.bundle.body, result.bundle.signature
-                    )
-                _log_outcome(outcome)
-                self._report_now.set()
-            for command in result.commands:
-                await self._execute(command)
+            try:
+                if (
+                    result.bundle is not None
+                    and result.bundle.version > self.applier.state.high_water
+                ):
+                    async with self._apply_lock:
+                        outcome = await asyncio.to_thread(
+                            self.applier.apply_bundle, result.bundle.body, result.bundle.signature
+                        )
+                    _log_outcome(outcome)
+                    self._report_now.set()
+                    if outcome.result == "invalid_bundle":
+                        # high-water did not move: the hub would resend it at once.
+                        await asyncio.sleep(INVALID_BUNDLE_PAUSE)
+                for command in result.commands:
+                    await self._execute(command)
+            except Exception:
+                log.exception("applying the poll result failed")
+                await asyncio.sleep(_jitter(backoff))
 
     async def _report_loop(self) -> None:
         while True:
@@ -240,7 +258,7 @@ class Agent:
             self._report_now.clear()
             try:
                 await self.client.report(await asyncio.to_thread(self.build_report))
-            except (ControlError, HubUnreachable) as exc:
+            except Exception as exc:
                 log.warning("report failed: %s", exc)
 
     def _report_interval(self) -> int:
@@ -280,7 +298,7 @@ class Agent:
             await asyncio.sleep(3600)
             try:
                 await self.renew_if_due()
-            except (ControlError, HubUnreachable) as exc:
+            except Exception as exc:
                 log.warning("certificate renewal failed: %s", exc)
 
     async def renew_if_due(self, now: datetime | None = None) -> bool:

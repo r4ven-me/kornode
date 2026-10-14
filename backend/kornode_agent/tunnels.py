@@ -9,15 +9,17 @@ liveness. It never touches routes or nft: that is the reconciler's alone.
 from __future__ import annotations
 
 import contextlib
+import functools
 import os
 import random
 import signal
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from kornode.bundle.validator import Validated
 from kornode.tunnels import vpnc_script_source
@@ -31,6 +33,17 @@ BACKOFF_MAX = 60.0
 DIAL_TIMEOUT = 60
 BACKGROUND_GRACE = 5.0
 DISCONNECT_GRACE = 5.0
+
+
+def _locked[F: Callable[..., Any]](method: F) -> F:
+    """tick (its own thread), the applier and commands all mutate tunnels."""
+
+    @functools.wraps(method)
+    def wrapper(self: TunnelManager, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
 
 
 class Runner(Protocol):
@@ -177,11 +190,13 @@ class TunnelManager:
         self._backoff: dict[str, float] = {}
         self._dial_index: dict[str, int] = {}
         self._suspended: set[str] = set()
+        self._lock = threading.RLock()
         self.errors: dict[str, str] = {}
         self.attached: dict[str, float] = {}
 
     # ---------------------------------------------------------- desired set
 
+    @_locked
     def set_desired(self, specs: dict[str, TunnelSpec]) -> None:
         """Stop what is gone or changed; new and changed tunnels dial on the next tick."""
         for name, old in list(self._specs.items()):
@@ -199,6 +214,7 @@ class TunnelManager:
     def carrier(self, exit_name: str) -> tuple[str, ...]:
         return self._carriers.get(exit_name, ())
 
+    @_locked
     def suspend(self, exit_name: str) -> None:
         """Stop redialing (the hub says this node is revoked)."""
         self._suspended.add(exit_name)
@@ -235,6 +251,7 @@ class TunnelManager:
 
     # --------------------------------------------------------------- loop
 
+    @_locked
     def tick(self) -> None:
         for name, spec in list(self._specs.items()):
             if name in self._suspended:
@@ -247,6 +264,7 @@ class TunnelManager:
                 continue
             self._connect(name, spec)
 
+    @_locked
     def reconnect(self, exit_name: str) -> bool:
         spec = self._specs.get(exit_name)
         if spec is None:
@@ -258,6 +276,7 @@ class TunnelManager:
         self._connect(exit_name, spec)
         return True
 
+    @_locked
     def stop_all(self) -> None:
         for name, spec in list(self._specs.items()):
             self._stop(name, spec)
@@ -279,7 +298,11 @@ class TunnelManager:
                 config_path = self.root / "run" / f"oc-{name.replace(':', '-')}.conf"
                 atomic_write(config_path, ("\n".join(lines) + "\n").encode(), 0o600)
             argv = openconnect_argv(dial, config_path=config_path)
-            stdin = f"{spec.password}\n" if spec.password else None
+            stdin = (
+                f"{spec.password or ''}\n"
+                if spec.password or dial.auth_type == "password"
+                else None
+            )
             code = self.runner.run(
                 argv,
                 input_text=stdin,

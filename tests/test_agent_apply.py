@@ -262,3 +262,20 @@ def test_local_rollback_uses_the_window_and_keeps_high_water(world: World) -> No
     state = world.store.load_state()
     assert (state.current, state.high_water) == (5, 6)
     assert world.applier.rollback_to(99).result == "skipped"
+
+
+def test_a_crash_while_activating_rolls_back_instead_of_wedging(world: World) -> None:
+    world.applier.apply_bundle(*world.bundle(5))
+    real = world.runtime.activate
+
+    def boom(validated: Validated | None) -> None:
+        if validated is not None and validated.bundle.version == 6:
+            raise OSError("disk full")
+        real(validated)
+
+    world.runtime.activate = boom  # type: ignore[method-assign]
+    outcome = world.applier.apply_bundle(*world.bundle(6))
+
+    assert outcome.result == "rolled_back" and "disk full" in (outcome.error or "")
+    state = world.store.load_state()
+    assert state.pending is None and state.current == 5

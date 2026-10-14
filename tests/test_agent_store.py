@@ -85,3 +85,14 @@ def test_trust_rejects_mismatched_key_id_and_empty_result() -> None:
         trust_from_enroll([])
     with pytest.raises(StoreError):
         Trust().add_active("not base64!")
+
+
+def test_a_retired_key_is_never_readded_by_an_old_bundle() -> None:
+    _, old_id, old_b64 = _pub()
+    _, new_id, new_b64 = _pub()
+    trust = trust_from_enroll([{"key_id": old_id, "pubkey_b64": old_b64}])
+    trust.confirmed(old_id, 5, new_b64)
+    trust.confirmed(new_id, 6, None)  # old key retired
+    trust.confirmed(old_id, 4, new_b64)  # local rollback to a bundle announcing it again
+    trust.add_active(old_b64)
+    assert [k.key_id for k in trust.active] == [new_id]
