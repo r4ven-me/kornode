@@ -9,7 +9,6 @@ import json
 import os
 import re
 import signal
-import socket
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -17,7 +16,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kornode.config.models import AppConfig, UpstreamProfileConfig
-from kornode.services.cert_pin import fetch_server_pin
 from kornode.services.command import CommandError, CommandResult, CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.net import NetApplyError, NetService
@@ -28,6 +26,12 @@ from kornode.services.upstream_pushed import (
     parse_sync_payload,
     parse_vpnc_environment,
 )
+from kornode.tunnels import vpnc_script_source
+from kornode.tunnels.argv import DialSpec
+from kornode.tunnels.argv import config_lines as tunnel_config_lines
+from kornode.tunnels.argv import openconnect_argv as build_openconnect_argv
+from kornode.tunnels.carrier import resolve_carrier_addresses
+from kornode.tunnels.pin import fetch_server_pin
 
 RESOLV_CONF = Path("/etc/resolv.conf")
 VPNC_MARKER = "#@VPNC_GENERATED@"
@@ -146,26 +150,7 @@ class UpstreamService:
         rather than raising -- callers must tolerate "nothing to exclude
         yet", not block a connection attempt on a DNS hiccup.
         """
-        server = profile.server
-        if not server:
-            return []
-        try:
-            ipaddress.ip_address(server)
-            return [server]
-        except ValueError:
-            pass
-        try:
-            infos = socket.getaddrinfo(server, None, family=socket.AF_INET)
-        except OSError:
-            return []
-        addresses: list[str] = []
-        seen: set[str] = set()
-        for info in infos:
-            addr = str(info[4][0])
-            if addr not in seen:
-                seen.add(addr)
-                addresses.append(addr)
-        return addresses
+        return resolve_carrier_addresses(profile.server)
 
     def install_carrier_exclusion(
         self, profile: UpstreamProfileConfig, *, dry_run: bool = False
@@ -426,59 +411,29 @@ class UpstreamService:
         presented, used for trusted_cert profiles without an explicit
         server_cert_pin (see _accepted_server_pin()).
         """
-        server = f"{profile.server}:{profile.port}"
-        # Everything secret goes through the 0600 --config file, never argv:
-        # /proc/<pid>/cmdline is readable by every local user for the tunnel's
-        # whole lifetime. The camouflage secret is part of the server URL
-        # (its query), so it moves into --server= in that file.
-        config_lines: list[str] = []
-        if profile.camouflage_secret:
-            config_lines.append(f"server={server}/?{profile.camouflage_secret}")
-        argv = [
-            "openconnect",
-            "--interface",
-            self.profile_interface(profile),
-            "--protocol=anyconnect",
-            "--non-inter",
-            "--background",
-            f"--pid-file={self._pid_file(profile)}",
-        ]
-        # The fwmark policy routing always owns tunnel egress now (no more
-        # hands-off "direct" mode); the distribution vpnc-script would
-        # additionally apply whatever the upstream pushes (default route,
-        # split routes, resolv.conf) to this namespace -- on
-        # network_mode: host that hijacks the host itself. Use the minimal
-        # interface-only script instead.
-        argv.append(f"--script={self._ensure_vpnc_script()}")
-        # openconnect dropped --no-cert-check; a certificate that isn't
-        # CA-trusted can only be accepted by pinning it.
-        pin = profile.server_cert_pin or accepted_pin
-        if pin:
-            argv.extend(["--servercert", pin])
-        # Username/password also apply to certificate profiles: an upstream
-        # ocserv with several `auth =` lines (e.g. certificate + plain)
-        # requires all of them, so it asks for a password after accepting
-        # the client certificate.
-        if profile.auth_type == "password" or profile.password:
-            argv.append("--passwd-on-stdin")
-        if profile.username:
-            argv.extend(["--user", profile.username])
+        cert_path: Path | None = None
+        key_path: Path | None = None
         if profile.auth_type in {"cert", "p12"}:
             cert_path, key_path = self._materialize_cert(profile)
-            if cert_path:
-                argv.extend(["--certificate", str(cert_path)])
-                if key_path:
-                    argv.extend(["--sslkey", str(key_path)])
-                if profile.cert_pass:
-                    # Never --key-password= on the command line.
-                    config_lines.append(f"key-password={profile.cert_pass}")
-        if config_lines:
-            argv.append(f"--config={self._materialize_openconnect_conf(profile, config_lines)}")
-        if not profile.camouflage_secret:
-            # With a camouflage secret the server comes from --server= in the
-            # config file instead of a positional argument.
-            argv.append(server)
-        return argv
+        assert profile.server is not None  # validator-required for kind="openconnect"
+        spec = DialSpec(
+            server=profile.server,
+            port=profile.port,
+            interface=self.profile_interface(profile),
+            pid_file=self._pid_file(profile),
+            script=self._ensure_vpnc_script(),
+            auth_type=profile.auth_type,
+            username=profile.username,
+            password=profile.password,
+            server_cert_pin=profile.server_cert_pin,
+            cert_path=cert_path,
+            key_path=key_path,
+            cert_pass=profile.cert_pass,
+            camouflage_secret=profile.camouflage_secret,
+        )
+        lines = tunnel_config_lines(spec)
+        config_path = self._materialize_openconnect_conf(profile, lines) if lines else None
+        return build_openconnect_argv(spec, accepted_pin=accepted_pin, config_path=config_path)
 
     def _materialize_openconnect_conf(
         self, profile: UpstreamProfileConfig, lines: list[str]
@@ -553,9 +508,7 @@ class UpstreamService:
         update propagates without manual steps; must be executable for
         openconnect to run it.
         """
-        from kornode.renderers.base import default_template_dir
-
-        source = default_template_dir() / "vpnc-script-kornode"
+        source = vpnc_script_source()
         target = self.config.system.generated_dir / "vpnc-script-kornode"
         self.files.ensure_dir(target.parent)
         self.files.atomic_write_text(target, source.read_text(encoding="utf-8"), mode=0o755)

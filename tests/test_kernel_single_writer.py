@@ -10,7 +10,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-BACKEND = Path(__file__).resolve().parents[1] / "backend" / "kornode"
+ROOT = Path(__file__).resolve().parents[1] / "backend"
+BACKEND = ROOT / "kornode"
+AGENT = ROOT / "kornode_agent"
 KERNEL = BACKEND / "net" / "kernel.py"
 
 MUTATIONS = {
@@ -28,12 +30,18 @@ NETLINK = re.compile(r"\b(?:pyroute2|IPRoute|NDB)\b")
 
 
 def _sources() -> list[Path]:
-    return sorted(path for path in BACKEND.rglob("*.py") if "__pycache__" not in path.parts)
+    # The agent is covered too: only kornode.net may touch the kernel (D-34).
+    return sorted(
+        path
+        for package in (BACKEND, AGENT)
+        for path in package.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
 
 
 def test_only_kernel_py_mutates_kernel_state() -> None:
     offenders = [
-        f"{path.relative_to(BACKEND)}: {name}"
+        f"{path.relative_to(ROOT)}: {name}"
         for path in _sources()
         if path != KERNEL
         for name, pattern in MUTATIONS.items()
@@ -45,7 +53,7 @@ def test_only_kernel_py_mutates_kernel_state() -> None:
 def test_netlink_is_only_used_inside_the_net_package() -> None:
     net_package = BACKEND / "net"
     offenders = [
-        str(path.relative_to(BACKEND))
+        str(path.relative_to(ROOT))
         for path in _sources()
         if net_package not in path.parents and NETLINK.search(path.read_text(encoding="utf-8"))
     ]

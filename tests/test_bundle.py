@@ -266,3 +266,25 @@ def test_pointer_escaping_binds_keys_with_slash_and_tilde() -> None:
 
     assert pointer == "/a~1b/c~0d"
     assert unseal(leaf, private, 3, pointer) == "value-1"
+
+
+def test_validator_revalidate_skips_only_the_replay_check() -> None:
+    key = Ed25519PrivateKey.generate()
+    trusted = {key_id(key.public_key()): key.public_key()}
+    doc = _example()
+    body, envelope = _signed(doc, key)
+    common = {
+        "trusted": trusted,
+        "high_water_version": doc["version"],
+        "agent_version": "2.0.0",
+        "expected_node_id": 3,
+    }
+    with pytest.raises(BundleError) as replay:
+        validate(body, envelope, **common)  # type: ignore[arg-type]
+    assert replay.value.code == "replay"
+    assert validate(body, envelope, revalidate=True, **common).bundle.version == doc["version"]  # type: ignore[arg-type]
+
+    other = Ed25519PrivateKey.generate()
+    with pytest.raises(BundleError) as bad:
+        validate(body, sign(body, other), revalidate=True, **common)  # type: ignore[arg-type]
+    assert bad.value.code == "bad_signature"

@@ -1976,7 +1976,7 @@ def test_explicit_server_cert_pin_wins_over_accepted_pin(tmp_path: Path) -> None
 def test_trusted_cert_accepts_the_certificate_the_server_presents(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kornode.services.cert_pin import CertificatePin
+    from kornode.tunnels.pin import CertificatePin
 
     fetched: list[tuple[str, int]] = []
 
@@ -2027,7 +2027,7 @@ def test_unreachable_server_certificate_is_a_command_error(
 def test_trusted_cert_follows_a_changed_server_key_and_logs_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kornode.services.cert_pin import CertificatePin
+    from kornode.tunnels.pin import CertificatePin
 
     presented = ["pin-sha256:FIRST"]
     monkeypatch.setattr(

@@ -23,7 +23,6 @@ from kornode.config.loader import (
 from kornode.config.models import AppConfig, GroupPolicyConfig, OidcProviderConfig
 from kornode.registry.snapshot import due as registry_snapshot_due
 from kornode.registry.snapshot import snapshot as registry_snapshot
-from kornode.services.cert_pin import fetch_server_pin
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
@@ -45,6 +44,7 @@ from kornode.services.server_certificates import ServerCertificateService
 from kornode.services.sessions import SessionService
 from kornode.services.upstream import UpstreamService
 from kornode.services.users import UserConfig, UserService
+from kornode.tunnels.pin import fetch_server_pin
 
 app = typer.Typer(no_args_is_help=True, help="Korvus Node management")
 config_app = typer.Typer(help="Validate and render configuration")

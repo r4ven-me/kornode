@@ -19,6 +19,7 @@ dependencies = [
   "pyroute2>=0.7,<1",
   "python-multipart>=0.0.9,<1",
   "python-dotenv>=1.0,<2",
+  "httpx>=0.27,<1",
   "pyyaml>=6,<7",
   "typer>=0.12,<1",
   "uvicorn[standard]>=0.30,<1",
@@ -49,7 +50,7 @@ package-dir = {"" = "backend"}
 where = ["backend"]
 
 [tool.setuptools.package-data]
-kornode = ["py.typed", "registry/migrations/*.sql"]
+kornode = ["py.typed", "registry/migrations/*.sql", "tunnels/vpnc-script-kornode"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

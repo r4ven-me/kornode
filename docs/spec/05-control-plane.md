@@ -124,7 +124,7 @@ when the compiled content changed.
    ```json
    {"v":1,"hub":"vpn.example.com:443","pin":"pin-sha256:…","id":"k2f9a1b0",
     "user":"enroll-3-k2f9a1b0","secret":"<32 random bytes b64>",
-    "camouflage":"<optional>","exp":"2026-10-11T16:41:00Z"}
+    "control":"https://10.99.0.1:8444","camouflage":"<optional>","exp":"2026-10-11T16:41:00Z"}
    ```
    `id` is the token id (also the suffix of `user`); a node has one live token,
    issuing a new one revokes the previous one. Hub stores `sha256(secret)` and

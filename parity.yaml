@@ -436,7 +436,7 @@ capabilities:
     ui: upstream.profile.disconnect
     exempt: "v1 gap: panel/API can disconnect a named profile directly; CLI uses upstream disconnect with an argument."
   - id: upstream.fetch_pin
-    service: kornode.services.cert_pin.fetch_server_pin
+    service: kornode.tunnels.pin.fetch_server_pin
     cli: "upstream fetch-pin"
     api: "POST /api/upstream/fetch-pin"
     ui: upstream.fetch_pin

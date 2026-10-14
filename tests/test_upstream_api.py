@@ -797,7 +797,7 @@ def test_fetch_pin_returns_the_presented_certificate_pin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kornode.api import routes_upstream
-    from kornode.services.cert_pin import CertificatePin
+    from kornode.tunnels.pin import CertificatePin
 
     calls: list[tuple[str, int]] = []
 

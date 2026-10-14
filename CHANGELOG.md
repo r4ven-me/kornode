@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added (P3-06: agent, part 1)
+
+- `kornode.tunnels` (stdlib only): shared openconnect argv builder (`--pfs`, `--no-dtls`),
+  carrier resolution, certificate pin and the interface-only vpnc-script; `UpstreamService`
+  uses it. `services.cert_pin` moved to `kornode.tunnels.pin`.
+- `kornode_agent`: atomic store (`state.json`, `trust.json` with key rotation, bundle cache),
+  `agent.yaml`, httpx control client (mTLS, pinned CA), enrollment. D-53.
+- Enroll token carries `control` (control API URL); `validate(revalidate=True)` for cached bundles.
+
 ### Added (P3-05: control API)
 
 - `kornode.control`: agent-facing API on the hub fabric address (`python -m kornode.control`,

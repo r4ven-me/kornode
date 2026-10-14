@@ -64,9 +64,14 @@ def validate(
     agent_version: str,
     expected_node_id: int,
     seal_private_key: X25519PrivateKey | None = None,
+    revalidate: bool = False,
 ) -> Validated:
     """Spec 05 "Validator". The hub passes no `seal_private_key`: it cannot
-    unseal (only the agent holds the key), so step 4 checks structure only."""
+    unseal (only the agent holds the key), so step 4 checks structure only.
+
+    `revalidate` re-checks an already accepted (cached) bundle, whose version
+    is by definition not above the high-water mark: the replay check is
+    skipped, everything else runs."""
     if len(body) > MAX_BODY_BYTES:
         raise BundleError("too_large", "bundle body exceeds 1 MiB")
     signer = verify(body, envelope, trusted)
@@ -77,7 +82,7 @@ def validate(
         raise BundleError("malformed", f"bundle does not match the schema: {exc}") from exc
     if bundle.node_id != expected_node_id:
         raise BundleError("wrong_node", f"bundle is for node {bundle.node_id}")
-    if bundle.version <= high_water_version:
+    if not revalidate and bundle.version <= high_water_version:
         raise BundleError(
             "replay", f"version {bundle.version} is not above high-water {high_water_version}"
         )

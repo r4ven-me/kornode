@@ -34,7 +34,7 @@ from kornode.config.models import AppConfig
 from kornode.net.addressing import derive_addresses
 from kornode.registry.models import Node, StoredBundle
 from kornode.registry.repository import Registry
-from kornode.services.cert_pin import certificate_file_pin
+from kornode.tunnels.pin import certificate_file_pin
 
 HUB_NODE_ID = 1
 _FABRIC_RULE_ID = "to-fabric"
@@ -64,6 +64,18 @@ class BundleService:
 
     def signing_key(self) -> Ed25519PrivateKey:
         return load_or_create_signing_key(self._signing_path())
+
+    def control_url(self) -> str:
+        """The control API as an agent reaches it: the hub's fabric address."""
+        fabric = self.config.fabric
+        hub = derive_addresses(
+            HUB_NODE_ID,
+            fabric_cidr=fabric.cidr,
+            client_pool=fabric.client_pool,
+            source_pool=fabric.source_pool,
+            domain=fabric.domain,
+        )
+        return f"https://{hub.fabric_address}:{self.config.control.port}"
 
     def signing_keys(self) -> list[dict[str, str]]:
         public = self.signing_key().public_key()
@@ -233,7 +245,7 @@ class BundleService:
                     "host": self.config.server.cn,
                     "port": self.config.server.port,
                     "pin": self._pin(),
-                    "control_url": f"https://{hub.fabric_address}:{self.config.control.port}",
+                    "control_url": self.control_url(),
                 }
             ],
             "node": node_info,

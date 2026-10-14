@@ -9,12 +9,12 @@ from kornode.api.auth import require_admin
 from kornode.api.routes_config import apply_config_patch
 from kornode.api.routes_routing import ListUrlRefreshRequest
 from kornode.config.models import AppConfig, UpstreamProfileConfig
-from kornode.services.cert_pin import fetch_server_pin
 from kornode.services.config import ConfigService
 from kornode.services.external_lists import ExternalListFetchResult
 from kornode.services.routing import RoutingService
 from kornode.services.secrets import is_secret_key
 from kornode.services.upstream import UpstreamService
+from kornode.tunnels.pin import fetch_server_pin
 
 # cert_file_base64/key_file_base64 are base64-encoded certificate/key
 # material pasted by the admin -- their names don't match any of

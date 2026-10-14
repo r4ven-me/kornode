@@ -24,13 +24,13 @@ from kornode.registry.models import EnrollToken, Node
 from kornode.registry.repository import Registry, RegistryNotFound
 from kornode.services.audit import AuditService
 from kornode.services.bundle import BundleService
-from kornode.services.cert_pin import certificate_file_pin
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandRunner
 from kornode.services.fabric_groups import FabricGroupsService
 from kornode.services.files import FileManager
 from kornode.services.sessions import SessionService
 from kornode.services.users import UserService
+from kornode.tunnels.pin import certificate_file_pin
 
 RENEW_AFTER_FRACTION = 2 / 3
 RENEW_WARNING_DAYS = 14
@@ -132,6 +132,7 @@ class EnrollmentService:
             "user": username,
             "secret": secret,
             "exp": _iso(expires),
+            "control": self.bundles.control_url(),
         }
         if camouflage:
             document["camouflage"] = camouflage
