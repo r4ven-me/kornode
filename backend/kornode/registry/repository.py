@@ -1,23 +1,29 @@
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from kornode.registry.db import RegistryError, transaction
 from kornode.registry.models import (
+    Command,
+    CommandState,
     EnrollToken,
     External,
     Node,
     NodePrefix,
     NodeState,
     PrefixKind,
+    Report,
     StoredBundle,
     decode_json_array,
     decode_json_object,
     encode_json,
+    iso_time,
     utc_now_iso,
 )
 
@@ -333,6 +339,166 @@ class Registry:
             for row in rows
         ]
 
+    # -- reports, liveness ---------------------------------------------------
+
+    def add_report(
+        self,
+        node_id: int,
+        body: Mapping[str, Any],
+        *,
+        keep: int = 500,
+        received_at: str | None = None,
+    ) -> Report:
+        stamp = received_at or utc_now_iso()
+        with self._write():
+            self.conn.execute(
+                "INSERT INTO reports (node_id, received_at, body) VALUES (?, ?, ?)",
+                (node_id, stamp, encode_json(body)),
+            )
+            self.conn.execute(
+                """
+                DELETE FROM reports WHERE node_id = ? AND rowid NOT IN (
+                  SELECT rowid FROM reports WHERE node_id = ? ORDER BY rowid DESC LIMIT ?
+                )
+                """,
+                (node_id, node_id, keep),
+            )
+        return Report(node_id, stamp, dict(body))
+
+    def list_reports(self, node_id: int, limit: int = 50) -> list[Report]:
+        rows = self.conn.execute(
+            "SELECT * FROM reports WHERE node_id = ? ORDER BY rowid DESC LIMIT ?",
+            (node_id, limit),
+        ).fetchall()
+        return [
+            Report(
+                int(row["node_id"]), str(row["received_at"]), decode_json_object(str(row["body"]))
+            )
+            for row in rows
+        ]
+
+    def touch_node(self, node_id: int, *, seen_at: str | None = None) -> None:
+        with self._write():
+            self.conn.execute(
+                "UPDATE nodes SET last_seen = ? WHERE id = ?", (seen_at or utc_now_iso(), node_id)
+            )
+
+    def raise_high_water(self, node_id: int, version: int) -> int:
+        """Monotonic: a lower value never replaces a higher one (D-37)."""
+        with self._write():
+            self.conn.execute(
+                "UPDATE nodes SET high_water_version = MAX(high_water_version, ?) WHERE id = ?",
+                (version, node_id),
+            )
+        return self.get_node(node_id).high_water_version
+
+    # -- commands ------------------------------------------------------------
+
+    def enqueue_command(
+        self,
+        node_id: int,
+        type_: str,
+        args: Mapping[str, Any] | None = None,
+        *,
+        ttl_seconds: int = 600,
+        now: datetime | None = None,
+    ) -> Command:
+        moment = now or datetime.now(UTC)
+        command_id = secrets.token_hex(8)
+        try:
+            with self._write():
+                self.conn.execute(
+                    """
+                    INSERT INTO commands (id, node_id, type, args, state, created_at, expires_at)
+                    VALUES (?, ?, ?, ?, 'queued', ?, ?)
+                    """,
+                    (
+                        command_id,
+                        node_id,
+                        type_,
+                        encode_json(dict(args or {})),
+                        iso_time(moment),
+                        iso_time(moment + timedelta(seconds=ttl_seconds)),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise RegistryConflict(str(exc)) from exc
+        return self.get_command(command_id)
+
+    def get_command(self, command_id: str) -> Command:
+        row = self.conn.execute("SELECT * FROM commands WHERE id = ?", (command_id,)).fetchone()
+        if row is None:
+            raise RegistryNotFound(f"command {command_id} not found")
+        return _command_from_row(row)
+
+    def list_commands(self, node_id: int, state: CommandState | None = None) -> list[Command]:
+        if state is None:
+            rows = self.conn.execute(
+                "SELECT * FROM commands WHERE node_id = ? ORDER BY created_at, id", (node_id,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM commands WHERE node_id = ? AND state = ? ORDER BY created_at, id",
+                (node_id, state),
+            ).fetchall()
+        return [_command_from_row(row) for row in rows]
+
+    def claim_commands(self, node_id: int, *, now: datetime | None = None) -> list[Command]:
+        """Expire stale queued commands, then mark the rest delivered (at most once)."""
+        stamp = iso_time(now or datetime.now(UTC))
+        with self._write():
+            self.conn.execute(
+                "UPDATE commands SET state = 'expired', finished_at = ? "
+                "WHERE node_id = ? AND state = 'queued' AND expires_at <= ?",
+                (stamp, node_id, stamp),
+            )
+            rows = self.conn.execute(
+                "SELECT id FROM commands WHERE node_id = ? AND state = 'queued' "
+                "ORDER BY created_at, id",
+                (node_id,),
+            ).fetchall()
+            ids = [str(row["id"]) for row in rows]
+            self.conn.executemany(
+                "UPDATE commands SET state = 'delivered', delivered_at = ? WHERE id = ?",
+                [(stamp, item) for item in ids],
+            )
+        return [self.get_command(item) for item in ids]
+
+    def has_queued_commands(self, node_id: int, *, now: datetime | None = None) -> bool:
+        stamp = iso_time(now or datetime.now(UTC))
+        row = self.conn.execute(
+            "SELECT 1 FROM commands "
+            "WHERE node_id = ? AND state = 'queued' AND expires_at > ? LIMIT 1",
+            (node_id, stamp),
+        ).fetchone()
+        return row is not None
+
+    def finish_command(
+        self,
+        node_id: int,
+        command_id: str,
+        *,
+        ok: bool,
+        result: Mapping[str, Any],
+        now: datetime | None = None,
+    ) -> Command:
+        """Only the addressed node can finish its own delivered command."""
+        with self._write():
+            cursor = self.conn.execute(
+                "UPDATE commands SET state = ?, finished_at = ?, result = ? "
+                "WHERE id = ? AND node_id = ? AND state = 'delivered'",
+                (
+                    "done" if ok else "failed",
+                    iso_time(now or datetime.now(UTC)),
+                    encode_json(dict(result)),
+                    command_id,
+                    node_id,
+                ),
+            )
+        if cursor.rowcount == 0:
+            raise RegistryNotFound(f"no delivered command {command_id} for node {node_id}")
+        return self.get_command(command_id)
+
     @contextmanager
     def _write(self) -> Iterator[None]:
         context = nullcontext() if self.conn.in_transaction else transaction(self.conn)
@@ -373,6 +539,22 @@ def _bundle_from_row(row: sqlite3.Row) -> StoredBundle:
         key_id=str(row["key_id"]),
         created_at=str(row["created_at"]),
         reason=str(row["reason"]),
+    )
+
+
+def _command_from_row(row: sqlite3.Row) -> Command:
+    result = cast(str | None, row["result"])
+    return Command(
+        id=str(row["id"]),
+        node_id=int(row["node_id"]),
+        type=str(row["type"]),
+        args=decode_json_object(str(row["args"])),
+        state=cast(CommandState, row["state"]),
+        created_at=str(row["created_at"]),
+        delivered_at=cast(str | None, row["delivered_at"]),
+        finished_at=cast(str | None, row["finished_at"]),
+        result=None if result is None else decode_json_object(result),
+        expires_at=str(row["expires_at"]),
     )
 
 

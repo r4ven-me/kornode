@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from kornode.net.state import (
     OWNED_NFT_TABLES,
     ActualState,
+    Address,
     DesiredState,
     ForeignNftRule,
     IpRule,
@@ -28,6 +29,11 @@ from kornode.net.state import (
 @dataclass(frozen=True, slots=True)
 class SetSysctl:
     sysctl: Sysctl
+
+
+@dataclass(frozen=True, slots=True)
+class AddAddress:
+    address: Address
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +91,7 @@ class DeleteForeignRule:
 
 Op = (
     SetSysctl
+    | AddAddress
     | AddRule
     | DelRule
     | ReplaceRoute
@@ -120,6 +127,9 @@ def diff(actual: ActualState, desired: DesiredState) -> Plan:
     for sysctl in sorted(desired.sysctls, key=lambda item: item.key):
         if actual_sysctls.get(sysctl.key) != sysctl.value:
             ops.append(SetSysctl(sysctl))
+
+    for address in sorted(desired.addresses - actual.addresses, key=repr):
+        ops.append(AddAddress(address))
 
     actual_routes = {route for route in actual.routes if owns_route(route)}
     for route in sorted(desired.routes - actual_routes, key=_route_sort_key):
@@ -173,6 +183,7 @@ def apply_to_state(state: ActualState, plan: Plan) -> ActualState:
     """What the kernel looks like after `plan` -- the same semantics the
     kernel adapter implements, used as the fake kernel in tests."""
     sysctls = {sysctl.key: sysctl for sysctl in state.sysctls}
+    addresses = set(state.addresses)
     rules = set(state.rules)
     routes = {route.key: route for route in state.routes}
     schema_hash = state.nft_schema_hash
@@ -182,6 +193,8 @@ def apply_to_state(state: ActualState, plan: Plan) -> ActualState:
     for op in plan.ops:
         if isinstance(op, SetSysctl):
             sysctls[op.sysctl.key] = op.sysctl
+        elif isinstance(op, AddAddress):
+            addresses.add(op.address)
         elif isinstance(op, AddRule):
             rules.add(op.rule)
         elif isinstance(op, DelRule):
@@ -210,6 +223,7 @@ def apply_to_state(state: ActualState, plan: Plan) -> ActualState:
     return replace(
         state,
         sysctls=frozenset(sysctls.values()),
+        addresses=frozenset(addresses),
         rules=frozenset(rules),
         routes=frozenset(routes.values()),
         nft_schema_hash=schema_hash,
@@ -247,6 +261,8 @@ def describe(op: Op) -> str:
     """One human-readable line per plan op (korctl net plan, the panel)."""
     if isinstance(op, SetSysctl):
         return f"sysctl {op.sysctl.key}={op.sysctl.value}"
+    if isinstance(op, AddAddress):
+        return f"add address {op.address.cidr} dev {op.address.dev}"
     if isinstance(op, AddRule):
         return f"add rule {_rule_text(op.rule)}"
     if isinstance(op, DelRule):

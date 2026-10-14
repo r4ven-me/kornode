@@ -310,3 +310,35 @@ def test_routing_main_interface_accepts_auto_and_an_ifname(tmp_path: Path) -> No
 
     assert load_config(config).routing.main_interface == "ens3"
     assert load_config(tmp_path / "missing.yaml").routing.main_interface == "auto"
+
+
+def test_control_defaults_and_signing_key_follows_data_dir(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"system": {"data_dir": str(tmp_path / "data")}},
+        environ={},
+    )
+
+    assert config.control.enabled is False
+    assert config.control.port == 8444
+    assert config.control.signing_key == tmp_path / "data" / "control" / "signing.ed25519"
+
+
+def test_control_requires_fabric(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="control.enabled requires fabric.enabled"):
+        load_config(
+            tmp_path / "missing.yaml",
+            cli_overrides={"control": {"enabled": True}},
+            environ={},
+        )
+
+
+def test_control_enabled_with_fabric(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"fabric": {"enabled": True}, "control": {"enabled": True, "port": 9444}},
+        environ={},
+    )
+
+    assert config.control.enabled is True
+    assert config.control.port == 9444

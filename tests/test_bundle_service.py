@@ -14,7 +14,7 @@ from kornode.bundle.validator import validate
 from kornode.config.models import AppConfig
 from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.repository import Registry
-from kornode.services.bundle import BUNDLE_HISTORY, BundleService
+from kornode.services.bundle import BundleService
 
 PIN = "pin-sha256:" + "A" * 43 + "="
 
@@ -201,13 +201,25 @@ def test_compile_all_skips_pending_and_revoked_nodes(env: Env) -> None:
 
 def test_history_is_pruned(env: Env) -> None:
     env.add(3)
-    for index in range(BUNDLE_HISTORY + 3):
+    for index in range(env.config.control.bundle_history + 3):
         env.registry.update_node(3, transport={"dpd": 10 + index})
         env.compile(3)
 
     versions = [item.version for item in env.registry.list_bundles(3)]
-    assert len(versions) == BUNDLE_HISTORY
-    assert versions[0] == BUNDLE_HISTORY + 3
+    assert len(versions) == env.config.control.bundle_history
+    assert versions[0] == env.config.control.bundle_history + 3
+
+
+def test_force_compile_stores_a_new_version_for_identical_content(env: Env) -> None:
+    env.add(3)
+    first = env.compile(3)
+    assert env.compile(3).version == first.version
+
+    env.registry.raise_high_water(3, first.version + 5)
+    forced = env.service.compile_node(env.registry, 3, "recovery", force=True)
+
+    assert forced.version == first.version + 6
+    assert env.registry.get_node(3).desired_version == forced.version
 
 
 def test_master_and_signing_keys_are_private(env: Env) -> None:

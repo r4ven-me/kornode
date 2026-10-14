@@ -234,6 +234,21 @@ class FabricConfig(StrictModel):
         return self
 
 
+class ControlConfig(StrictModel):
+    """Hub control plane (docs/spec/05-control-plane.md)."""
+
+    enabled: bool = False
+    port: int = Field(default=8444, ge=1, le=65535)
+    long_poll_seconds: int = Field(default=60, ge=1, le=300)
+    report_interval_seconds: int = Field(default=30, ge=5, le=3600)
+    offline_after_seconds: int = Field(default=90, ge=10, le=86400)
+    cert_lifetime_days: int = Field(default=90, ge=3, le=3650)
+    enroll_token_ttl_minutes: int = Field(default=60, ge=1, le=1440)
+    bundle_history: int = Field(default=20, ge=3, le=500)
+    min_agent_version: str = Field(default="2.0.0", pattern=r"^\d+\.\d+\.\d+$")
+    signing_key: Path | None = None
+
+
 class LogRotationConfig(StrictModel):
     enabled: bool = False
     # 0 disables the size trigger.
@@ -1415,6 +1430,7 @@ class AppConfig(StrictModel):
 
     node: NodeConfig = Field(default_factory=NodeConfig)
     fabric: FabricConfig = Field(default_factory=FabricConfig)
+    control: ControlConfig = Field(default_factory=ControlConfig)
     system: SystemConfig = Field(default_factory=SystemConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     certificates: CertificatesConfig = Field(default_factory=CertificatesConfig)
@@ -1426,6 +1442,14 @@ class AppConfig(StrictModel):
     web: WebConfig = Field(default_factory=WebConfig)
     cli: CliConfig = Field(default_factory=CliConfig)
     advanced: AdvancedConfig = Field(default_factory=AdvancedConfig)
+
+    @model_validator(mode="after")
+    def validate_control(self) -> AppConfig:
+        if self.control.enabled and not self.fabric.enabled:
+            raise ValueError("control.enabled requires fabric.enabled")
+        if self.control.signing_key is None:
+            self.control.signing_key = self.system.data_dir / "control" / "signing.ed25519"
+        return self
 
     @model_validator(mode="after")
     def validate_fabric_auth(self) -> AppConfig:

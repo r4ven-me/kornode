@@ -35,7 +35,10 @@ BACKOFF_MAX = 30.0
 
 class KernelLike(Protocol):
     def read(
-        self, sysctl_keys: list[str], foreign_chains: list[tuple[str, str, str]]
+        self,
+        sysctl_keys: list[str],
+        foreign_chains: list[tuple[str, str, str]],
+        address_devs: list[str],
     ) -> ActualState: ...
 
     def apply(self, plan: Plan) -> None: ...
@@ -115,7 +118,8 @@ class Reconciler:
                 desired = self.provider()
                 keys = sorted(sysctl.key for sysctl in desired.sysctls)
                 chains = sorted({rule.chain_key for rule in desired.foreign_rules})
-                plan = diff(self.kernel.read(keys, chains), desired)
+                devs = sorted({address.dev for address in desired.addresses})
+                plan = diff(self.kernel.read(keys, chains, devs), desired)
                 if not plan.is_empty:
                     if desired == self._last_desired:
                         # Inputs unchanged, kernel differs: someone else

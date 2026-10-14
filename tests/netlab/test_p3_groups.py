@@ -8,6 +8,7 @@ configuration `korctl config render` produced and the enroll restriction that
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -98,11 +99,10 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
     hub.run(["sysctl", "-qw", "net.ipv4.ip_forward=1"])
     lab.add_veth(hub, inet, addr_a="198.51.100.1/24", addr_b=f"{INET_ADDR}/24")
     inet.run(["ip", "route", "add", "10.0.0.0/8", "via", "198.51.100.1"])
-    # P3-05 binds the hub fabric address via the reconciler; until then by hand.
-    for name, cidr in (("fab0", f"{HUB_FABRIC_ADDR}/32"), ("lan0", f"{HUB_LAN_ADDR}/24")):
-        hub.run(["ip", "link", "add", name, "type", "dummy"])
-        hub.run(["ip", "addr", "add", cidr, "dev", name])
-        hub.run(["ip", "link", "set", name, "up"])
+    # The hub fabric address is bound to lo by the reconciler (control.enabled).
+    hub.run(["ip", "link", "add", "lan0", "type", "dummy"])
+    hub.run(["ip", "addr", "add", f"{HUB_LAN_ADDR}/24", "dev", "lan0"])
+    hub.run(["ip", "link", "set", "lan0", "up"])
     peers: dict[str, Peer] = {}
     for index, name in enumerate(("client", "agent", "enroll", "rogue")):
         ns = lab.add_namespace(name)
@@ -118,6 +118,7 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
         {
             "node": {"id": 1},
             "fabric": {"enabled": True},
+            "control": {"enabled": True, "port": CONTROL_PORT},
             "server": {
                 "enabled": True,
                 "port": 443,
@@ -187,7 +188,6 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
                 [
                     "python3",
                     str(node_tmp / "listener.py"),
-                    f"{HUB_FABRIC_ADDR}:{CONTROL_PORT}",
                     f"{HUB_FABRIC_ADDR}:22",
                     f"{HUB_LAN_ADDR}:{CONTROL_PORT}",
                 ],
@@ -200,6 +200,23 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
                 ["python3", str(node_tmp / "listener.py"), f"{INET_ADDR}:80"],
                 root.log_dir / "inet-listener.log",
             )
+        )
+        control = _popen_in_namespace(
+            hub,
+            [
+                "env",
+                f"KORNODE_CONFIG={root.config_path}",
+                f"PATH={Path(sys.executable).absolute().parent}{os.pathsep}{os.environ['PATH']}",
+                sys.executable,
+                "-m",
+                "kornode.control",
+            ],
+            root.log_dir / "control-api.log",
+        )
+        processes.append(control)
+        _wait_until(
+            lambda: control.poll() is None and tcp_check(hub, HUB_FABRIC_ADDR, CONTROL_PORT),
+            "control API on the hub fabric address",
         )
         ocserv = _popen_in_namespace(
             hub,

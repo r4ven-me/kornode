@@ -4,7 +4,10 @@ import ipaddress
 import re
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from cryptography import x509
 
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult, CommandRunner
@@ -192,6 +195,62 @@ class CertificateService:
                 dry_run=dry_run,
             ),
         ]
+
+    def ensure_control_certificate(self, address: str, *, dry_run: bool = False) -> bool:
+        """Server certificate of the control API listener, IP SAN = the hub fabric
+        address (agents pin the kornode CA and verify this address). Renewed
+        when it has under 30 days left. True when a certificate was issued."""
+        crt = self.config.cert_path("control.crt")
+        key = self.config.cert_path("control.key")
+        if crt.exists() and key.exists() and not dry_run:
+            parsed = x509.load_pem_x509_certificate(crt.read_bytes())
+            left = parsed.not_valid_after_utc - datetime.now(UTC)
+            if left > timedelta(days=30):
+                return False
+        self.files.ensure_dir(self.cert_dir, mode=0o700)
+        template = self._write_template(
+            self._template_path("control.tmpl"),
+            "\n".join(
+                [
+                    "cn = kornode-control",
+                    "tls_www_server",
+                    "encryption_key",
+                    "signing_key",
+                    f"ip_address = {address}",
+                    "expiration_days = 825",
+                    "",
+                ]
+            ),
+        )
+        try:
+            if not key.exists():
+                self.runner.run(
+                    ["certtool", "--generate-privkey", "--ecc", "--outfile", str(key)],
+                    timeout=60,
+                    dry_run=dry_run,
+                )
+                self._chmod_private_key(key, dry_run=dry_run)
+            self.runner.run(
+                [
+                    "certtool",
+                    "--generate-certificate",
+                    "--load-privkey",
+                    str(key),
+                    "--load-ca-certificate",
+                    str(self.config.cert_path("ca.crt")),
+                    "--load-ca-privkey",
+                    str(self.config.cert_path("ca.key")),
+                    "--template",
+                    str(template),
+                    "--outfile",
+                    str(crt),
+                ],
+                timeout=60,
+                dry_run=dry_run,
+            )
+        finally:
+            template.unlink(missing_ok=True)
+        return True
 
     def create_user_certificate(
         self,

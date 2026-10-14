@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from kornode.net.diff import (
+    AddAddress,
     AddRule,
     DelRoute,
     DelRule,
@@ -16,6 +17,7 @@ from kornode.net.diff import (
 from kornode.net.errors import PolicyError
 from kornode.net.state import (
     ActualState,
+    Address,
     DesiredState,
     IpRule,
     NftElements,
@@ -249,3 +251,16 @@ def test_elements_are_compared_in_canonical_form() -> None:
     assert merged.elements == {"10.0.0.0/23", "192.168.1.5/32"}
     ifaces = NftElements("inet", "kornode", "fabric_ifaces", frozenset({"vpns0", "oc-hub0"}))
     assert ifaces.elements == {"vpns0", "oc-hub0"}
+
+
+def test_missing_address_is_added_and_never_removed() -> None:
+    hub = Address("lo", "10.99.0.1/32")
+    desired = DesiredState(addresses=frozenset({hub}))
+
+    plan = diff(ActualState(), desired)
+
+    assert plan.ops == (AddAddress(hub),)
+    after = apply_to_state(ActualState(), plan)
+    assert diff(after, desired).is_empty
+    stray = ActualState(addresses=frozenset({Address("lo", "10.99.0.9/32"), hub}))
+    assert diff(stray, desired).is_empty

@@ -34,7 +34,7 @@ class FakeKernel:
         self.fail = False
 
     def read(
-        self, sysctl_keys: list[str], foreign_chains: object = ()
+        self, sysctl_keys: list[str], foreign_chains: object = (), address_devs: object = ()
     ) -> ActualState:
         return self.state
 

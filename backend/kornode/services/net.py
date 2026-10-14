@@ -52,7 +52,8 @@ class NetService:
         compiled = self.inputs.compiled()
         keys = [sysctl.key for sysctl in compiled.desired.sysctls]
         chains = sorted({rule.chain_key for rule in compiled.desired.foreign_rules})
-        plan = diff(self.kernel.read(keys, chains), compiled.desired)
+        devs = sorted({address.dev for address in compiled.desired.addresses})
+        plan = diff(self.kernel.read(keys, chains, devs), compiled.desired)
         return {
             "ops": _plan_dict(plan),
             "warnings": list(compiled.warnings),

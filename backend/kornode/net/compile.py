@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from kornode.net.errors import PolicyError
 from kornode.net.model import EgressPolicy, InlineDest, NodeRef, Rule, SetRef, Via
 from kornode.net.state import (
+    Address,
     DesiredState,
     Family,
     ForeignNftRule,
@@ -79,6 +80,8 @@ class NodeFacts:
     uplink: str | None = None
     all_rp_filter: str | None = None
     enroll: EnrollGuard | None = None
+    # Hub control-plane address, bound to `lo` so it never depends on a link.
+    service_address: ipaddress.IPv4Address | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +131,12 @@ class Compiled:
     classify_host: tuple[ClassifyRule, ...]
     script: str
     warnings: tuple[str, ...]
+
+
+def _addresses(facts: NodeFacts) -> frozenset[Address]:
+    if facts.service_address is None:
+        return frozenset()
+    return frozenset({Address("lo", f"{facts.service_address}/32")})
 
 
 def _dest_name(rule: Rule, index: int) -> str | None:
@@ -302,6 +311,7 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
     )
     desired = DesiredState(
         sysctls=_sysctls(exit_list, policy, facts),
+        addresses=_addresses(facts),
         rules=_rules(exit_list, facts),
         routes=_routes(exit_list, facts),
         nft=NftRuleset(script),

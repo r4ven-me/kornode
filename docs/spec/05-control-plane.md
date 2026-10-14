@@ -12,12 +12,16 @@ control:
   cert_lifetime_days: 90
   enroll_token_ttl_minutes: 60
   bundle_history: 20            # versions kept per agent in the registry
+  min_agent_version: 2.0.0      # carried in every bundle
   signing_key: ${data_dir}/control/signing.ed25519   # created on first start, 0600
 ```
 
-Supervisor program `control-api` runs `uvicorn kornode.control.app:create_app`
-on `10.99.0.1:8444` with mTLS (`ssl_cert_reqs=CERT_REQUIRED`, CA = kornode CA,
-CRL checked per request). Independent of `web.enabled`.
+Supervisor program `control-api` runs `python -m kornode.control` on
+`10.99.0.1:8444`. TLS is `CERT_OPTIONAL` against the kornode CA and the app
+requires the certificate per request except on `POST /agent/v1/enroll` (D-49):
+CN `agent-<id>`, OU `agents`, CRL (fail closed), `nodes.state`. The listener
+uses its own certificate `certs/control.crt` (IP SAN = fabric address).
+Independent of `web.enabled`.
 
 The hub's fabric address `10.99.0.1/32` is bound to `lo` by the reconciler.
 

@@ -20,7 +20,7 @@ from kornode.net.compile import (
 )
 from kornode.net.errors import PolicyError
 from kornode.net.model import EgressPolicy, Via
-from kornode.net.state import IpRule, Route, Sysctl
+from kornode.net.state import Address, IpRule, Route, Sysctl
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "docs" / "spec" / "examples"
@@ -361,3 +361,14 @@ def test_no_per_interface_sysctl_for_a_down_tunnel() -> None:
     keys = {sysctl.key for sysctl in compile_policy(policy, facts).desired.sysctls}
 
     assert "net.ipv4.conf.oc-office0.rp_filter" not in keys
+
+
+def test_service_address_is_bound_to_lo() -> None:
+    policy, facts = hub_case()
+
+    assert compile_policy(policy, facts).desired.addresses == frozenset()
+    with_address = dataclasses.replace(
+        facts, service_address=ipaddress.IPv4Address("10.99.0.1")
+    )
+    desired = compile_policy(policy, with_address).desired
+    assert desired.addresses == frozenset({Address("lo", "10.99.0.1/32")})

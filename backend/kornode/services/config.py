@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import difflib
+import logging
+import sqlite3
 from pathlib import Path
 
 from kornode.config.models import AppConfig
@@ -12,6 +14,8 @@ from kornode.renderers import (
 from kornode.services.files import FileManager
 from kornode.services.rendered import RenderedFile
 from kornode.services.secrets import collect_config_secrets, mask_text
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ConfigService:
@@ -96,7 +100,30 @@ class ConfigService:
             for path in FabricGroupsService(config, self.file_manager).stale_files(rendered_files):
                 path.unlink()
                 written.append(path)
+        self._recompile_bundles(config)
         return written
+
+    def _recompile_bundles(self, config: AppConfig) -> None:
+        """Hub host/port/pin and fabric settings live in the bundles: every
+        saved configuration recompiles them. The control API repeats this at
+        start, so a failure here is logged, not fatal to the save."""
+        if not config.control.enabled:
+            return
+        from kornode.bundle.errors import BundleError
+        from kornode.registry.db import RegistryError, migrate, open_registry, transaction
+        from kornode.registry.repository import Registry
+        from kornode.services.bundle import BundleService
+
+        try:
+            conn = open_registry(config.system.data_dir / "registry.db")
+            try:
+                migrate(conn)
+                with transaction(conn):
+                    BundleService(config).compile_all(Registry(conn), "hub configuration saved")
+            finally:
+                conn.close()
+        except (BundleError, RegistryError, OSError, sqlite3.Error) as exc:
+            LOGGER.warning("bundle recompilation after config save failed: %s", exc)
 
     def _ensure_fabric_crl(self, config: AppConfig) -> None:
         # ocserv refuses to start with `crl =` pointing at a missing file.

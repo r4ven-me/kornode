@@ -1,7 +1,7 @@
-# Prompt for the next session — P3-05 onwards (control plane and agent)
+# Prompt for the next session — P3-06 onwards (agent)
 
 Paste everything below the line into a fresh Claude Code session started in
-`/home/lans/Cloud/Projects/public/kornode`. **Start on Opus in plan mode** (P3-05 is non-trivial: mTLS control API, long-poll, supervisor program),
+`/home/lans/Cloud/Projects/public/kornode`. **Start on Opus in plan mode** (P3-06 is non-trivial: agent run loop, apply-with-confirm, rollback),
 switch to Sonnet for the code once the plan is agreed.
 
 ---
@@ -83,3 +83,10 @@ netlab-сценарий для D-32 «exit убран, пока соединен
 ## Что нужно от меня для P3-10 (напомни заранее)
 4 VM (`hub`, `agent-a`, `agent-b`, `ext`), self-hosted runner на `hub` и инвентарь в secrets/variables репозитория. Runner лучше поднять заранее.
 Четвёртый адрес VM пока не определён (зарезервированы три: `192.168.122.173/.152/.237`); `192.168.122.30` — только netlab.
+
+
+## Обновление после P3-05 (2026-10-14)
+Ветка `redesign/p3-05-control-api` (от `redesign/p3-04-bundle-compiler`), D-49…D-52, не запушена. `make check`: 856 passed / 39 skipped, `make parity` зелёный, netlab 39/39 на VM.
+Сделано: `kornode.control` (mTLS `CERT_OPTIONAL` + middleware, long-poll, report, commands, renew, enroll), `control.*` в конфиге вместо констант, `10.99.0.1/32` на `lo` через reconciler (`Address`), reports/commands в реестре, supervisor-программа `control-api`, hub YAML save пересобирает пакеты.
+**Не сделано:** `security-reviewer`/`code-reviewer` упали на лимите сессии — прогнать на дифе P3-05 до пуша. Известное ограничение D-51: потерянный ответ enroll лечится отзывом и пересозданием узла.
+Следующее: P3-06 (пакет `kornode_agent`, образ, enroll/run loop/кэш/apply-with-confirm/rollback), клиент использует `GET /agent/v1/poll`.

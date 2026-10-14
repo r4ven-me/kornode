@@ -1,8 +1,10 @@
-"""P3-03: enrollment, certificate revocation and enroll-session source spoofing.
+"""P3-03/P3-05: enrollment, revocation, the control API over the fabric, spoofing.
 
-Reuses the P3-02 hub fixture. There is no Control API yet (P3-05), so the
-hub-side calls (`issue_token`, `enroll`, `revoke_node`) run as small scripts in
-the hub namespace against the same registry/ocpasswd/CA ocserv uses.
+Reuses the P3-02 hub fixture, which also runs the real control API on the hub
+fabric address. `enroll` and everything an agent does is real HTTP(S) from the
+peer's namespace. Admin-side calls that have no HTTP surface yet (P3-08:
+`issue_token`, `revoke_node`) run as small scripts in the hub namespace against
+the same registry/ocpasswd/CA ocserv uses.
 """
 
 # ruff: noqa: F811 - pytest fixtures imported from test_p3_groups
@@ -22,9 +24,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from tests.netlab.helpers import tcp_check
 from tests.netlab.kornode_nodes import _wait_until
+from tests.netlab.lab import Namespace
 from tests.netlab.ocserv_peers import Peer
 from tests.netlab.test_p3_groups import (  # noqa: F401 - fixtures
     CONTROL_PORT,
+    ENROLL_PASSWORD,
+    ENROLL_USER,
     FABRIC_CIDR,
     HUB_FABRIC_ADDR,
     HUB_LAN_ADDR,
@@ -60,14 +65,6 @@ HUB_SCRIPT = textwrap.dedent(
         Registry(conn).create_node(id=int(args[0]), name=f"node{args[0]}")
     elif op == "token":
         print(svc.issue_token(int(args[0])))
-    elif op == "enroll":
-        doc = json.loads(Path(args[0]).read_text())
-        csr = Path(args[1]).read_text()
-        out = svc.enroll(
-            token_id=doc["id"], secret=doc["secret"], csr_pem=csr,
-            seal_pubkey_b64=base64.b64encode(b"\x07" * 32).decode(),
-        )
-        print(json.dumps(out))
     elif op == "revoke":
         svc.revoke_node(int(args[0]))
     elif op == "delete":
@@ -103,6 +100,53 @@ def _hub_call(hub: RenderedHub, op: str, *args: str) -> str:
     return result.stdout
 
 
+HTTP_CLIENT = textwrap.dedent(
+    """
+    import http.client, ssl, sys
+    ca, host, port, method, path, body_file, *cert = sys.argv[1:]
+    ctx = ssl.create_default_context(cafile=ca)
+    if cert:
+        ctx.load_cert_chain(cert[0], cert[1])
+    conn = http.client.HTTPSConnection(host, int(port), context=ctx, timeout=20)
+    body = open(body_file).read() if body_file != "-" else None
+    conn.request(method, path, body=body, headers={"Content-Type": "application/json"})
+    response = conn.getresponse()
+    print(response.status)
+    print(response.read().decode())
+    """
+)
+
+
+def _http(
+    hub: RenderedHub,
+    ns: Namespace,
+    method: str,
+    path: str,
+    *,
+    body: Path | None = None,
+    cert: tuple[Path, Path] | None = None,
+) -> tuple[int, str]:
+    argv = [
+        sys.executable,
+        "-c",
+        HTTP_CLIENT,
+        str(hub.root.data_dir / "certs" / "ca.crt"),
+        HUB_FABRIC_ADDR,
+        str(CONTROL_PORT),
+        method,
+        path,
+        str(body) if body else "-",
+    ]
+    if cert is not None:
+        argv.extend(str(item) for item in cert)
+    try:
+        output = ns.run(argv, timeout=60).stdout
+    except CommandError as exc:
+        raise AssertionError(f"{method} {path} failed:\n{exc.result.stderr}") from exc
+    status, _, rest = output.partition("\n")
+    return int(status), rest.strip()
+
+
 def _decode(token: str) -> dict[str, str]:
     return json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
 
@@ -134,7 +178,21 @@ def _enroll_agent(hub: RenderedHub, node_tmp_dir: Path) -> tuple[Path, Path]:
     doc_path.write_text(json.dumps(doc), encoding="utf-8")
     assert hub.enroll.connect(hub.pin, user=doc["user"], password=doc["secret"])
     key, csr = _csr(node_tmp_dir, f"agent-{NEW_ID}")
-    result = json.loads(_hub_call(hub, "enroll", str(doc_path), str(csr)).strip().splitlines()[-1])
+    request = node_tmp_dir / "enroll-request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "token_id": doc["id"],
+                "secret": doc["secret"],
+                "csr_pem": csr.read_text(encoding="utf-8"),
+                "seal_pubkey_b64": base64.b64encode(b"\x07" * 32).decode(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    status, body = _http(hub, hub.enroll.ns, "POST", "/agent/v1/enroll", body=request)
+    assert status == 200, body
+    result = json.loads(body)
     crt = node_tmp_dir / f"agent-{NEW_ID}.crt"
     crt.write_text(result["cert_pem"], encoding="utf-8")
     hub.enroll.stop()
@@ -158,6 +216,38 @@ def test_enroll_by_csr_then_certificate_joins_agents_group(
     assert hub.agent.address() == f"10.99.0.{NEW_ID}"
     assert hub.agent.pushed_routes() == [FABRIC_CIDR]
     assert tcp_check(hub.agent.ns, HUB_FABRIC_ADDR, CONTROL_PORT)
+
+
+def test_agent_polls_its_bundle_over_the_fabric_and_revocation_gives_403(
+    rendered_hub: RenderedHub, node_tmp: Path
+) -> None:
+    hub = rendered_hub
+    crt, key = _enroll_agent(hub, node_tmp)
+    assert hub.agent.connect(hub.pin, cert=(crt, key))
+
+    status, body = _http(hub, hub.agent.ns, "GET", "/agent/v1/poll?since=0", cert=(crt, key))
+    assert status == 200, body
+    bundle = json.loads(body)["bundle"]
+    assert bundle is not None and bundle["signature"].startswith("ed25519:")
+    status, body = _http(hub, hub.agent.ns, "GET", "/agent/v1/ping", cert=(crt, key))
+    assert status == 204, body
+
+    _hub_call(hub, "revoke", str(NEW_ID))
+
+    # The session is cut, so the refusal is observed from the hub itself.
+    status, body = _http(hub, hub.hub, "GET", "/agent/v1/ping", cert=(crt, key))
+    assert status == 403 and json.loads(body)["error"] == "revoked", body
+
+
+def test_enroll_session_cannot_use_the_agent_api_without_a_certificate(
+    rendered_hub: RenderedHub,
+) -> None:
+    hub = rendered_hub
+    assert hub.enroll.connect(hub.pin, user=ENROLL_USER, password=ENROLL_PASSWORD)
+
+    status, body = _http(hub, hub.enroll.ns, "GET", "/agent/v1/poll?since=0")
+
+    assert status == 401 and json.loads(body)["error"] == "unauthorized", body
 
 
 def test_revoked_certificate_cannot_connect_and_live_session_is_cut(

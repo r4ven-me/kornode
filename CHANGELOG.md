@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added (P3-05: control API)
+
+- `kornode.control`: agent-facing API on the hub fabric address (`python -m kornode.control`,
+  supervisor program `control-api` when `control.enabled`, independent of `web.enabled`).
+  mTLS on one port: the CA-verified client certificate is optional at the TLS layer and
+  required per request everywhere except `POST /agent/v1/enroll` (CN `agent-<id>`,
+  OU `agents`, CRL, `nodes.state`; a missing/stale CRL fails closed with 503).
+  Endpoints `ping`, `bundle`, `poll` (long-poll, 500 ms registry re-check, recovery when
+  `since` is ahead of the hub), `report`, `commands`, `commands/<id>/result`, `renew`
+  (identity from the certificate), `enroll` (5/min per source). D-49, D-52.
+- New `control.*` config (port, long-poll, report/offline intervals, certificate
+  lifetime, token TTL, bundle history, `min_agent_version`, `signing_key`) replaces the
+  constants of P3-03/P3-04; saving the hub configuration recompiles all bundles.
+- `kornode.net` binds `service_address` (`10.99.0.1/32`) to `lo` (new add-only `Address`
+  primitive). D-50.
+- Registry: reports (last 500 per node), commands (queue, at-most-once delivery, expiry,
+  owner-only results), monotonic `high_water_version`.
+- Fix found by netlab: the enroll VPN session is cut after the answer was delivered, not
+  inside `enroll` (the certificate was lost). D-51.
+
 ### Added (P3-04: bundle compiler)
 
 - `kornode.bundle` (stdlib + pydantic + cryptography + `kornode.net`, AST-checked): bundle

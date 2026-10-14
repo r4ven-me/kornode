@@ -31,14 +31,11 @@ from kornode.bundle.signing import (
 )
 from kornode.bundle.validator import validate
 from kornode.config.models import AppConfig
-from kornode.config.reserved import DEFAULT_CONTROL_PORT
 from kornode.net.addressing import derive_addresses
 from kornode.registry.models import Node, StoredBundle
 from kornode.registry.repository import Registry
 from kornode.services.cert_pin import certificate_file_pin
 
-MIN_AGENT_VERSION = "2.0.0"
-BUNDLE_HISTORY = 20
 HUB_NODE_ID = 1
 _FABRIC_RULE_ID = "to-fabric"
 _SECRET_UPSTREAM_FIELDS = ("password", "key", "camouflage")
@@ -62,8 +59,11 @@ class BundleService:
     def control_dir(self) -> Path:
         return self.config.system.data_dir / "control"
 
+    def _signing_path(self) -> Path:
+        return self.config.control.signing_key or self.control_dir / "signing.ed25519"
+
     def signing_key(self) -> Ed25519PrivateKey:
-        return load_or_create_signing_key(self.control_dir / "signing.ed25519")
+        return load_or_create_signing_key(self._signing_path())
 
     def signing_keys(self) -> list[dict[str, str]]:
         public = self.signing_key().public_key()
@@ -117,7 +117,11 @@ class BundleService:
                 result[node.id] = self.compile_node(registry, node.id, reason)
         return result
 
-    def compile_node(self, registry: Registry, node_id: int, reason: str) -> StoredBundle:
+    def compile_node(
+        self, registry: Registry, node_id: int, reason: str, *, force: bool = False
+    ) -> StoredBundle:
+        """`force` skips content dedup: recovery after the agent reported a
+        version above everything stored needs a fresh, higher version."""
         node = registry.get_node(node_id)
         if node.state != "active" or node.seal_pubkey is None:
             raise BundleError("conflict", f"node {node_id} is not an active enrolled agent")
@@ -134,7 +138,7 @@ class BundleService:
                 "_seal_pubkey": node.seal_pubkey.hex(),
             }
         )
-        if latest is not None and latest.content_hash == digest:
+        if not force and latest is not None and latest.content_hash == digest:
             if node.desired_version != latest.version:
                 registry.update_node(node_id, desired_version=latest.version)
             return latest
@@ -149,7 +153,7 @@ class BundleService:
                 signature,
                 trusted=trusted,
                 high_water_version=version - 1,
-                agent_version=MIN_AGENT_VERSION,
+                agent_version=self.config.control.min_agent_version,
                 expected_node_id=node_id,
             )
         except BundleError as exc:
@@ -165,7 +169,7 @@ class BundleService:
             reason=reason,
         )
         registry.update_node(node_id, desired_version=version)
-        registry.prune_bundles(node_id, BUNDLE_HISTORY)
+        registry.prune_bundles(node_id, self.config.control.bundle_history)
         return stored
 
     # ------------------------------------------------------------------ plan
@@ -223,13 +227,13 @@ class BundleService:
             "node_id": node.id,
             "version": version,
             "generated_at": self._clock().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "min_agent_version": MIN_AGENT_VERSION,
+            "min_agent_version": self.config.control.min_agent_version,
             "hubs": [
                 {
                     "host": self.config.server.cn,
                     "port": self.config.server.port,
                     "pin": self._pin(),
-                    "control_url": f"https://{hub.fabric_address}:{DEFAULT_CONTROL_PORT}",
+                    "control_url": f"https://{hub.fabric_address}:{self.config.control.port}",
                 }
             ],
             "node": node_info,
@@ -240,7 +244,7 @@ class BundleService:
             },
             "policy": _policy_with_fabric_rule(node.policy),
             "settings": {
-                "report_interval_seconds": 30,
+                "report_interval_seconds": self.config.control.report_interval_seconds,
                 "confirm_window_seconds": 60,
                 "log_level": "info",
             },

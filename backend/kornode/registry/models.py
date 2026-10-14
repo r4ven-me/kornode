@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 type NodeState = Literal["pending", "active", "revoked"]
 type PrefixKind = Literal["pool", "source", "lan"]
+type CommandState = Literal["queued", "delivered", "done", "failed", "expired"]
 
 
 @dataclass(frozen=True)
@@ -68,8 +69,33 @@ class External:
     secrets: bytes | None
 
 
+@dataclass(frozen=True)
+class Report:
+    node_id: int
+    received_at: str
+    body: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Command:
+    id: str
+    node_id: int
+    type: str
+    args: dict[str, Any]
+    state: CommandState
+    created_at: str
+    delivered_at: str | None
+    finished_at: str | None
+    result: dict[str, Any] | None
+    expires_at: str
+
+
+def iso_time(value: datetime) -> str:
+    return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def utc_now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return iso_time(datetime.now(UTC))
 
 
 def encode_json(value: Any) -> str:

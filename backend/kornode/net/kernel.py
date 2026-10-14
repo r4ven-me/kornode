@@ -31,6 +31,7 @@ from pyroute2 import IPRoute  # type: ignore[import-untyped]
 from pyroute2.netlink.exceptions import NetlinkError  # type: ignore[import-untyped]
 
 from kornode.net.diff import (
+    AddAddress,
     AddRule,
     DeleteForeignRule,
     DelRoute,
@@ -50,6 +51,7 @@ from kornode.net.state import (
     TABLE_ID_MAX,
     TABLE_ID_MIN,
     ActualState,
+    Address,
     Family,
     ForeignNftRule,
     IpRule,
@@ -73,6 +75,24 @@ def _family(af: int) -> Family:
     return 4 if af == socket.AF_INET else 6
 
 
+def _add_address(ipr: Any, address: Address) -> None:
+    indexes = ipr.link_lookup(ifname=address.dev)
+    if not indexes:
+        raise ApplyError(f"add address {address.cidr}: no interface {address.dev}")
+    interface = ipaddress.ip_interface(address.cidr)
+    try:
+        ipr.addr(
+            "add",
+            index=indexes[0],
+            address=str(interface.ip),
+            mask=interface.network.prefixlen,
+            family=socket.AF_INET if interface.version == 4 else socket.AF_INET6,
+        )
+    except NetlinkError as exc:
+        if exc.code != 17:  # EEXIST: another pass or the operator got there first
+            raise
+
+
 def _sysctl_path(proc_sys: Path, key: str) -> Path:
     return proc_sys.joinpath(*key.split("."))
 
@@ -92,9 +112,19 @@ class Kernel:
         self,
         sysctl_keys: Iterable[str] = (),
         foreign_chains: Iterable[tuple[str, str, str]] = (),
+        address_devs: Iterable[str] = (),
     ) -> ActualState:
         with IPRoute() as ipr:
             links = {link["index"]: link.get_attr("IFLA_IFNAME") for link in ipr.get_links()}
+            wanted_devs = set(address_devs)
+            addresses = frozenset(
+                Address(
+                    links[message["index"]],
+                    f"{message.get_attr('IFA_ADDRESS')}/{message['prefixlen']}",
+                )
+                for message in ipr.get_addr()
+                if links.get(message["index"]) in wanted_devs
+            )
             rules = frozenset(
                 rule
                 for af in _AF.values()
@@ -113,6 +143,7 @@ class Kernel:
         chains, foreign = self._read_foreign(foreign_chains)
         return ActualState(
             sysctls=frozenset(self._read_sysctls(sysctl_keys)),
+            addresses=addresses,
             rules=rules,
             routes=routes,
             nft_schema_hash=schema_hash,
@@ -262,6 +293,8 @@ class Kernel:
             _sysctl_path(self.proc_sys, op.sysctl.key).write_text(
                 op.sysctl.value + "\n", encoding="utf-8"
             )
+        elif isinstance(op, AddAddress):
+            _add_address(ipr, op.address)
         elif isinstance(op, AddRule):
             ipr.rule("add", **_rule_args(op.rule))
         elif isinstance(op, DelRule):

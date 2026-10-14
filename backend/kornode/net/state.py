@@ -44,6 +44,19 @@ class Sysctl:
 
 
 @dataclass(frozen=True, slots=True)
+class Address:
+    """An address kornode adds to an interface (the hub fabric address on `lo`).
+    Add-only: kornode cannot prove it owns a foreign address, so it never
+    removes one."""
+
+    dev: str
+    cidr: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "cidr", str(ipaddress.ip_interface(self.cidr)))
+
+
+@dataclass(frozen=True, slots=True)
 class IpRule:
     priority: int
     table: TableRef
@@ -172,6 +185,7 @@ class ForeignNftRule:
 @dataclass(frozen=True, slots=True)
 class DesiredState:
     sysctls: frozenset[Sysctl] = frozenset()
+    addresses: frozenset[Address] = frozenset()
     rules: frozenset[IpRule] = frozenset()
     routes: frozenset[Route] = frozenset()
     nft: NftRuleset | None = None
@@ -207,6 +221,8 @@ class ActualState:
     kernel adapter is responsible for knowing it."""
 
     sysctls: frozenset[Sysctl] = frozenset()
+    # Only addresses on the interfaces the desired state names are read.
+    addresses: frozenset[Address] = frozenset()
     rules: frozenset[IpRule] = frozenset()
     routes: frozenset[Route] = frozenset()
     nft_schema_hash: str | None = None

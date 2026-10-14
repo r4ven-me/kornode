@@ -24,7 +24,6 @@ from kornode.services import enrollment as enrollment_module
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.enrollment import (
-    CERT_LIFETIME_DAYS,
     EnrollmentError,
     EnrollmentService,
     hash_secret,
@@ -77,6 +76,7 @@ def _config(tmp_path: Path) -> AppConfig:
                 "secrets_dir": tmp_path / "secrets",
             },
             "fabric": {"enabled": True},
+            "control": {"enabled": True},
             "auth": {"password": {"enabled": True}},
             "identity": {
                 "config_per_group_dir": tmp_path / "generated" / "groups",
@@ -198,7 +198,8 @@ def test_enroll_issues_cert_with_hub_chosen_subject(env: Env) -> None:
         cert.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)[0].value == "agents"
     )
     days = (cert.not_valid_after_utc - cert.not_valid_before_utc).days
-    assert days in (CERT_LIFETIME_DAYS, CERT_LIFETIME_DAYS + 1)
+    lifetime = env.config.control.cert_lifetime_days
+    assert days in (lifetime, lifetime + 1)
     ca = x509.load_pem_x509_certificate(result["ca_pem"].encode())
     cert.verify_directly_issued_by(ca)
     assert result["node_id"] == 3

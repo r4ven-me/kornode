@@ -32,8 +32,6 @@ from kornode.services.files import FileManager
 from kornode.services.sessions import SessionService
 from kornode.services.users import UserService
 
-TOKEN_TTL = timedelta(hours=1)
-CERT_LIFETIME_DAYS = 90
 RENEW_AFTER_FRACTION = 2 / 3
 RENEW_WARNING_DAYS = 14
 CRL_REFRESH_AFTER_SECONDS = 10 * 24 * 3600  # crl_next_update is 30 days
@@ -102,7 +100,7 @@ class EnrollmentService:
         secret = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
         token_id = secrets.token_hex(4)
         username = f"enroll-{node_id}-{token_id}"
-        expires = now + TOKEN_TTL
+        expires = now + timedelta(minutes=self.config.control.enroll_token_ttl_minutes)
         with self._registry() as registry:
             node = self._node(registry, node_id)
             if node.state != "pending":
@@ -186,7 +184,11 @@ class EnrollmentService:
         seal_pubkey_b64: str,
         facts: Mapping[str, Any] | None = None,
         source_ip: str | None = None,
+        end_session: bool = True,
     ) -> dict[str, Any]:
+        """`end_session=False` leaves the enroll VPN session up: the Control API
+        answers through it, so it calls `end_enroll_session` once the answer
+        has been delivered (cutting it here would lose the certificate)."""
         now = self._clock()
         with self._registry() as registry:
             token = self._authenticate(registry, token_id, secret, source_ip)
@@ -226,7 +228,10 @@ class EnrollmentService:
         problems = [
             step
             for step, action in (
-                ("enroll user", partial(self._drop_enroll_user, token.ocserv_user)),
+                (
+                    "enroll user",
+                    partial(self._drop_enroll_user, token.ocserv_user, disconnect=end_session),
+                ),
                 ("sync groups", self.groups.sync),
             )
             if not self._attempt(action)
@@ -257,7 +262,7 @@ class EnrollmentService:
             if node.state != "active" or node.cert_not_after is None:
                 raise EnrollmentError(409, "conflict", f"node {node_id} is {node.state}")
             earliest = _parse_time(node.cert_not_after) - timedelta(
-                days=CERT_LIFETIME_DAYS * (1 - RENEW_AFTER_FRACTION)
+                days=self.config.control.cert_lifetime_days * (1 - RENEW_AFTER_FRACTION)
             )
             if now < earliest:
                 raise EnrollmentError(409, "conflict", f"renewal opens at {_iso(earliest)}")
@@ -399,7 +404,7 @@ class EnrollmentService:
 
     def _issue_certificate(self, node_id: int, public_key_pem: str) -> dict[str, str]:
         tmp = self.certificates.sign_agent_public_key(
-            node_id, public_key_pem, lifetime_days=CERT_LIFETIME_DAYS
+            node_id, public_key_pem, lifetime_days=self.config.control.cert_lifetime_days
         )
         try:
             pem = tmp.read_text(encoding="utf-8")
@@ -431,13 +436,28 @@ class EnrollmentService:
     def _drop_enroll_user_quietly(self, username: str) -> None:
         self._attempt(partial(self._drop_enroll_user, username))
 
-    def _drop_enroll_user(self, username: str) -> None:
+    def _drop_enroll_user(self, username: str, *, disconnect: bool = True) -> None:
         self.users.delete_enroll_user(username)
+        if disconnect:
+            self._disconnect_user(username)
+
+    def _disconnect_user(self, username: str) -> None:
         self.runner.run(
             self.sessions.occtl_argv("disconnect", "user", username),
             timeout=15,
             check=False,
         )
+
+    def end_enroll_session(self, token_id: str) -> None:
+        """Cut the enroll VPN session of a spent token (best effort; the user
+        is already gone from ocpasswd and expiry/maintain() heal the rest)."""
+        with self._registry() as registry:
+            try:
+                token = registry.get_enroll_token(token_id)
+            except RegistryNotFound:
+                return
+        if token.used_at is not None:
+            self._attempt(partial(self._disconnect_user, token.ocserv_user))
 
     def _node(self, registry: Registry, node_id: int) -> Node:
         try:

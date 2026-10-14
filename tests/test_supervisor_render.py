@@ -307,3 +307,26 @@ def test_supervisor_render_runs_the_reconciler_before_everything_else(tmp_path: 
     priority = int(section.split("priority=")[1].split()[0])
     assert priority < 999
     assert "priority=" not in rendered.split("[program:upstream-watchdog]")[1].split("\n[")[0]
+
+
+def test_supervisor_registers_control_api_only_when_enabled(tmp_path: Path) -> None:
+    overrides = {
+        "system": {
+            "generated_dir": str(tmp_path / "generated"),
+            "log_dir": str(tmp_path / "logs"),
+        },
+        "fabric": {"enabled": True},
+        "web": {"enabled": False},
+    }
+    off = load_config(tmp_path / "missing.yaml", cli_overrides=overrides, environ={})
+    on = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={**overrides, "control": {"enabled": True}},
+        environ={},
+    )
+
+    assert "[program:control-api]" not in SupervisorConfigRenderer().render(off)
+    rendered = SupervisorConfigRenderer().render(on)
+    assert "[program:control-api]" in rendered
+    assert "command=/usr/local/bin/python -m kornode.control" in rendered
+    assert "[program:api]" not in rendered
