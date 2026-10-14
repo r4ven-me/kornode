@@ -212,10 +212,10 @@ P0-03 с kill-switch (D-20, D-21).
 
 - [ ] Реестр на центре в SQLite с миграциями: агенты, клиенты, внешние серверы, версии пакетов. Три раздела в панели и три группы ocserv.
 
-> Статус (2026-10-13): архитектура P3-04/P3-06 согласована (D-34…D-40, spec 05/06/11). P3-01 — реестр SQLite с миграциями и снапшотами — готов в ветке `redesign/p3-01-registry` (D-41). P3-02 — группы ocserv `clients`/`agents`/`enroll` из реестра — готов в ветке `redesign/p3-02-ocserv-groups` (D-42…D-44; спайки S-01/S-02 прошли, S-04 ушёл на запасной вариант с nft); разделы панели (P3-08) — впереди. P3-03 — регистрация агента (токены, CSR, продление, отзыв через CRL, строгий RPF для сессий ocserv) — готова в ветке `redesign/p3-03-enrollment` (D-45…D-47), уровень сервисов; HTTP-обвязка — P3-05, `korctl agent`/API/панель — P3-08. P3-04 — компилятор пакета (`kornode.bundle`, `BundleService`) — готов в ветке `redesign/p3-04-bundle-compiler` (D-48). P3-05 — Control API (`kornode.control`, mTLS, long-poll, отчёты, команды; `control.*` в конфиге) — готов в ветке `redesign/p3-05-control-api` (D-49…D-52); следующая — P3-06 (агент). К P3-05: `renew` должен брать `node_id` из CN клиентского сертификата mTLS; удаление узла — только через `revoke_node` (ключи SQLite переиспользуются, неотозванный сертификат подошёл бы новому узлу с тем же id).
+> Статус (2026-10-14): архитектура P3-04/P3-06 согласована (D-34…D-40, spec 05/06/11). P3-01 — реестр SQLite с миграциями и снапшотами — готов в ветке `redesign/p3-01-registry` (D-41). P3-02 — группы ocserv `clients`/`agents`/`enroll` из реестра — готов в ветке `redesign/p3-02-ocserv-groups` (D-42…D-44; спайки S-01/S-02 прошли, S-04 ушёл на запасной вариант с nft); разделы панели (P3-08) — впереди. P3-03 — регистрация агента (токены, CSR, продление, отзыв через CRL, строгий RPF для сессий ocserv) — готова в ветке `redesign/p3-03-enrollment` (D-45…D-47), уровень сервисов; HTTP-обвязка — P3-05, `korctl agent`/API/панель — P3-08. P3-04 — компилятор пакета (`kornode.bundle`, `BundleService`) — готов в ветке `redesign/p3-04-bundle-compiler` (D-48). P3-05 — Control API (`kornode.control`, mTLS, long-poll, отчёты, команды; `control.*` в конфиге) — готов в ветке `redesign/p3-05-control-api` (D-49…D-52); следующая — P3-06 (агент). Удаление узла — только через `revoke_node` (ключи SQLite переиспользуются, неотозванный сертификат подошёл бы новому узлу с тем же id).
 - [ ] Регистрация: одноразовый токен (адрес, отпечаток сертификата, секрет), CSR, выпуск сертификата на 90 дней, автопродление, отзыв через CRL.
-- [ ] Компилятор пакета на центре: JSON-схема с версией формата, подпись Ed25519, шифрование секретов на ключ агента.
-- [ ] Control API на служебном адресе фабрики с mTLS: long-poll пакета, отчёты, очередь типизированных команд.
+- [x] Компилятор пакета на центре: JSON-схема с версией формата, подпись Ed25519, шифрование секретов на ключ агента.
+- [x] Control API на служебном адресе фабрики с mTLS: long-poll пакета, отчёты, очередь типизированных команд.
 - [ ] Образ `kornode-agent`: `kornode.net`, openconnect, клиент control plane, кэш трёх последних пакетов, применение с подтверждением и автооткатом, старт из кэша без центра.
 - [ ] Страница агентов на центре: версия пакета, online/offline, состояние туннелей, последние ошибки, кнопки `explain` и `collect_diag`.
 - [ ] `korctl hub backup/restore` и тест восстановления.
@@ -241,9 +241,9 @@ P0-03 с kill-switch (D-20, D-21).
 
 Готово, когда: все примеры из `examples/` мигрируются автоматически и проходят те же сетевые сценарии.
 
-## Дальнейшие действия (на 2026-10-13, после P3-04)
+## Дальнейшие действия (на 2026-10-14, после P3-05)
 
-Локальный `main` содержит P0–P2 вместе с исправлениями по ревью (`3f195f3`, `40b270a`) и опережает `origin/main` на 44 коммита; ветки P3 в `main` ещё не влиты. Ветка `redesign/p3-04-bundle-compiler` (стек: доки P3-04/P3-06 → P3-01 → спайки → P3-02 → P3-03 → P3-04, последний код — `0ac9c74`, дерево чистое, `make check` 828 passed / 37 skipped, `make parity` зелёный, netlab 37/37 — P3-04 ядро не трогала) не запушена; следующая ветка — `redesign/p3-05-control-api` от неё; на GitHub ничего не отправлено, CI-задача `netlab` на GitHub-раннере ещё не запускалась. Промпт для следующей сессии — `docs/redesign/NEXT_SESSION.md`.
+Локальный `main` содержит P0–P2 вместе с исправлениями по ревью (`3f195f3`, `40b270a`) и опережает `origin/main` на 44 коммита; ветки P3 в `main` ещё не влиты. Ветка `redesign/p3-05-control-api` (стек: доки P3-04/P3-06 → P3-01 → спайки → P3-02 → P3-03 → P3-04 → P3-05, последний код — `1a7a7c1`, дерево чистое, `make check` 856 passed / 39 skipped, `make parity` зелёный, netlab 39/39) не запушена; следующая ветка — `redesign/p3-06-agent` от неё; на GitHub ничего не отправлено, CI-задача `netlab` на GitHub-раннере ещё не запускалась. Промпт для следующей сессии — `docs/redesign/NEXT_SESSION.md`.
 
 **1. Закрыть P2 перед пушем.**
 
@@ -293,23 +293,29 @@ P0-03 с kill-switch (D-20, D-21).
    - секции `access` и `dns` не выпускаются до P4-04/P4-03;
    - `enroll` возвращает первый подписанный пакет и `signing_keys` вместо заглушки; `revoke_node` пересобирает пакеты остальных агентов после транзакции отзыва, сбой пересборки отзыв не блокирует.
 
-   **Перенесено в P3-05:**
-   - заменить константы `BUNDLE_HISTORY = 20`, `MIN_AGENT_VERSION = 2.0.0`, `CERT_LIFETIME_DAYS = 90`, `DEFAULT_CONTROL_PORT` и имя интерфейса `oc-hub0` на секцию `control.*`;
-   - запрос с `since` больше последней версии хаба вызывает `compile_node` (восстановление из старого бэкапа, D-37);
-   - `compile_all` — при сохранении YAML хаба и на старте control API;
-   - хвосты P3-03 из пункта 4 (mTLS-идентичность для `renew`, удаление узла только через `revoke_node`, тонкие HTTP-обёртки, адрес `10.99.0.1`).
+   Переносы P3-03/P3-04 в P3-05 закрыты (см. пункт 6).
 
-6. **Следующее: P3-05 — control API** (ветка `redesign/p3-05-control-api`; план согласуется на Opus в режиме плана, код — на Sonnet). Детальный план составляется в начале сессии. Опорные точки из spec 05:
-   - секция `control.*` в YAML хаба (`enabled` подразумевает `fabric.enabled`, `port`, `long_poll_seconds`, `report_interval_seconds`, `offline_after_seconds`, `cert_lifetime_days`, `enroll_token_ttl_minutes`, `bundle_history`, `signing_key`) — заменяет константы P3-03/P3-04;
-   - адрес хаба `10.99.0.1/32` на `lo` ставит reconciler `kornode.net` (объект желаемого состояния) — ручная настройка dummy-интерфейса в netlab убирается;
-   - supervisor-программа `control-api`: `uvicorn kornode.control.app:create_app` только на `10.99.0.1:<control.port>`, mTLS (`CERT_REQUIRED`, CA kornode, CRL на каждый запрос), работает при `web.enabled: false`;
-   - идентичность агента — CN `agent-<id>` клиентского сертификата, каждый запрос сверяется с `nodes.state == 'active'` и CRL; `/enroll` — единственный эндпоинт без клиентского сертификата, с rate limit 5/мин на адрес;
-   - эндпоинты `/agent/v1/`: `enroll`, `ping`, `bundle` (long-poll, 304), `poll` (пакет + команды), `report`, `commands`, `commands/<id>/result`, `renew`; ошибки `{"error", "message"}` с кодами из spec 05;
-   - long-poll ждёт в процессе control API и перечитывает `nodes.desired_version` раз в 500 мс (SQLite — единственный общий канал между процессами);
-   - отчёты (последние 500 на узел, `last_seen`, `offline` через `offline_after_seconds`, `high_water_version`) и очередь типизированных команд (срок 10 мин, без произвольного shell);
-   - netlab: агент по сертификату через фабрику получает пакет long-poll'ом; отозванный — 403 `revoked`; enroll-сессия достаёт только до `10.99.0.1:<control.port>`; тестовые вызовы `_hub_call` из P3-03 заменяются на реальный HTTP.
-7. Далее по порядку: P3-05 (control API, mTLS, long-poll) → хвосты P2 из пункта 2 → P3-06/07 (агент и его CLI) → P3-08 (паритет: `korctl agent`, `/api/agents/*`, панель) → P3-09 (backup/restore) → P3-10 (e2e на 4 VM).
-8. Спайки S-01/S-02/S-04 пройдены (D-43, D-44); S-03 проверяется в netlab до P4-01; S-05/S-06 закрыты фреймворком netlab.
+6. ~~P3-05 (control API)~~ — **готов** (ветка `redesign/p3-05-control-api`, коммит `1a7a7c1`, не запушено; D-49…D-52). Пакет `kornode.control`, процесс `python -m kornode.control` (supervisor-программа `control-api` при `control.enabled`) на `10.99.0.1:<control.port>`:
+   - mTLS на одном порту (D-49): `CERT_OPTIONAL` + `PeerCertProtocol` (подкласс `H11Protocol`, сохраняет проверенный сертификат в состоянии соединения) + `MutualTLSMiddleware` — сертификат обязателен везде, кроме `POST /agent/v1/enroll`; проверяются CN `agent-<id>` **и** OU `agents`, CRL (перечитывается по mtime; нет, неверный или устаревший CRL → 503, fail closed) и `nodes.state`. Свой серверный сертификат `certs/control.crt` (IP SAN = адрес хаба). Spec 05 обновлена: `CERT_REQUIRED` несовместим с enroll на том же порту, а второй порт менял бы nft-правила D-44;
+   - эндпоинты `/agent/v1`: `ping`, `bundle`, `poll` (long-poll, перепроверка реестра раз в 500 мс; `since` выше последней версии → `compile_node(force=True)` и рост `high_water_version`), `report` (≤ 256 КиБ, `node_id` только из сертификата), `commands` и `commands/<id>/result` (узел завершает только свои выданные команды), `renew` (`node_id` из CN), `enroll` (5/мин на адрес); ошибки `{"error", "message"}`; лимиты размеров и версий — D-52;
+   - секция `control.*` (порт, long-poll, интервалы, `cert_lifetime_days`, `enroll_token_ttl_minutes`, `bundle_history`, `min_agent_version`, `signing_key`) заменила константы P3-03/P3-04; сохранение YAML хаба пересобирает пакеты, `compile_all` — на старте control API;
+   - адрес хаба `10.99.0.1/32` на `lo` ставит reconciler (D-50): новый примитив `kornode.net` `Address` (только добавление), `NodeFacts.service_address`; ручная настройка в netlab убрана;
+   - реестр: отчёты (последние 500 на узел), очередь команд (`enqueue/claim/finish`, не более одного раза, истечение 10 мин), `raise_high_water`;
+   - D-51: VPN-сессию enroll закрывает control API через 5 с после ответа — `occtl disconnect` внутри `enroll` рвал туннель вместе с ответом, и агент оставался без сертификата. Потерянный ответ исправляется отзывом и пересозданием узла;
+   - netlab: control API запущен в namespace хаба, enroll/poll/ping/403 `revoked`/401 без сертификата проверяются реальным HTTPS; `_hub_call` остался только для `create`, `token`, `revoke`, `delete` (это поверхности P3-08).
+
+   **Не сделано:** ревью `security-reviewer` и `code-reviewer` по P3-05 не прошло (лимит сессии) — прогнать на диффе `30f611c..1a7a7c1` до пуша: задача целиком про аутентификацию.
+
+   **Перенесено в P3-08:** `korctl agent ...`, `/api/agents/*`, раздел панели (в том числе команды агентам); после мутаций реестра вызывать `FabricGroupsService.sync()` и `BundleService.compile_*`; `control.status` / `control.rotate_key` (spec 08); удаление узла только через `EnrollmentService.revoke_node`.
+
+7. **Следующее: P3-06 — агент** (ветка `redesign/p3-06-agent`; план согласуется на Opus в режиме плана, код — на Sonnet). Перед ней или первым шагом в ней — хвосты P2 из пункта 2: агент работает на том же `kornode.net` без центра под рукой. Опорные точки (spec 06, D-38…D-40):
+   - пакет `kornode_agent` и образ `kornode-agent`; зависит только от `kornode.net` и `kornode.bundle` (AST-тест импортов);
+   - `enroll` по токену: локальные ключи (TLS ECDSA P-256 и X25519), enroll-сессия openconnect с проверкой `pin`, `POST /agent/v1/enroll`, переход на сертификат;
+   - цикл работы на `GET /agent/v1/poll`; проверка пакета общим валидатором `kornode.bundle.validator`; кэш трёх последних версий, `state.json` как единственный указатель;
+   - применение с подтверждением и откатом (проверки «без регрессии», D-40), старт из кэша без центра;
+   - отчёты (`POST /report` раз в 30 с и при событиях), выполнение типизированных команд, продление сертификата после 2/3 срока через `/renew`.
+8. Далее по порядку: хвосты P2 из пункта 2 → P3-06/07 (агент и его CLI) → P3-08 (паритет: `korctl agent`, `/api/agents/*`, панель) → P3-09 (backup/restore) → P3-10 (e2e на 4 VM).
+9. Спайки S-01/S-02/S-04 пройдены (D-43, D-44); S-03 проверяется в netlab до P4-01; S-05/S-06 закрыты фреймворком netlab.
 
 **5. Что нужно от владельца заранее (к P3-10).** Четыре VM (`hub`, `agent-a`, `agent-b`, `ext`; под e2e пока зарезервированы три адреса — `192.168.122.173/.152/.237`, четвёртую нужно определить), self-hosted runner на `hub`, инвентарь в secrets/variables репозитория. VM `192.168.122.30` — только netlab, не e2e-стенд.
 
