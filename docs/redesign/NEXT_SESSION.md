@@ -8,7 +8,7 @@ switch to Sonnet for the code once the plan is agreed.
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык общения — русский, обращайся ко мне «Ivan».
 Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (P3), раздел «Дальнейшие действия» в `docs/redesign/PLAN.ru.md`,
-`docs/redesign/DECISIONS.md` (особенно D-29…D-52, S-01…S-04), `docs/spec/05`, `06`, `07`, `11`, `docs/spec/schemas/bundle.v1.schema.json`,
+`docs/redesign/DECISIONS.md` (особенно D-29…D-54, S-01…S-04), `docs/spec/05`, `06`, `07`, `11`, `docs/spec/schemas/bundle.v1.schema.json`,
 затем память Serena проекта `kornode`: `redesign/p2-hub-cutover`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Правила работы (важно, это про стоимость)
@@ -32,9 +32,10 @@ switch to Sonnet for the code once the plan is agreed.
 - Ревью перед коммитом задач, трогающих аутентификацию/ядро: агенты `security-reviewer` и `code-reviewer` (в этом проекте правило «тесты → секьюрити → коммит» для старых проектов формально выключено, но здесь ревью окупилось — делай).
 
 ## Состояние (на момент передачи, 2026-10-14)
-Ветка `redesign/p3-05-control-api` (стек: доки P3-04/P3-06 → P3-01 → спайки → P3-02 → P3-03 → P3-04 → P3-05), последний коммит `1a7a7c1`, **не запушена**; `main` локально опережает `origin/main` на 44 коммита (ветки P3 ещё не влиты). Дерево чистое.
-`make check`: 856 passed, 39 skipped (netlab), `make parity` зелёный, netlab 39/39 на VM. Следующая ветка — `redesign/p3-06-agent` от `redesign/p3-05-control-api`.
-**Не сделано по P3-05:** `security-reviewer` и `code-reviewer` упали на лимите сессии — прогнать на дифе `30f611c..1a7a7c1` до пуша (правило «тесты → секьюрити → коммит» для этого проекта формально выключено, но на auth-задачах ревью окупалось).
+Ветка `redesign/p3-06-agent` (стек: доки P3-04/P3-06 → P3-01 → спайки → P3-02 → P3-03 → P3-04 → P3-05 → P3-06), последний коммит `3ce1ac0`, **не запушена**; `main` локально опережает `origin/main` на 44 коммита (ветки P3 ещё не влиты). Дерево чистое. Следующая ветка — `redesign/p3-07-agent-cli` от `redesign/p3-06-agent`.
+`make check`: 895 passed, 40 skipped (netlab), **2 failed** — `tests/test_enrollment.py::test_renew_only_after_two_thirds_and_keeps_old_cert` и `::test_revoke_node_crl_reload_disconnect_and_sync`: зависят от настенных часов (`certtool` считает срок от реального времени, тест — от фиксированной даты 2026-10-13; падают после ~12:00 UTC), к P3-06 не относятся — отдельная задача, починить до пуша. `make parity` зелёный, netlab 40/40 на VM.
+Ревью P3-05 и P3-06 (`security-reviewer`, `code-reviewer`) прогнаны на дифе `30f611c..HEAD`, замечания исправлены (`dca90af`, `3ce1ac0`).
+**Не проверено:** `Dockerfile.agent` не собирался (размер ≤150 МБ из spec 06 не подтверждён) — собрать `docker build -f Dockerfile.agent .` и записать размер.
 
 Сделано в P3 (подробности — `DECISIONS.md`, `docs/spec/05–07`, `ROADMAP.md`):
 - Архитектура P3-04/P3-06 согласована: D-34…D-40 (подпись Ed25519, sealing секретов, монотонные версии, apply-with-confirm, `state.json` агента).
@@ -64,6 +65,12 @@ switch to Sonnet for the code once the plan is agreed.
   - Реестр: `add_report` (последние 500), очередь команд (`enqueue/claim/finish`, at-most-once, истечение 10 мин), `raise_high_water`. Поверхности CLI/API/панель для команд — P3-08.
   - **D-51:** `enroll(end_session=False)`; VPN-сессию enroll закрывает control API через 5 с после ответа (иначе `occtl disconnect` рвал туннель с ответом — сертификат терялся). Потерянный ответ лечится отзывом и пересозданием узла.
   - Netlab (`test_p3_enrollment.py`, `test_p3_groups.py`): control API запускается в namespace хаба, enroll/poll/ping/403 `revoked`/401 — реальный HTTPS; `_hub_call` остался только для `create`, `token`, `revoke`, `delete`.
+- **P3-06** (D-53, D-54) — агент:
+  - `kornode.tunnels` (stdlib, AST-тест): `DialSpec`, argv openconnect, carrier, pin (`tunnels/pin.py`, бывший `services/cert_pin.py`), `vpnc-script-kornode`; `UpstreamService` хаба работает через него. `validate(..., revalidate=True)` — для кэша.
+  - `kornode_agent` (импортирует только `kornode.net/bundle/tunnels`, httpx, cryptography, pydantic, yaml): `store.py` (атомарные записи, `state.json`, `trust.json` с ротацией), `config.py` (`agent.yaml`), `control.py` (httpx, mTLS; биндится на fabric-адрес), `enroll.py`, `inputs.py` (`AgentNetInputs`, bootstrap-политика `host → fabric`), `tunnels.py` (`TunnelManager` под локом), `health.py`, `apply.py` (`Applier`: boot, `apply_bundle`, `rollback_to`, `retry_deferred`; синхронный, на фейках), `agent.py` (`Agent`: poll/report/renew/deferred, команды `reconnect|explain|collect_diag|restart|rollback`), `cli.py` (`enroll`, `run`, `version`).
+  - `Dockerfile.agent`, `compose.agent.yaml`, `agent/supervisord.conf`; токен enroll несёт `control`.
+  - Netlab `tests/netlab/test_p3_agent.py`: реальный `kornode-agent enroll` + `run` против хаба — бандл подтверждён, отчёт дошёл, рестарт из кэша при остановленном control API.
+  - Пробелы (D-54): `resolved`-домены, `accept_server_routes`, p12-upstream, doctor-находки на агенте.
 - Netlab-хелперы для ocserv: `tests/netlab/ocserv_peers.py` (`Peer` — сырой openconnect-клиент с паролем или сертификатом, `issue_client_cert`, `read_env`), сценарии `tests/netlab/test_p3_groups.py` (на отрендеренном конфиге) и `test_spike_p3_groups.py`.
 
 Решение о пуше (одним PR в `origin/main`, чтобы CI-netlab впервые прошёл на GitHub-раннере, либо напрямую в `main`) — за мной, не предлагай и не делай сам.
@@ -73,10 +80,10 @@ switch to Sonnet for the code once the plan is agreed.
   линтеры — `~/.local/bin/ruff`, `~/.local/bin/mypy`. `ruff format --check` на всём репо красный из-за старых файлов — форматируй только то, что меняешь.
 
 ## Порядок работы по P3
-1. ~~P3-03~~, ~~P3-04~~, ~~P3-05~~ — готовы. Переносы дальше:
+1. ~~P3-03~~, ~~P3-04~~, ~~P3-05~~, ~~P3-06~~ — готовы. Переносы дальше:
    - P3-08: `korctl agent ...`, `/api/agents/*`, панель; после мутаций реестра вызывать `FabricGroupsService.sync()` и `BundleService.compile_*`; `control.status` / `control.rotate_key` (spec 08); удаление узла только через `EnrollmentService.revoke_node`.
    - Хвост (низкий приоритет): CRL ocserv перечитывается по SIGHUP — проверено в netlab.
-2. **P3-06 (Opus, режим плана)** — пакет `kornode_agent` + образ `kornode-agent`: enroll, run loop (`GET /agent/v1/poll`), кэш 3 версий, verify (`kornode.bundle.validator`), apply-with-confirm и откат, загрузка из кэша, отчёты (`POST /report`, 30 с), команды. Зависит только от `kornode.net` и `kornode.bundle` (AST-тест импортов). Затем P3-07 (CLI `kornode-agent`), P3-08, P3-09, P3-10.
+2. **P3-07 (Opus, режим плана)** — остальной CLI `kornode-agent` (spec 06 «CLI»): `status [--json]`, `explain`, `doctor`, `bundle show|history|rollback`, `diag`, `reconnect`, коды выхода 0/1/2/3/4, `--json` везде, без секретов в выводе. В `Agent` уже есть `_explain`, `_diag`, `_reconnect`, а в `Applier` — `rollback_to`; нужен способ достучаться до работающего процесса (unix-сокет агента в `/var/lib/kornode-agent`, 0600) либо читать `state.json`/кэш напрямую для команд, которым процесс не нужен (`bundle show|history`, `status` без хаба). Решить в плане. Затем P3-08, P3-09, P3-10.
 3. Спайк S-03 проверяй в netlab до P4-01; S-05/S-06 уже закрыты фреймворком.
 Хвосты P2 (пуш не блокируют, закрыть до P3-06 — агент работает на том же `kornode.net` без центра):
 netlab-сценарий для D-32 «exit убран, пока соединение живо» (0 пакетов на uplink); окно второго писателя ядра на старте демона;
@@ -86,15 +93,3 @@ netlab-сценарий для D-32 «exit убран, пока соединен
 ## Что нужно от меня для P3-10 (напомни заранее)
 4 VM (`hub`, `agent-a`, `agent-b`, `ext`), self-hosted runner на `hub` и инвентарь в secrets/variables репозитория. Runner лучше поднять заранее.
 Четвёртый адрес VM пока не определён (зарезервированы три: `192.168.122.173/.152/.237`); `192.168.122.30` — только netlab.
-
-
-## Обновление после P3-06 (2026-10-14)
-Ветка `redesign/p3-06-agent` (3 коммита поверх `redesign/p3-05-control-api`), не запушена. Готово: `kornode.tunnels`
-(общий диалер), `kornode_agent` (store/trust, control-клиент, enroll, apply-with-confirm, inputs, tunnels, health, run loop,
-отчёты, команды, renew), `kornode-agent enroll|run|version`, `Dockerfile.agent`, `compose.agent.yaml`, netlab
-`test_p3_agent.py`. Решения D-53, D-54. Осталось: P3-07 — `status/explain/doctor/bundle show|history|rollback/diag/reconnect`
-(в агенте уже есть `Agent._explain/_diag/_reconnect`, `Applier.rollback_to`; нужен способ достучаться до работающего процесса —
-unix-сокет агента), затем P3-08…P3-10. Пробелы агента (D-54): `resolved`-домены, `accept_server_routes`, p12, doctor.
-Известно: `tests/test_enrollment.py::test_renew_only_after_two_thirds…` и `…revoke_node_crl…` зависят от настенных часов
-(падают после ~12:00 UTC: `certtool` считает срок от реального времени, тест — от фиксированного) — отдельная задача.
-Образ `Dockerfile.agent` собран/проверен по размеру только если это отмечено в отчёте PR.
