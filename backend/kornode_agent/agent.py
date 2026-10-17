@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import io
 import json
@@ -12,9 +13,10 @@ import subprocess
 import tarfile
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -28,9 +30,12 @@ from kornode_agent import __version__
 from kornode_agent.apply import Applier, Convergence, Outcome
 from kornode_agent.config import AgentConfig, load_config
 from kornode_agent.control import Command, ControlClient, ControlError, HubUnreachable
+from kornode_agent.doctor import run_doctor
 from kornode_agent.enroll import load_seal_key
 from kornode_agent.health import AgentHealth
 from kornode_agent.inputs import AgentNetInputs, SystemProbes
+from kornode_agent.inspection import Redactor, cache_redactor, load_cached, safe_json
+from kornode_agent.local import LocalError, LocalServer, ProcessLock, Request
 from kornode_agent.store import Store, atomic_write
 from kornode_agent.tunnels import TunnelManager, specs_for
 
@@ -93,6 +98,27 @@ class Agent:
     # ----------------------------------------------------------------- setup
 
     async def run(self) -> int:
+        self._tasks: list[asyncio.Task[None]] = []
+        self._threads: list[threading.Thread] = []
+        self._local = LocalServer(self.root, self.perform)
+        with ProcessLock(self.root):
+            try:
+                return await self._run()
+            finally:
+                await self._local.close()
+                for task in self._tasks:
+                    task.cancel()
+                await asyncio.gather(*self._tasks, return_exceptions=True)
+                self._thread_stop.set()
+                if hasattr(self, "reconciler"):
+                    self.reconciler.stop()
+                for thread in self._threads:
+                    await asyncio.to_thread(thread.join)
+                if hasattr(self, "client"):
+                    await self.client.aclose()
+                # Tunnels stay up: the data plane outlives the control plane.
+
+    async def _run(self) -> int:
         self.loop = asyncio.get_running_loop()
         self.config: AgentConfig = load_config(self.root)
         self.client = ControlClient.enrolled(
@@ -107,7 +133,8 @@ class Agent:
         self.inputs = AgentNetInputs(
             self.config, self.probes, self.tunnels, on_change=lambda: self.reconciler.wake()
         )
-        self.reconciler = Reconciler(self.inputs.desired, Kernel())
+        self.kernel = Kernel()
+        self.reconciler = Reconciler(self.inputs.desired, self.kernel)
         self.runtime = AgentRuntime(
             self.inputs, self.tunnels, self.reconciler, self.config, self.root
         )
@@ -124,15 +151,18 @@ class Agent:
         self._versions = await asyncio.to_thread(_component_versions)
         # Boot first: a reconciler pass before the cached bundle is active would
         # drop the kill-switches the kernel still holds (fail closed).
-        await asyncio.to_thread(self.applier.boot)
+        await _worker(self.applier.boot)
         for target in (
             self.reconciler.run_forever,
             lambda: watch_netlink(self.reconciler, self._thread_stop),
             self._tunnel_loop,
         ):
-            threading.Thread(target=target, daemon=True).start()
+            thread = threading.Thread(target=target, daemon=True)
+            self._threads.append(thread)
+            thread.start()
         log.info("agent %d started at version %d", self.config.node_id, self.applier.state.current)
-        tasks = [
+        await self._local.start()
+        self._tasks = [
             asyncio.create_task(coro)
             for coro in (
                 self._poll_loop(),
@@ -142,13 +172,6 @@ class Agent:
             )
         ]
         await self.stop.wait()
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        self._thread_stop.set()
-        self.reconciler.stop()
-        await self.client.aclose()
-        # Tunnels are left up: the data plane outlives the control plane.
         return self.exit_code
 
     def _fabric_address(self) -> str | None:
@@ -180,7 +203,8 @@ class Agent:
             if exc.revoked:
                 self.loop.call_soon_threadsafe(self._mark_revoked)
             return False
-        except Exception:
+        except Exception as exc:
+            log.warning("hub ping failed: %s", type(exc).__name__)
             return False
         return True
 
@@ -236,7 +260,7 @@ class Agent:
                     and result.bundle.version > self.applier.state.high_water
                 ):
                     async with self._apply_lock:
-                        outcome = await asyncio.to_thread(
+                        outcome = await _worker(
                             self.applier.apply_bundle, result.bundle.body, result.bundle.signature
                         )
                     _log_outcome(outcome)
@@ -286,7 +310,7 @@ class Agent:
             elif now - self._fabric_healthy_since >= DEFERRED_STABLE_SECONDS:
                 self._fabric_healthy_since = None
                 async with self._apply_lock:
-                    outcome = await asyncio.to_thread(self.applier.retry_deferred)
+                    outcome = await _worker(self.applier.retry_deferred)
                 if outcome is not None:
                     _log_outcome(outcome)
                     self._report_now.set()
@@ -334,25 +358,23 @@ class Agent:
     async def _execute(self, command: Command) -> None:
         ok, output, artefact = True, "", None
         try:
-            if command.type == "reconnect":
-                ok, output = await asyncio.to_thread(self._reconnect, command.args.get("tunnel"))
-            elif command.type == "explain":
-                output = json.dumps(await asyncio.to_thread(self._explain, command.args))
+            if command.type in ("reconnect", "explain", "rollback"):
+                args = dict(command.args)
+                if command.type == "rollback":
+                    args = {"version": args["to_version"]}
+                result = await self.perform(Request.model_validate({"op": command.type, **args}))
+                output = json.dumps(result)
             elif command.type == "collect_diag":
                 artefact = await asyncio.to_thread(self._diag)
             elif command.type == "restart":
                 output = "restarting"
-            elif command.type == "rollback":
-                async with self._apply_lock:
-                    outcome = await asyncio.to_thread(
-                        self.applier.rollback_to, int(command.args["to_version"])
-                    )
-                ok = outcome.result == "confirmed"
-                output = outcome.error or outcome.result
+
             else:
                 ok, output = False, f"unknown command {command.type!r}"
-        except (ValueError, KeyError, OSError) as exc:
-            ok, output = False, f"{type(exc).__name__}: {exc}"
+        except LocalError as exc:
+            ok, output = False, str(exc)
+        except (ValueError, KeyError, OSError):
+            ok, output = False, "invalid command arguments or unavailable local data"
         for attempt in range(3):
             try:
                 await self.client.command_result(
@@ -367,29 +389,134 @@ class Agent:
             self.stop.set()
         self._report_now.set()
 
-    def _reconnect(self, name: str | None) -> tuple[bool, str]:
-        names = [name] if name else list(self.tunnels._specs)  # noqa: SLF001
-        done = [n for n in names if self.tunnels.reconnect(n)]
-        return bool(done), ", ".join(done) or f"unknown tunnel {name!r}"
+    async def perform(self, req: Request) -> dict[str, Any]:
+        """One implementation for local RPC and the hub command queue."""
+        if req.op == "status":
+            report = await asyncio.to_thread(self.build_report)
+            reachable = False
+            try:
+                await asyncio.wait_for(self.client.ping(), 10)
+                reachable = True
+            except ControlError as exc:
+                if exc.revoked:
+                    self._mark_revoked()
+            except (HubUnreachable, TimeoutError):
+                pass
+            return {"running": True, "hub_reachable": reachable, **report}
+        if req.op == "explain":
+            result = await asyncio.to_thread(self._explain, req.model_dump(exclude_none=True))
+        elif req.op == "doctor":
+            result = {"findings": await asyncio.to_thread(self._doctor)}
+        elif req.op == "diag":
+            # Not through the redactor: its base64-line rule would swallow the
+            # archive whole; `_diag` redacts the files it packs.
+            archive = await asyncio.to_thread(self._diag)
+            return {"archive_b64": base64.b64encode(archive).decode()}
+        elif req.op == "reconnect":
+            async with self._apply_lock:
+                result = await _worker(self._reconnect, req.tunnel, req.dry_run)
+            self._report_now.set()
+        else:
+            assert req.version is not None
+            async with self._apply_lock:
+                if req.dry_run:
+                    if (
+                        req.version not in self.applier.state.confirmed
+                        or req.version == self.applier.state.current
+                    ):
+                        raise LocalError(
+                            "rollback_conflict", "choose a different cached confirmed version", 3
+                        )
+                    await asyncio.to_thread(load_cached, self.root, req.version)
+                    return {
+                        "dry_run": True,
+                        "from_version": self.applier.state.current,
+                        "to_version": req.version,
+                        "high_water": self.applier.state.high_water,
+                    }
+                outcome = await _worker(self.applier.rollback_to, req.version)
+            self._report_now.set()
+            if outcome.result != "confirmed":
+                raise LocalError(
+                    "rollback_failed",
+                    "rollback did not confirm; inspect status for the recorded outcome",
+                    3 if outcome.result in ("skipped", "invalid_bundle") else 1,
+                )
+            result = {"version": outcome.version, "result": outcome.result}
+        return self._redactor().data(result)  # type: ignore[no-any-return]
+
+    def _reconnect(self, name: str | None, dry_run: bool = False) -> dict[str, Any]:
+        if self.revoked:
+            raise LocalError("revoked", "revoked agents cannot reconnect tunnels", 3)
+        names = [name] if name else list(self.tunnels.specs())
+        if not names or any(n not in self.tunnels.specs() for n in names):
+            raise LocalError("unknown_tunnel", "unknown tunnel; inspect status for names", 3)
+        if dry_run:
+            return {"dry_run": True, "would_reconnect": names}
+        for tunnel in names:
+            self.tunnels.reconnect(tunnel)
+        errors = {n: self.tunnels.errors[n] for n in names if n in self.tunnels.errors}
+        if errors:
+            raise LocalError("reconnect_failed", "tunnel dial failed; inspect status")
+        return {"reconnected": names}
 
     def _explain(self, args: dict[str, Any]) -> dict[str, Any]:
         policy, facts = self.inputs.policy(), self.inputs.facts()
         compiled = compile_policy(policy, facts)
-        return explain(compiled, policy, facts, str(args["src"]), str(args["dst"])).as_dict()
+        decision = explain(
+            compiled,
+            policy,
+            facts,
+            str(args["src"]),
+            str(args["dst"]),
+            route_get=self.kernel.route_get,
+        ).as_dict()
+        if args.get("proto") is not None or args.get("port") is not None:
+            decision["query"] = {key: args.get(key) for key in ("src", "dst", "proto", "port")}
+            decision["warnings"].append(
+                "Egress rules match addresses, not protocol/port; kernel check is mark-based."
+            )
+        return decision
+
+    def _redactor(self) -> Redactor:
+        known = [self.config.hub.camouflage or ""]
+        active = self.inputs.active
+        if active:
+            known.extend(active.secrets.values())
+        return cache_redactor(self.root, known)
+
+    def _doctor(self) -> list[dict[str, str]]:
+        return run_doctor(self.inputs, self.root, self.kernel)
 
     def _diag(self) -> bytes:
         buffer = io.BytesIO()
+        redactor = self._redactor()
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             for name, argv in (
                 ("ip-rule.txt", ["ip", "rule", "show"]),
                 ("ip-route.txt", ["ip", "route", "show", "table", "all"]),
                 ("nft.txt", ["nft", "list", "ruleset"]),
             ):
-                _add(archive, name, _capture(argv))
-            _add(archive, "report.json", json.dumps(self.build_report(), indent=1).encode())
-            _add(archive, "state.json", self.store.state_path.read_bytes())
+                _add(archive, name, redactor.text(_capture(argv).decode(errors="replace")).encode())
+            report = self.build_report()
+            _add(archive, "report.json", safe_json(report, redactor))
+            _add(archive, "doctor.json", safe_json(report["doctor"], redactor))
+            _add(archive, "state.json", safe_json(self.store.load_state().model_dump(), redactor))
+            total = 0
             for log_file in sorted((self.root / "logs").glob("*.log")):
-                _add(archive, f"logs/{log_file.name}", log_file.read_bytes()[-100_000:])
+                if log_file.is_symlink() or not log_file.is_file():
+                    continue
+                with log_file.open("rb") as handle:
+                    handle.seek(max(0, log_file.stat().st_size - 100_000))
+                    tail = handle.read(100_000).decode(errors="replace")
+                # Never include a partial first line (possibly the middle of a key).
+                if log_file.stat().st_size > 100_000:
+                    tail = tail.partition("\n")[2]
+                content = redactor.text(tail).encode()
+                if total + len(content) > 2 * 1024 * 1024:
+                    break
+                _add(archive, f"logs/{log_file.name}", content)
+                total += len(content)
         data = buffer.getvalue()
         if len(data) > MAX_DIAG_BYTES:
             raise ValueError("diagnostic archive exceeds 5 MB")
@@ -398,12 +525,12 @@ class Agent:
     # --------------------------------------------------------------- report
 
     def build_report(self) -> dict[str, Any]:
-        state = self.applier.state
+        state = self.store.load_state()
         active = self.inputs.active
         links = self.probes.links()
         status = self.reconciler.status()
         tunnels = []
-        for name, spec in sorted(self.tunnels._specs.items()):  # noqa: SLF001
+        for name, spec in sorted(self.tunnels.specs().items()):
             dial = spec.dials[0]
             tunnels.append(
                 {
@@ -419,27 +546,46 @@ class Agent:
             {"name": s.name, "iface": s.interface, "present": s.interface in links}
             for s in (active.bundle.policy.sources if active else ())
         ]
-        return {
-            "node_id": self.config.node_id,
-            "agent_version": __version__,
-            "time": _now(),
-            "applied_version": state.current,
-            "pending_version": state.pending.version if state.pending else None,
-            "high_water_version": state.high_water,
-            "last_apply": state.last_apply.model_dump() if state.last_apply else None,
-            "rollbacks": list(self.rollbacks),
-            "failed_versions": dict(state.failed),
-            "tunnels": tunnels,
-            "sources": sources,
-            "local_networks": [str(n) for n in self.probes.local_networks(set(links))],
-            "reconciler": {
-                "last_apply": status["last_apply_at"],
-                "drift_events": status["drift"],
-                "last_error": status["last_error"],
-            },
-            "versions": self._versions,
-            "revoked": self.revoked,
-        }
+        return cast(
+            dict[str, Any],
+            self._redactor().data(
+                {
+                    "node_id": self.config.node_id,
+                    "agent_version": __version__,
+                    "time": _now(),
+                    "applied_version": state.current,
+                    "pending_version": state.pending.version if state.pending else None,
+                    "high_water_version": state.high_water,
+                    "last_apply": state.last_apply.model_dump() if state.last_apply else None,
+                    "rollbacks": list(self.rollbacks),
+                    "failed_versions": dict(state.failed),
+                    "tunnels": tunnels,
+                    "sources": sources,
+                    "local_networks": [str(n) for n in self.probes.local_networks(set(links))],
+                    "reconciler": {
+                        "last_apply": status["last_apply_at"],
+                        "drift_events": status["drift"],
+                        "last_error": status["last_error"],
+                    },
+                    "versions": self._versions,
+                    "revoked": self.revoked,
+                    "doctor": self._doctor(),
+                }
+            ),
+        )
+
+
+async def _worker(function: Callable[..., Any], *args: Any) -> Any:
+    """Cancellation must not release the apply/process lock before a worker exits."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # Preserve cancellation even if the worker failed: otherwise a caller
+        # with an error/retry loop could swallow shutdown as an ordinary error.
+        with contextlib.suppress(Exception):
+            await task
+        raise
 
 
 def _component_versions() -> dict[str, str]:

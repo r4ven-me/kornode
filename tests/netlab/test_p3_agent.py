@@ -22,6 +22,7 @@ from tests.netlab.kornode_nodes import _popen_in_namespace, _terminate_process, 
 from tests.netlab.lab import Namespace
 from tests.netlab.test_p3_enrollment import NEW_ID, _decode, _hub_call
 from tests.netlab.test_p3_groups import (  # noqa: F401 - fixtures
+    HUB_FABRIC_ADDR,
     RenderedHub,
     node_tmp,
     rendered_hub,
@@ -111,13 +112,44 @@ def test_agent_enrolls_confirms_its_bundle_and_boots_from_cache(
         assert ns.run(["ip", "link", "show", "dev", "oc-hub0"], check=False).ok
         _wait_until(lambda: _applied_on_hub(hub) == _state(root)["current"], "report reached hub")
 
+        # P3-07: CLI talks to this process, never starts a second reconciler.
+        status = ns.run(_agent_argv(root, "status", "--json"), check=False, timeout=120)
+        assert status.ok, status.stdout + status.stderr
+        report = json.loads(status.stdout)
+        assert report["running"] and report["hub_reachable"]
+        assert report["applied_version"] == _state(root)["current"]
+        for args in (
+            ("bundle", "show"),
+            ("bundle", "history"),
+            ("explain", "host", HUB_FABRIC_ADDR),
+            ("reconnect", "fabric", "--dry-run"),
+        ):
+            result = ns.run(_agent_argv(root, *args, "--json"), check=False, timeout=120)
+            assert result.ok, result.stdout + result.stderr
+            json.loads(result.stdout)
+        doctor = ns.run(_agent_argv(root, "doctor", "--json"), check=False, timeout=120)
+        assert doctor.returncode in (0, 1)
+        assert "findings" in json.loads(doctor.stdout)
+        diag_path = root / "diagnostic.tar.gz"
+        diag = ns.run(
+            _agent_argv(root, "diag", "--out", str(diag_path), "--json"), check=False, timeout=120
+        )
+        assert diag.ok and diag_path.stat().st_mode & 0o777 == 0o600
+        assert diag_path.stat().st_size <= 5 * 1024 * 1024
+        assert (root / "run/agent.sock").stat().st_mode & 0o777 == 0o600
+
         # Hub control plane down: the agent keeps its state and restarts from the cache.
         control = next(
             p for p in hub.processes if isinstance(p.args, list) and "kornode.control" in p.args
         )
         _terminate_process(control)
         current = _state(root)["current"]
+        down = ns.run(_agent_argv(root, "status", "--json"), check=False, timeout=120)
+        assert down.returncode == 4 and json.loads(down.stdout)["hub_reachable"] is False
         _terminate_process(agent)
+        offline = ns.run(_agent_argv(root, "status", "--json"), check=False, timeout=120)
+        assert offline.ok and json.loads(offline.stdout)["running"] is False
+        assert ns.run(_agent_argv(root, "bundle", "show", "--json"), check=False).ok
         agent = _popen_in_namespace(
             ns, [*env, *_agent_argv(root, "run")], root / "logs" / "agent2.log"
         )

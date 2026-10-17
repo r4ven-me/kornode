@@ -211,6 +211,15 @@ class TunnelManager:
                     self.errors.pop(name, None)
         self._specs = dict(specs)
 
+    def specs(self) -> dict[str, TunnelSpec]:
+        """A snapshot for diagnostics and reconnect, never expose the mutable mapping.
+
+        Deliberately lock-free: tick()/reconnect() hold the lock for a whole
+        dial (up to ~65 s) and status/doctor must not wait for it. set_desired()
+        replaces the dict by one assignment, so a copy is always consistent.
+        """
+        return dict(self._specs)
+
     def carrier(self, exit_name: str) -> tuple[str, ...]:
         return self._carriers.get(exit_name, ())
 
