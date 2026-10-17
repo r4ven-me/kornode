@@ -87,12 +87,12 @@ Done when:
 | P3-04 | Bundle compiler on the hub: per-agent JSON per `schemas/bundle.v1.schema.json`, Ed25519 signature, secret sealing, monotonic versions, stored history. **Done (D-48).** |
 | P3-05 | Control API service (`kornode.control`): separate supervisor program bound to the hub fabric address, mTLS, long-poll, reports, command queue. Runs with `web.enabled: false`. **Done (D-49…D-52).** |
 | P3-06 | Agent package `kornode_agent` + image `kornode-agent`: enroll, run loop, cache (3 versions), verify, apply-with-confirm, rollback, boot from cache, report, commands. Depends only on `kornode.net` + small deps. **Done (D-53, D-54; CLI beyond enroll/run/version is P3-07).** |
-| P3-07 | Agent CLI `kornode-agent` (`docs/spec/06-agent.md`). |
-| P3-08 | Hub management surfaces with parity: `korctl agent ...`, `/api/agents/*`, panel "Agents" section (list, detail, enroll dialog, bundle history/diff, commands, revoke). |
-| P3-09 | `korctl hub backup|restore` (+ API + panel), encrypted archive, restore test. |
-| P3-10 | E2E harness on 4 VMs via self-hosted runner, workflow `e2e.yml` (manual + PR label `e2e`). |
+| P3-07 | Agent CLI `kornode-agent` (`docs/spec/06-agent.md`). **Implemented, awaiting Claude review and privileged netlab execution (D-55).** |
+| P3-08 | Hub management surfaces with parity: `korctl agent ...`, `/api/agents/*`, panel "Agents" section (list, detail, enroll dialog, bundle history/diff, commands, revoke), control status/signing-key rotation. **Implemented, awaiting Claude review and privileged netlab execution (D-56; `P3-08-REVIEW.md`).** |
+| P3-09 | `korctl hub backup|restore` (+ API + panel), encrypted archive, restore test. **Implemented, awaiting Claude review and privileged wipe/restore/reconnect netlab (D-57; `P3-09-REVIEW.md`). Restore is staged, never a live replacement.** |
+| P3-10 | E2E harness on 4 VMs via self-hosted runner, workflow `e2e.yml` (manual + PR label `e2e`). **Harness implemented, NOT Done: awaiting Claude review, owner provisioning and real VM execution (D-58; `P3-10-REVIEW.md`, [runbook](../runbooks/vm-e2e.md)). Container-isolated P3 scope only; full client/P4 and production host-network coverage remain outstanding.** |
 
-Status 2026-10-13: P3-01…P3-04 done (spikes S-01/S-02/S-04 run, D-42…D-44).
+Status 2026-10-17: P3-01…P3-06 implemented as recorded above. P3-07…P3-10 are in the uncommitted working tree, **not finally accepted**. The owner explicitly authorized P3-09/P3-10 implementation before review; this does not waive Claude review, privileged netlab, P2 prerequisites or four-VM evidence. P3-10 local checks: 49 safety tests + 4 parity passed; 22 VM/P4 cases skipped. Full check: ruff/mypy passed, pytest 1069 passed / 64 skipped / 2 pre-existing enrollment clock failures. No VM/Docker deployment was run.
 
 Done when:
 - `kornode-agent enroll <token>` brings a fresh VM to `online` in ≤ 30 s [e2e];

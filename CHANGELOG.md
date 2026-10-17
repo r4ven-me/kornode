@@ -2,6 +2,112 @@
 
 ## [Unreleased]
 
+### Fixed (P2 tails, D-60)
+
+- Reconciler: single kernel writer enforced by `flock` on `generated_dir/reconciler.lock` (daemon
+  for life, in-process `net apply` per pass, waits for a starting daemon instead of writing);
+  netlink events no longer bypass the backoff after a failed pass (`Reconciler.wake_netlink`).
+- Tests: `tests/test_kernel_single_writer.py` is AST-based; new netlab scenario for D-32 (flow of a
+  removed exit sends 0 packets to the uplink; written, not yet run on the netlab VM).
+- Review 2026-10-18: `kornode-agent diag` returns the archive (the redactor swallowed it);
+  `credentials_set` and other boolean flags, public keys and hex digests stay readable;
+  `rotate-signing-key --dry-run` no longer counts the hub; e2e workflow no longer uploads agent
+  diagnostic archives to the public repository.
+- `Dockerfile.agent` built locally: 396 MB (target 150 MB not met; `supervisor` pulls a second
+  Python 3.13, ~27 MB, base + apt ~250 MB).
+
+### Fixed (review follow-ups for P3-07…P3-10, D-59)
+
+- Agent: local socket shutdown cancels handlers before `wait_closed()`; `TunnelManager.specs()`
+  no longer blocks behind a dial; unexpected local/doctor/ping failures are logged (type only);
+  redactor covers `psk`, API/auth keys, sessions, credentials and bare `Bearer`/`Basic` tokens.
+- Hub: address validation marks only the mutated node's prefixes as "adding"; the command queue
+  limit counts `queued`+`delivered`; `ocpasswd` hashing happens outside the registry transaction;
+  `control status` lists agents that have not confirmed the signing-key announcement.
+- Backup: certbot-style symlinks at default `certs/` names are materialized; all directories of a
+  staged restore are 0700.
+- E2E: `pull_request` trigger removed (dispatch from a protected branch only), checkout keeps
+  `artifacts/`, artifact retention 7 days, container `sysctls` for forwarding.
+- Panel: secrets are kept after a failed save, the enrollment token can be revealed when the
+  clipboard API is unavailable, Backup shows backend detail, policy "From" accepts commas.
+- Tests: enrollment tests use the real clock (certtool dates certificates from it).
+
+### Added (P3-10: disposable four-VM E2E tooling)
+
+- Environment-only SSH inventory, strict host pins, explicit destructive opt-in,
+  root-owned VM authorization markers, exclusive leases and guarded recovery.
+- Build/save/load both images on the designated hub runner; Docker pinned to the
+  local rootful socket/default builder. Per-case Compose projects isolate kernel
+  faults in container namespaces; metadata/config are read-only, only state is RW.
+- Executable enrollment, confirmed registry updates, bounded blackhole recovery,
+  revoke/mTLS 403, rotating hub wipe/restore, previous-image upgrade, route repair,
+  signed bad-bundle rollback, signature rejection and partial ten-minute cache /
+  upstream outage scenarios. P4/client cases stay explicit skips.
+- Detached container-only fault watchdog, teardown on setup failure, private recovery
+  ledger, sanitized diagnostics and narrow artifact upload allowlist.
+- Protected-environment self-hosted workflow (manual confirmation / same-repo `e2e`
+  PR label), offline `make e2e-plan`, opt-in `make e2e`, strict harness typing in
+  `make check`, and 49 local safety tests. No application config/parity additions.
+- **Not accepted / no real VM execution yet**; both agents use Docker NAT, not the
+  final public/host-network topology. See `docs/runbooks/vm-e2e.md` and
+  `docs/redesign/P3-10-REVIEW.md`. Prior pending P3 tasks remain unaccepted.
+
+### Added (P3-09: encrypted hub backup / staged restore)
+
+- Shared `BackupService`, `korctl hub backup|restore`, admin `/api/hub/backup|restore`,
+  Config → Backup / Restore; two new parity capabilities without exemptions.
+- Versioned Argon2id (64 MiB, t=3, p=4) + ChaCha20-Poly1305 encrypted archives;
+  `cryptography >=44`. Consistent SQLite backup, resolved config, CA/TLS identities,
+  master key, secrets/users/groups and all referenced signing rotation files,
+  including custom paths outside data_dir. Atomic private no-clobber archive output.
+- Strict bounded manifests, portable path validation, hashes, DB integrity/schema
+  and key-pair checks; source change detection, bounded cross-process backup lock.
+  Restore validates first and writes a new private tree only, remapping config/DB
+  paths and publishing config last. Managed connect hook regenerates restored paths.
+- Masked ephemeral UI passphrases, CSRF/no-store streaming download and bounded
+  encrypted upload; explicit restore confirmation. No live state replacement,
+  automatic network changes or claimed live activation. Detailed recovery runbook
+  documents maintenance-window consistency and offline activation/permissions.
+- Unit/API/CLI/security/recovery tests, desktop/mobile light/dark browser checks,
+  privileged wipe/restore/reconnect netlab scenario (execution still required).
+  Implemented, **not finally accepted**; see `docs/redesign/P3-09-REVIEW.md`.
+
+### Added (P3-08: hub agent management)
+
+- Shared `AgentService`/`ControlManagement` for `korctl agent`/`control`, authenticated
+  `/api/agents*`/`/api/control*`, and the responsive light/dark Agents panel; 39 parity
+  capability rows without exemptions. CRUD, token issue/revoke, networks, sources,
+  policies, upstreams, registry access users, reports, redacted bundle history/diff,
+  typed remote commands/results and explicit diagnostic archive download.
+- SQLite schema 2: 30-day deleted-ID quarantine with explicit force reuse; durable
+  signing-key rotation. Seven-day public-key announcement in old-signed bundles,
+  promotion on polls/compile, old private key files retained (required in P3-09 backup).
+- Transactional validation/compilation and bounded management lock; revoke-before-delete,
+  occtl reload and verified offline-session handling; group render/sync lock acquired
+  before snapshot to prevent stale guard resurrection. Explicit committed-state errors.
+- Write-only encrypted transport camouflage/upstream credentials, sanitized errors and
+  no-store management responses; token shown only for explicit issue and forgotten on
+  dialog close. Unsupported P4 runtime features are labeled/rejected, never implied active.
+- Service/API/CLI/security/concurrency tests, Chromium checks at desktop/mobile in both
+  themes, and a privileged netlab CLI scenario (execution still required). D-56;
+  cumulative primary-review handoff: `docs/redesign/CLAUDE-HANDOFF.md`.
+
+### Added (P3-07: agent CLI)
+
+- `kornode-agent status`, `explain`, `doctor`, `bundle show|history|rollback`, `diag`,
+  `reconnect`; `--json` on every command, sanitized errors and exit codes 0/1/2/3/4.
+  Cache inspection/offline status work without the process or hub.
+- Owner-only Unix RPC (`run/agent.sock`, 0600); process/enrollment flock before boot;
+  one mutation path shared with hub commands, serialized with apply and cancellation-safe.
+  Rollback/reconnect previews (`--dry-run`); rollback preserves high-water and health checks.
+- Agent-local read-only doctor findings in reports/diagnostics; mark-based kernel check in
+  explain with an explicit warning about protocol/port limitations.
+- Shared redacted diagnostic collector (bounded logs, no symlink targets/keys/config/bundles),
+  atomic private no-clobber archive output; verified/redacted bundle show. D-55.
+- CLI, real Unix-socket, concurrency, cache/secrets and doctor tests; expanded P3 agent netlab
+  scenario (privileged execution still required). Claude review handoff in
+  `docs/redesign/P3-07-REVIEW.md`.
+
 ### Added (P3-06: agent)
 
 - `kornode.tunnels` (stdlib only): shared openconnect argv builder (`--pfs`, `--no-dtls`),
