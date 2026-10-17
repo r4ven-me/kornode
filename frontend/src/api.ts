@@ -422,7 +422,7 @@ export function setCsrfToken(value: string | null): void {
   csrfToken = value;
 }
 
-async function requestJson<T>(
+export async function requestJson<T>(
   path: string,
   _token: string | null,
   init: RequestInit = {}
@@ -443,9 +443,18 @@ async function requestJson<T>(
         detail?: unknown;
         error?: unknown;
         conflicts?: unknown;
+        message?: unknown;
+        details?: unknown;
       };
       if (payload.detail) {
         detail = formatApiDetail(payload.detail);
+      } else if (typeof payload.message === "string") {
+        detail = payload.message;
+        if (Array.isArray(payload.details) && payload.details.length > 0) {
+          detail += ": " + formatApiDetail(payload.details);
+        } else if (payload.details && typeof payload.details === "object") {
+          detail += ": " + JSON.stringify(payload.details);
+        }
       } else if (payload.error === "address_overlap" && Array.isArray(payload.conflicts)) {
         detail = formatAddressOverlap(payload.conflicts);
       }
@@ -470,15 +479,21 @@ function formatAddressOverlap(conflicts: unknown[]): string {
   return messages.length > 0 ? `address overlap: ${messages.join("; ")}` : "address overlap";
 }
 
-async function requestBlob(path: string, _token: string, init: RequestInit = {}): Promise<Blob> {
+export async function requestBlob(path: string, _token: string, init: RequestInit = {}): Promise<Blob> {
   const headers = new Headers(init.headers);
+  const method = (init.method ?? "GET").toUpperCase();
+  if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    headers.set("X-Kornode-CSRF", csrfToken);
+  }
   const response = await fetch(path, { ...init, credentials: "same-origin", headers });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
-      const payload = (await response.json()) as { detail?: unknown };
+      const payload = (await response.json()) as { detail?: unknown; message?: string };
       if (payload.detail) {
         detail = formatApiDetail(payload.detail);
+      } else if (typeof payload.message === "string") {
+        detail = payload.message;
       }
     } catch {
       // Keep status text for non-JSON responses.

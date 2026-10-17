@@ -1,4 +1,14 @@
 capabilities:
+  - id: hub.backup
+    service: kornode.services.backup.BackupService.create
+    cli: "hub backup"
+    api: "POST /api/hub/backup"
+    ui: hub.backup
+  - id: hub.restore
+    service: kornode.services.backup.BackupService.restore
+    cli: "hub restore"
+    api: "POST /api/hub/restore"
+    ui: hub.restore
   - id: config.validate
     service: kornode.config.loader.load_config
     cli: "config validate"
@@ -148,7 +158,7 @@ capabilities:
     cli: "registry snapshot"
     api: null
     ui: null
-    exempt: "process entrypoint for supervisor; admin backup arrives with P3-09 hub backup"
+    exempt: "process entrypoint for supervisor; internal DB-only snapshot worker; encrypted admin backup is hub.backup"
 
   - id: registry.maintain
     service: kornode.services.enrollment.EnrollmentService.maintain
@@ -889,6 +899,202 @@ capabilities:
     api: null
     ui: null
     exempt: "process entrypoint for supervisor, not a management action"
+
+  - id: agent.list
+    service: kornode.services.agents.AgentService.list
+    cli: "agent list"
+    api: "GET /api/agents"
+    ui: agent.list
+  - id: agent.show
+    service: kornode.services.agents.AgentService.show
+    cli: "agent show"
+    api: "GET /api/agents/{name}"
+    ui: agent.show
+  - id: agent.create
+    service: kornode.services.agents.AgentService.create
+    cli: "agent create"
+    api: "POST /api/agents"
+    ui: agent.create
+  - id: agent.update
+    service: kornode.services.agents.AgentService.update
+    cli: "agent set"
+    api: "PATCH /api/agents/{name}"
+    ui: agent.update
+  - id: agent.token
+    service: kornode.services.agents.AgentService.token
+    cli: "agent token"
+    api: "POST /api/agents/{name}/token"
+    ui: agent.token
+  - id: agent.token.revoke
+    service: kornode.services.agents.AgentService.token
+    cli: "agent token"
+    api: "DELETE /api/agents/{name}/token"
+    ui: agent.token.revoke
+  - id: agent.revoke
+    service: kornode.services.agents.AgentService.revoke
+    cli: "agent revoke"
+    api: "POST /api/agents/{name}/revoke"
+    ui: agent.revoke
+  - id: agent.delete
+    service: kornode.services.agents.AgentService.delete
+    cli: "agent delete"
+    api: "DELETE /api/agents/{name}"
+    ui: agent.delete
+  - id: agent.prefix.list
+    service: kornode.services.agents.AgentService.prefixes
+    cli: "agent prefix list"
+    api: "GET /api/agents/{name}/prefixes"
+    ui: agent.prefix.list
+  - id: agent.prefix.add
+    service: kornode.services.agents.AgentService.add_prefix
+    cli: "agent prefix add"
+    api: "POST /api/agents/{name}/prefixes"
+    ui: agent.prefix.add
+  - id: agent.prefix.delete
+    service: kornode.services.agents.AgentService.delete_prefix
+    cli: "agent prefix del"
+    api: "DELETE /api/agents/{name}/prefixes"
+    ui: agent.prefix.delete
+  - id: agent.policy.show
+    service: kornode.services.agents.AgentService.policy
+    cli: "agent egress show"
+    api: "GET /api/agents/{name}/policy"
+    ui: agent.policy.show
+  - id: agent.policy.set
+    service: kornode.services.agents.AgentService.set_policy
+    cli: "agent egress set"
+    api: "PUT /api/agents/{name}/policy"
+    ui: agent.policy.set
+  - id: agent.policy.edit
+    service: kornode.services.agents.AgentService.set_policy
+    cli: "agent egress edit"
+    api: "PUT /api/agents/{name}/policy"
+    ui: agent.policy.set
+  - id: agent.source.list
+    service: kornode.services.agents.AgentService.sources
+    cli: "agent source list"
+    api: "GET /api/agents/{name}/sources"
+    ui: agent.source.list
+  - id: agent.source.add
+    service: kornode.services.agents.AgentService.set_source
+    cli: "agent source add"
+    api: "PUT /api/agents/{name}/sources/{source}"
+    ui: agent.source.set
+  - id: agent.source.set
+    service: kornode.services.agents.AgentService.set_source
+    cli: "agent source set"
+    api: "PUT /api/agents/{name}/sources/{source}"
+    ui: agent.source.set
+  - id: agent.source.delete
+    service: kornode.services.agents.AgentService.set_source
+    cli: "agent source del"
+    api: "DELETE /api/agents/{name}/sources/{source}"
+    ui: agent.source.delete
+  - id: agent.upstream.list
+    service: kornode.services.agents.AgentService.upstreams
+    cli: "agent upstream list"
+    api: "GET /api/agents/{name}/upstreams"
+    ui: agent.upstream.list
+  - id: agent.upstream.add
+    service: kornode.services.agents.AgentService.set_upstream
+    cli: "agent upstream add"
+    api: "PUT /api/agents/{name}/upstreams/{upstream}"
+    ui: agent.upstream.set
+  - id: agent.upstream.set
+    service: kornode.services.agents.AgentService.set_upstream
+    cli: "agent upstream set"
+    api: "PUT /api/agents/{name}/upstreams/{upstream}"
+    ui: agent.upstream.set
+  - id: agent.upstream.delete
+    service: kornode.services.agents.AgentService.set_upstream
+    cli: "agent upstream del"
+    api: "DELETE /api/agents/{name}/upstreams/{upstream}"
+    ui: agent.upstream.delete
+  - id: agent.user.list
+    service: kornode.services.agents.AgentService.users
+    cli: "agent user list"
+    api: "GET /api/agents/{name}/users"
+    ui: agent.user.list
+  - id: agent.user.add
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user add"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.set
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user set"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.passwd
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user passwd"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.enable
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user enable"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.disable
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user disable"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.delete
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user del"
+    api: "DELETE /api/agents/{name}/users/{username}"
+    ui: agent.user.delete
+  - id: agent.bundle.list
+    service: kornode.services.agents.AgentService.bundles_list
+    cli: "agent bundle list"
+    api: "GET /api/agents/{name}/bundles"
+    ui: agent.bundle.list
+  - id: agent.bundle.show
+    service: kornode.services.agents.AgentService.bundle
+    cli: "agent bundle show"
+    api: "GET /api/agents/{name}/bundles/{version}"
+    ui: agent.bundle.show
+  - id: agent.bundle.diff
+    service: kornode.services.agents.AgentService.bundle_diff
+    cli: "agent bundle diff"
+    api: "GET /api/agents/{name}/bundles/diff"
+    ui: agent.bundle.diff
+  - id: agent.reports
+    service: kornode.services.agents.AgentService.reports
+    cli: "agent status"
+    api: "GET /api/agents/{name}/reports"
+    ui: agent.reports
+  - id: agent.command.enqueue
+    service: kornode.services.agents.AgentService.enqueue
+    cli: "agent exec"
+    api: "POST /api/agents/{name}/commands"
+    ui: agent.command.enqueue
+  - id: agent.command.list
+    service: kornode.services.agents.AgentService.commands
+    cli: "agent commands"
+    api: "GET /api/agents/{name}/commands"
+    ui: agent.command.list
+  - id: agent.command.result
+    service: kornode.services.agents.AgentService.command
+    cli: "agent command"
+    api: "GET /api/agents/{name}/commands/{command_id}"
+    ui: agent.command.result
+  - id: agent.command.artifact
+    service: kornode.services.agents.AgentService.artifact
+    cli: "agent command"
+    api: "GET /api/agents/{name}/commands/{command_id}/artifact"
+    ui: agent.command.artifact
+  - id: control.status
+    service: kornode.services.control_management.ControlManagement.status
+    cli: "control status"
+    api: "GET /api/control"
+    ui: control.status
+  - id: control.rotate_key
+    service: kornode.services.control_management.ControlManagement.rotate
+    cli: "control rotate-signing-key"
+    api: "POST /api/control/rotate-signing-key"
+    ui: control.rotate_key
 
 parity_ignore:
   - api: "GET /healthz"

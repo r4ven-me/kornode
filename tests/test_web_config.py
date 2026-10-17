@@ -54,9 +54,7 @@ def test_web_tls_paths_must_be_configured_together() -> None:
 
 
 def test_web_trusted_proxies_accept_ip_and_cidr() -> None:
-    config = AppConfig.model_validate(
-        {"web": {"trusted_proxies": ["127.0.0.1", "172.18.0.0/16"]}}
-    )
+    config = AppConfig.model_validate({"web": {"trusted_proxies": ["127.0.0.1", "172.18.0.0/16"]}})
 
     assert config.web.trusted_proxies == ["127.0.0.1", "172.18.0.0/16"]
 

@@ -12,8 +12,9 @@ import contextlib
 import json
 import os
 import secrets
+import sqlite3
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -62,8 +63,59 @@ class BundleService:
     def _signing_path(self) -> Path:
         return self.config.control.signing_key or self.control_dir / "signing.ed25519"
 
-    def signing_key(self) -> Ed25519PrivateKey:
-        return load_or_create_signing_key(self._signing_path())
+    def rotation(self, registry: Registry | None = None) -> dict[str, Any] | None:
+        if registry is not None:
+            return registry.rotation()
+        path = self.config.system.data_dir / "registry.db"
+        if not path.exists():
+            return None
+        with contextlib.closing(sqlite3.connect(path)) as conn:
+            conn.row_factory = sqlite3.Row
+            if not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'control_rotation'"
+            ).fetchone():
+                return None
+            return Registry(conn).rotation()
+
+    def key_plan(self, registry: Registry | None = None) -> tuple[Path, str | None]:
+        rotation = self.rotation(registry)
+        if rotation is None:
+            return self._signing_path(), None
+        deadline = datetime.fromisoformat(
+            rotation["started_at"].replace("Z", "+00:00")
+        ) + timedelta(days=7)
+        active, upcoming = Path(rotation["active_path"]), Path(rotation["next_path"])
+        if not active.is_file() or not upcoming.is_file():
+            raise BundleError(
+                "internal", "rotation key file is missing; restore keys before continuing"
+            )
+        if self._clock() >= deadline:
+            return upcoming, None
+        public = load_or_create_signing_key(upcoming).public_key()
+        return active, base64.b64encode(raw_public_bytes(public)).decode()
+
+    def signing_key(self, registry: Registry | None = None) -> Ed25519PrivateKey:
+        path, _ = self.key_plan(registry)
+        return load_or_create_signing_key(path)
+
+    def refresh_rotation(self, registry: Registry, node_id: int) -> None:
+        if registry.rotation() is None:
+            return
+        latest = registry.latest_bundle(node_id)
+        _, announcement = self.key_plan(registry)
+        signer = key_id(self.signing_key(registry).public_key())
+        if (
+            latest
+            and latest.key_id == signer
+            and json.loads(latest.body).get("next_signing_pubkey") == announcement
+        ):
+            return
+        from kornode.registry.db import transaction
+
+        with (
+            contextlib.nullcontext() if registry.conn.in_transaction else transaction(registry.conn)
+        ):
+            self.compile_node(registry, node_id, "signing key rotation")
 
     def control_url(self) -> str:
         """The control API as an agent reaches it: the hub's fabric address."""
@@ -79,12 +131,17 @@ class BundleService:
 
     def signing_keys(self) -> list[dict[str, str]]:
         public = self.signing_key().public_key()
-        return [
+        keys = [
             {
                 "key_id": key_id(public),
                 "pubkey_b64": base64.b64encode(raw_public_bytes(public)).decode("ascii"),
             }
         ]
+        _, announcement = self.key_plan()
+        if announcement:
+            raw = base64.b64decode(announcement)
+            keys.append({"key_id": key_id(raw), "pubkey_b64": announcement})
+        return keys
 
     def master_key(self) -> bytes:
         path = self.control_dir / "master.key"
@@ -148,6 +205,7 @@ class BundleService:
             {
                 **digest_secrets(plan, self.master_key(), node.id),
                 "_seal_pubkey": node.seal_pubkey.hex(),
+                "_signing_key_id": key_id(self.signing_key(registry).public_key()),
             }
         )
         if not force and latest is not None and latest.content_hash == digest:
@@ -156,7 +214,7 @@ class BundleService:
             return latest
         wire = seal_secrets(plan, node.seal_pubkey, node.id)
         body = canonical_json(wire)
-        key = self.signing_key()
+        key = self.signing_key(registry)
         signature = sign(body, key)
         trusted = {key_id(key.public_key()): key.public_key()}
         try:
@@ -232,9 +290,14 @@ class BundleService:
         for field in ("dpd", "keepalive"):
             if field in transport:
                 fabric_tunnel[field] = int(transport[field])
-        if transport.get("camouflage"):
-            fabric_tunnel["camouflage"] = {SECRET_MARKER: str(transport["camouflage"])}
-        return {
+        camouflage = transport.get("camouflage")
+        if transport.get("camouflage_enc"):
+            camouflage = self._decrypt_external_secrets(
+                node.id, "fabric-transport", base64.b64decode(transport["camouflage_enc"])
+            )["camouflage"]
+        if camouflage:
+            fabric_tunnel["camouflage"] = {SECRET_MARKER: str(camouflage)}
+        plan = {
             "format": "kornode.bundle/v1",
             "node_id": node.id,
             "version": version,
@@ -261,6 +324,10 @@ class BundleService:
                 "log_level": "info",
             },
         }
+        _, announcement = self.key_plan(registry)
+        if announcement:
+            plan["next_signing_pubkey"] = announcement
+        return plan
 
     def _pin(self) -> str:
         if self._hub_pin is not None:

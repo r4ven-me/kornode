@@ -348,11 +348,7 @@ class EnrollmentService:
         # CRL is checked on the handshake only: a live session has to be cut.
         attempt(
             "disconnect",
-            lambda: self.runner.run(
-                self.sessions.occtl_argv("disconnect", "user", f"agent-{node_id}"),
-                timeout=15,
-                check=False,
-            ),
+            partial(self.sessions.disconnect_if_present, f"agent-{node_id}"),
         )
         self.audit.record(
             actor="operator",

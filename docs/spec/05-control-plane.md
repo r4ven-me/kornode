@@ -40,7 +40,7 @@ CREATE TABLE nodes (
   cert_serial   TEXT, cert_not_after TEXT,
   seal_pubkey   BLOB,                               -- X25519 public key (32 bytes)
   policy        TEXT NOT NULL DEFAULT '{}',         -- JSON: egress, sources, sets (02)
-  transport     TEXT NOT NULL DEFAULT '{}',         -- JSON: transport, dpd, keepalive, camouflage
+  transport     TEXT NOT NULL DEFAULT '{}',         -- JSON: transport, dpd, keepalive, camouflage_enc
   desired_version INTEGER NOT NULL DEFAULT 0,       -- latest stored bundle version
   applied_version INTEGER NOT NULL DEFAULT 0,       -- from the last report
   high_water_version INTEGER NOT NULL DEFAULT 0,    -- highest version the agent ever accepted (D-37)
@@ -111,10 +111,75 @@ snapshot worker checks hourly and writes at most one snapshot per 24 h to
 and an atomic replace. Snapshot copies are `0600`, verified with
 `PRAGMA integrity_check`, and the newest 7 are retained.
 
-All writes go through `RegistryService` (one class, used by CLI, admin API and
-control API). Any mutation affecting an agent's bundle recompiles it in the
-same transaction (see Bundle → Compilation); `desired_version` moves only
-when the compiled content changed.
+The repository `Registry` owns SQLite operations; shared domain services own
+workflows: `AgentService` for operator CLI/admin API, `EnrollmentService` for
+credentials and revocation, `BundleService` for compilation, and the control
+service for agent requests. Operator changes affecting a bundle validate and
+recompile in the same transaction (see Bundle → Compilation); `desired_version`
+moves only when compiled content or signing identity changed.
+
+Schema **2** (`0002_agent_management.sql`, P3-08/D-56) adds:
+
+```sql
+CREATE TABLE node_id_quarantine (
+  node_id INTEGER PRIMARY KEY CHECK (node_id BETWEEN 2 AND 254),
+  until_at TEXT NOT NULL
+);
+CREATE TABLE control_rotation (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  active_path TEXT NOT NULL, next_path TEXT NOT NULL, started_at TEXT NOT NULL
+);
+```
+
+Agent allocation reserves ID 1 and skips occupied/quarantined IDs 2…254.
+Deletion first completes `EnrollmentService.revoke_node`, then records a
+30-day quarantine and deletes the node in one transaction. Explicit ID plus
+`force_reuse` bypasses quarantine, never a currently occupied ID. Failed revoke
+leaves the row revoked for an explicit retry, not removed. A failed occtl
+disconnect is not silently ignored: only a fresh successful `show user` JSON
+response containing an empty list proves no live session remains.
+
+Operator mutations use a cross-process flock (5 s acquisition limit). ocserv
+group synchronization runs after commit; render/sync share a separate flock
+from registry snapshot through atomic writes/stale cleanup, so a stale sync
+cannot recreate a revoked agent guard. Postcommit sync/token errors explicitly
+return `details.committed: true`, not a fictitious rollback. Recovery: registry
+maintenance for sync, explicit token reissue for failed issuance.
+
+`transport.camouflage_enc` is base64 ciphertext encrypted with the same hub
+master key as external credentials (AAD distinguishes the node/fabric transport).
+The compiler decrypts and seals it for that agent. Normal management views
+only return `camouflage_set`/`credentials_set`/`password_set`, never credentials,
+hashes or ciphertext. Access users remain registry-only until P4-04.
+
+## Operator management (P3-08)
+
+Admin `/api/agents*` and `/api/control*` use existing admin authentication and
+CSRF checks, not agent mTLS. They are served only when the optional Web GUI/API
+is enabled; CLI and agent-facing Control API do not depend on it. Endpoint/CLI
+matrix: [08-interfaces-parity.md](08-interfaces-parity.md); all call shared
+services and are represented in `parity.yaml`.
+
+Management JSON objects are bounded to 1 MiB; malformed/unknown fields and
+validation errors do not echo input values. Errors use `{error,message,details}`.
+Management success/error/download responses carry `Cache-Control: no-store`.
+The deliberate secret-output exception is a one-time token from explicit
+create/reissue, as required by Enrollment; list/show/history never return it.
+The panel masks that token in an ephemeral dialog, supports explicit copy and
+forgets it on close/unmount (clipboard remains the operator's responsibility).
+
+Remote commands accept only reconnect/explain/collect_diag/restart/rollback and
+their typed arguments. At most 100 queued/delivered entries per node; stale queued
+entries expire before capacity checking. Normal results omit `artefact_b64` and
+expose availability metadata; explicit `/commands/{id}/artifact` download checks
+node ownership, completed collect_diag type, valid base64 and a 5 MiB byte limit.
+Downloaded data is not extracted by the hub. CLI publication is private, atomic
+and no-clobber. The queue is not proof of execution or successful application.
+
+The P3 agent still lacks domain/URL resolution, p12 upstreams, pushed routes
+and node-to-node exit routing. Operator validation refuses these inputs rather
+than silently delivering nonworking policies; access roles/users and exported
+prefixes clearly report their P4 runtime boundary.
 
 ## Enrollment
 
@@ -331,7 +396,32 @@ Commands expire after 10 minutes undelivered. No free-form shell exists.
   next bundles carry `next_signing_pubkey` for 7 days signed by the old key,
   then switch. Agents accept a key change only via a bundle signed by the
   current key, and add `next_signing_pubkey` to their trust store only when
-  that bundle is confirmed. The old key is kept only to verify cached bundles
-  it signed (06, trust store).
+  that bundle is confirmed. On the agent the old key is kept only to verify
+  cached bundles it signed (06, trust store).
+
+  Hub implementation (P3-08/D-56): new private files are atomically published
+  as `data_dir/control/rotation-<random>.ed25519`, 0600; `control_rotation` holds
+  the authoritative active/next paths and start time in SQLite. During the
+  seven-day window another rotation is refused. After the deadline, bundle
+  compilation and control polls automatically select the next signer and
+  refresh the affected bundle even without a configuration edit. Signing-key
+  identity participates in dedup, so promotion creates a higher version.
+  Hub private key files are **retained**, never auto-deleted; failed transactions
+  can leave an unreferenced private file, not a partially changed identity.
+  Missing referenced files fail closed (restore them; do not generate a replacement).
+  P3-09 backup/restore must include registry, master key and **all referenced
+  signing-key files**, including custom paths outside data_dir, not merely
+  `control.signing_key`. Agents offline for the entire announcement window
+  may need reenrollment; the operator confirms this risk before rotation.
 - Agent deleted on hub: node `revoked`, cert added to CRL, prefixes released
   (id quarantined, 01).
+- P3-09 hub backup/recovery (D-57, awaiting acceptance): `BackupService` includes
+  a consistent registry snapshot, resolved effective configuration, CA/TLS identity,
+  actual `data_dir/control/master.key`, persistent user/group/secrets state and all
+  referenced rotation keys. Archives use Argon2id + ChaCha20-Poly1305. Restore
+  validates integrity/schema/key coverage and stages a new private tree, remapping
+  typed config paths and registry rotation pointers without modifying signed bundle
+  bodies. No live replacement/network action; fencing and activation are explicit.
+  Legacy file writers require maintenance-window quiescence; DB/management locking
+  does not claim a universal cross-service filesystem transaction. Full coverage,
+  exclusions and activation steps: [hub recovery runbook](../runbooks/hub-recovery.md).

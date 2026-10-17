@@ -60,7 +60,9 @@ class FakeRunner(CommandRunner):
 
 class Clock:
     def __init__(self) -> None:
-        self.now = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
+        # certtool dates certificates from the real clock, so the fake clock
+        # must start at real "now" or lifetimes drift apart as days pass.
+        self.now = datetime.now(UTC).replace(microsecond=0)
 
     def __call__(self) -> datetime:
         return self.now
@@ -163,7 +165,7 @@ def test_issue_token_document_and_enroll_user(env: Env) -> None:
     assert doc["hub"] == "vpn.example.com:443"
     assert doc["pin"].startswith("pin-sha256:")
     assert doc["user"] == f"enroll-3-{doc['id']}"
-    assert doc["exp"] == "2026-10-13T13:00:00Z"
+    assert doc["exp"] == (env.clock.now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     assert env.passwd_lines() == [f"{doc['user']}:enroll:$hash"]
     stored = env.registry.get_enroll_token(doc["id"])
     assert stored.secret_hash == hash_secret(doc["secret"])
@@ -214,7 +216,8 @@ def test_enroll_issues_cert_with_hub_chosen_subject(env: Env) -> None:
         bundle["signature"],
         trusted=trusted,
         high_water_version=0,
-        agent_version="2.0.0", expected_node_id=3,
+        agent_version="2.0.0",
+        expected_node_id=3,
     )
     assert checked.bundle.node_id == 3
 
@@ -469,9 +472,7 @@ def test_malformed_token_id_is_403(env: Env) -> None:
 
 
 def test_enroll_recompiles_other_active_agents(env: Env) -> None:
-    env.registry.create_node(
-        id=2, name="node2", state="active", seal_pubkey=b"\x05" * 32
-    )
+    env.registry.create_node(id=2, name="node2", state="active", seal_pubkey=b"\x05" * 32)
     env.service.bundles.compile_node(env.registry, 2, "setup")
     before = env.registry.get_node(2).desired_version
     env.registry.set_prefixes(3, [{"prefix": "192.168.3.0/24", "kind": "lan"}])

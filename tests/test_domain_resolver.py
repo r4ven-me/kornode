@@ -244,7 +244,7 @@ def test_refresh_interval_is_clamped_between_min_and_max(tmp_path: Path) -> None
             "routing": {
                 "client_policy": "split",
                 "split": {"domains": ["short.example", "long.example"]},
-            }
+            },
         },
     )
     lookup = FakeLookup(

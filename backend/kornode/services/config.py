@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import logging
 import sqlite3
+from contextlib import nullcontext
 from pathlib import Path
 
 from kornode.config.models import AppConfig
@@ -90,16 +91,18 @@ class ConfigService:
             UserService(config, files=self.file_manager).ensure_default_group()
             self._ensure_fabric_crl(config)
         written: list[Path] = []
-        rendered_files = self.render_files(config)
-        for rendered in rendered_files:
-            self.file_manager.atomic_write_text(rendered.path, rendered.content, rendered.mode)
-            written.append(rendered.path)
-        if config.fabric.enabled:
-            from kornode.services.fabric_groups import FabricGroupsService
+        from kornode.services.fabric_groups import FabricGroupsService
 
-            for path in FabricGroupsService(config, self.file_manager).stale_files(rendered_files):
-                path.unlink()
-                written.append(path)
+        groups = FabricGroupsService(config, self.file_manager)
+        with groups.locked() if config.fabric.enabled else nullcontext():
+            rendered_files = self.render_files(config)
+            for rendered in rendered_files:
+                self.file_manager.atomic_write_text(rendered.path, rendered.content, rendered.mode)
+                written.append(rendered.path)
+            if config.fabric.enabled:
+                for path in groups.stale_files(rendered_files):
+                    path.unlink()
+                    written.append(path)
         self._recompile_bundles(config)
         return written
 

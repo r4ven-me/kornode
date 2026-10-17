@@ -104,9 +104,7 @@ def test_totp_disable_removes_secret_and_stops_requiring_code(tmp_path: Path) ->
         auth=("admin", "secret"),
         json={"secret": secret, "code": _totp_code(secret)},
     )
-    assert client.get("/api/auth/totp/status", auth=("admin", "secret")).json() == {
-        "enabled": True
-    }
+    assert client.get("/api/auth/totp/status", auth=("admin", "secret")).json() == {"enabled": True}
 
     disable = client.post("/api/auth/totp/disable", auth=("admin", "secret"))
     assert disable.status_code == 200

@@ -77,11 +77,7 @@ def test_graceful_timeout_lets_process_clean_up_before_kill() -> None:
 
 
 def test_graceful_timeout_hard_kills_process_that_ignores_sigterm() -> None:
-    script = (
-        "import signal, time\n"
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-        "time.sleep(30)\n"
-    )
+    script = "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(30)\n"
 
     result = CommandRunner().run(
         [sys.executable, "-c", script],
@@ -148,13 +144,7 @@ def test_output_file_returns_promptly_even_if_a_forked_child_keeps_writing(
     # Redirecting to a real file sidesteps that: only the parent PID needs
     # to exit for wait() to return.
     log_file = tmp_path / "upstream.log"
-    script = (
-        "import os, sys, time\n"
-        "pid = os.fork()\n"
-        "if pid > 0:\n"
-        "    sys.exit(0)\n"
-        "time.sleep(5)\n"
-    )
+    script = "import os, sys, time\npid = os.fork()\nif pid > 0:\n    sys.exit(0)\ntime.sleep(5)\n"
 
     started = time.monotonic()
     result = CommandRunner().run(
@@ -171,11 +161,7 @@ def test_output_file_returns_promptly_even_if_a_forked_child_keeps_writing(
 
 def test_output_file_kills_process_that_ignores_sigterm(tmp_path: Path) -> None:
     log_file = tmp_path / "upstream.log"
-    script = (
-        "import signal, time\n"
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-        "time.sleep(30)\n"
-    )
+    script = "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(30)\n"
 
     result = CommandRunner().run(
         [sys.executable, "-c", script],

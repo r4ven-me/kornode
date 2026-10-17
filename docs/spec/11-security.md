@@ -14,6 +14,18 @@ All three hub keys are included in `hub backup` (encrypted with a passphrase,
 Argon2id KDF + ChaCha20-Poly1305). Losing the signing key means re-enrolling
 all agents; the backup procedure must say so prominently.
 
+P3-09 uses `BackupService` and a bounded v1 authenticated envelope (fixed Argon2id
+cost: 64 MiB, 3 iterations, 4 lanes; random salt/nonce; complete header as AAD).
+The implementation stores the master key at `data_dir/control/master.key`;
+backup follows that actual location. It includes configured and DB-referenced
+rotation signers, even outside data_dir. It never generates replacement identity
+material while backing up/restoring. Restore writes only a new private staging tree
+and publishes the resolved config last, not a live SQLite/CA/key replacement.
+See [the runbook](../runbooks/hub-recovery.md) for maintenance-window consistency,
+size limits, symlink/path checks, passphrase transport, temp-file handling and
+activation permissions. Request body/passphrase-header logging must be disabled
+at proxies too. DB-only nightly snapshots are not encrypted disaster-recovery backups.
+
 ## Threats and mitigations
 
 | Threat | Mitigation |

@@ -165,8 +165,9 @@ def _add_dummy_lan(ns: Namespace, name: str, cidr: str) -> None:
 
 
 def _start_http_echo(ns: Namespace, bind: str, port: int) -> subprocess.Popen[bytes]:
-    code = textwrap.dedent(
-        """
+    code = (
+        textwrap.dedent(
+            """
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
         class Handler(BaseHTTPRequestHandler):
@@ -183,7 +184,10 @@ def _start_http_echo(ns: Namespace, bind: str, port: int) -> subprocess.Popen[by
 
         ThreadingHTTPServer((BIND, PORT), Handler).serve_forever()
         """
-    ).replace("BIND", repr(bind)).replace("PORT", repr(port))
+        )
+        .replace("BIND", repr(bind))
+        .replace("PORT", repr(port))
+    )
     return _popen_in_namespace(ns, ["python3", "-c", code])
 
 

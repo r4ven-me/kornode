@@ -96,9 +96,19 @@ Recorded result (2026-10-12, Debian 13 VM, ocserv 1.3.0, nft 1.1.3):
 
 ## E2E (VMs)
 
-Inventory (repository variables/secrets, never committed): `E2E_HUB_HOST`,
-`E2E_AGENT_A_HOST`, `E2E_AGENT_B_HOST`, `E2E_EXT_HOST`, SSH key
-`E2E_SSH_KEY`, public domain for the hub if available.
+**P3-10 status (2026-10-17): harness implemented, not accepted or executed on
+real VMs.** D-58 is a pending implementation choice, not permission to weaken
+phase acceptance. Operational details: [disposable VM runbook](../runbooks/vm-e2e.md),
+review: [P3-10-REVIEW](../redesign/P3-10-REVIEW.md).
+
+Inventory is environment-only (repository/environment variables and secrets, never
+committed): `E2E_HUB_HOST`, `E2E_AGENT_A_HOST`, `E2E_AGENT_B_HOST`, `E2E_EXT_HOST`,
+`E2E_HUB_ADDRESS` (optional advertised name/address), `E2E_SSH_USER`, `E2E_SSH_PORT`;
+secrets `E2E_SSH_KEY` and operator-verified `E2E_SSH_KNOWN_HOSTS`. Local execution
+uses private file paths `E2E_SSH_KEY_FILE` / `E2E_KNOWN_HOSTS_FILE`. Four distinct
+management IPv4 addresses and four distinct machine IDs are required.
+
+### Target topology (full phase acceptance, not current coverage)
 
 | VM | OS | Role in suite |
 | --- | --- | --- |
@@ -107,28 +117,79 @@ Inventory (repository variables/secrets, never committed): `E2E_HUB_HOST`,
 | agent-b | Ubuntu 24.04, public IP | agent, wg-easy (Amnezia) as source, node-exporter |
 | ext | Debian 13 | plain ocserv as `upstream:office` |
 
-If agent-a is not actually behind NAT, the suite emulates it: inbound
-connections to agent-a are dropped with a test-owned nft table except SSH from
-the runner.
+The full topology requires agent-a behind NAT (or equivalent test-owned ingress
+ACL except runner SSH). **The current harness does not change host ingress ACLs**:
+both agents use Docker bridge NAT, so public agent-b topology, VM-level NAT
+emulation, Prometheus, wg-easy and access-client roles remain unvalidated.
 
-Workflow `.github/workflows/e2e.yml`: runs on `[self-hosted, kornode-e2e]` (the runner on hub), on manual
-dispatch and on PRs labelled `e2e`. Steps: build both images → push to a
-local registry on hub (or `docker save | ssh docker load`) → deploy with
-compose over SSH → run `tests/e2e/` (pytest driving SSH + `korctl`/
-`kornode-agent --json`) → collect `collect_diag` from all agents as artefacts
-→ tear down to a clean baseline (keeps VMs reusable).
+### Implemented harness boundary and safety contract
 
-E2E scenarios mirror NL-01..NL-13 on real hosts plus:
+- `tests/e2e/` uses strict pinned SSH and actual CLI/mTLS over inter-VM TCP;
+  faults and kornode kernel changes stay in Docker **container** network namespaces.
+  This is not host networking. Docker itself manages its normal host bridge/NAT
+  and published ports; the harness never globally flushes host nft/routes/sysctls.
+- Default pytest, including root, skips every VM case. Execution requires both
+  `--e2e-run` and exact `E2E_ALLOW_DESTRUCTIVE=I_ACKNOWLEDGE_DISPOSABLE_VMS`.
+  `make e2e-plan` reads no inventory and makes no network/runtime changes.
+- Every remote action verifies the owner-provisioned root-owned
+  `/etc/kornode-e2e-vm.json` role/purpose/machine ID. Claims take an exclusive lease
+  that never expires automatically; cleanup/recovery refuse foreign ownership.
+  Runner machine ID must match hub. Docker is pinned to the local rootful socket
+  and builds use the default builder, not inherited production contexts.
+- No privileged/host-PID containers or Docker socket mounts. Case metadata,
+  config and Compose mounts are read-only, state/recovery submounts are writable.
+  Fault removal is armed independently of pytest/SSH and targets only the immutable
+  original container ID. Restore wipes only the stopped owned case's hub data.
+- Tokens/passphrases use stdin/private files, never OS argv. Remote stdout/stderr
+  is withheld, `--showlocals` and parallel pytest workers are refused. Only sanitized
+  bounded agent diagnostics, summary and short JUnit are eligible for upload;
+  no raw configs/logs/backup/key archives. Normal and failed setup paths tear down;
+  hard runner/VM loss still requires explicit owned-run recovery.
+
+Workflow `.github/workflows/e2e.yml` uses `[self-hosted, kornode-e2e]` on hub:
+manual `DISPOSABLE_VMS` dispatch from a protected branch (no PR trigger), plus
+protected `kornode-e2e` Environment approval configured by the owner. The variable
+`E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true` only acknowledges that configuration,
+it does not create or prove protection. No forks or `pull_request_target`;
+checkout does not persist credentials. Concurrency is singleton, no cancellation
+of active runs. Steps: private SSH files → local harness checks → remote preflight /
+leases → build both images once → bounded `docker save`/SSH `load` → fresh Compose
+case → sanitized diagnostics → teardown; `always()` recovery/upload/key removal.
+No commit/push/workflow execution is authorized by implementing this file.
+
+### Scenario targets (full coverage still required)
+
+E2E scenarios must ultimately mirror NL-01..NL-13 on real hosts plus:
 
 | ID | Scenario |
 | --- | --- |
 | E2E-01 | fresh enroll of agent-a and agent-b ≤ 30 s each |
 | E2E-02 | registry change → agent applied ≤ 10 s |
-| E2E-03 | 60 s blackhole of agent-b's uplink (iptables on agent-b) → auto recovery |
+| E2E-03 | 60 s blackhole of agent-b's uplink → auto recovery (P3 implementation: namespaced nft fault, never host iptables) |
 | E2E-04 | revoke agent-b → fabric down, control API 403 |
 | E2E-05 | hub backup → wipe → restore → agents reconnect without re-enroll |
 | E2E-06 | upgrade hub and agents from previous pre-release with live traffic, ≤ 30 s interruption |
 | E2E-07 | two-host run with only `hub` (wg-easy attached as a source) and `agent-a` (role `exit`): a wg-easy client exits via agent-a by domain/subnet list, then in full mode; hub Prometheus scrapes agent-a |
+
+### Current executable scope, not execution evidence
+
+`test_control_plane.py` has 10 opt-in cases: E2E-01…06, NL-10 route repair,
+NL-11 signed bad-bundle rollback/report, NL-12 real incoming signature tamper,
+and **partial** NL-13 (≥600 s hub outage, cache boot, external tunnel/ICMP traffic).
+E2E-04 checks actual mTLS HTTP 403 through a test-only TCP relay; CA/client cert
+verification stays on, hostname checking is disabled only for that relay probe.
+E2E-05 includes announced rotation keys, owned wipe/staged restore activation,
+original certs and restored high-water recovery. E2E-06 observes continuous fabric
+mTLS probes (not access-client forwarding); it requires paired **different immutable**
+`E2E_PREVIOUS_HUB_IMAGE` / `E2E_PREVIOUS_AGENT_IMAGE` digest refs with compatible
+CLI/schema. Missing baselines skip; identical images fail rather than pass as an upgrade.
+
+`test_routed_fabric.py` has 12 explicit P4 skips: E2E-07, NL-01…09, full NL-13
+client forwarding and E2E-06 client continuity. They are listed in offline plan
+and run summary. There is no claimed wg-easy/domain/leak/throughput/host-network
+coverage. None of the real VM cases has been run; local faked SSH/Docker safety
+tests do not close any runtime assertion. First VM acceptance must record timings,
+image identities/sizes, sanitized diagnostics, cleanup evidence and remaining skips.
 
 ## Unit test conventions
 

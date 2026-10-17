@@ -1,4 +1,4 @@
-.PHONY: help install test netlab parity lint typecheck check render docker-build git-tag docker-tag docker-push docker-release docker-test docker-cli-check frontend-install frontend-build frontend-test frontend-e2e frontend-audit release
+.PHONY: help install test netlab e2e e2e-plan parity lint typecheck check render docker-build git-tag docker-tag docker-push docker-release docker-test docker-cli-check frontend-install frontend-build frontend-test frontend-e2e frontend-audit release
 
 PYTHON ?= $(shell if [ -x .venv/bin/python ]; then printf '%s' '.venv/bin/python'; else printf '%s' 'python'; fi)
 NPM ?= npm
@@ -15,7 +15,7 @@ MSG ?= Release $(TAG)
 EXTRA_TAG ?=
 
 help:
-	@printf '%s\n' 'Targets: install test lint typecheck check render docker-build git-tag docker-tag docker-push docker-release docker-test docker-cli-check frontend-install frontend-build frontend-test frontend-e2e frontend-audit release'
+	@printf '%s\n' 'Targets: install test lint typecheck check e2e-plan e2e render docker-build git-tag docker-tag docker-push docker-release docker-test docker-cli-check frontend-install frontend-build frontend-test frontend-e2e frontend-audit release'
 	@printf '%s\n' 'Korvus Client lives in its own repository: https://github.com/r4ven-me/korclient'
 	@printf '%s\n' 'EXTRA_TAG=<name> on release/docker-tag/docker-push/git-tag also moves that tag (git + both registries) to this release, e.g. make release EXTRA_TAG=raven'
 
@@ -31,11 +31,19 @@ parity:
 netlab:
 	$(PYTHON) -m pytest -m netlab -v
 
+# plan is offline. e2e additionally requires env opt-in, pinned SSH and VM markers.
+e2e-plan:
+	$(PYTHON) -m tests.e2e plan
+
+e2e:
+	$(PYTHON) -m pytest tests/e2e --e2e-run -q --tb=short
+
 lint:
 	$(PYTHON) -m ruff check backend tests
 
 typecheck:
 	$(PYTHON) -m mypy backend
+	$(PYTHON) -m mypy --explicit-package-bases tests/e2e
 
 check: lint typecheck test
 

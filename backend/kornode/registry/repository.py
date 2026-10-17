@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import secrets
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
@@ -498,6 +499,77 @@ class Registry:
         if cursor.rowcount == 0:
             raise RegistryNotFound(f"no delivered command {command_id} for node {node_id}")
         return self.get_command(command_id)
+
+    def expire_commands(self, node_id: int, now: str) -> None:
+        with self._write():
+            self.conn.execute(
+                "UPDATE commands SET state = 'expired', finished_at = ? "
+                "WHERE node_id = ? AND state = 'queued' AND expires_at <= ?",
+                (now, node_id, now),
+            )
+
+    def quarantine_id(self, node_id: int, until_at: str) -> None:
+        with self._write():
+            self.conn.execute(
+                "INSERT OR REPLACE INTO node_id_quarantine VALUES (?, ?)", (node_id, until_at)
+            )
+
+    def quarantined_ids(self, now: str) -> set[int]:
+        return {
+            int(row[0])
+            for row in self.conn.execute(
+                "SELECT node_id FROM node_id_quarantine WHERE until_at > ?", (now,)
+            )
+        }
+
+    def delete_external(self, node_id: int, name: str) -> None:
+        with self._write():
+            cursor = self.conn.execute(
+                "DELETE FROM externals WHERE node_id = ? AND name = ?", (node_id, name)
+            )
+        if cursor.rowcount == 0:
+            raise RegistryNotFound("upstream not found")
+
+    def access_users(self, node_id: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "username": str(row["username"]),
+                "pw_hash": row["pw_hash"],
+                "groups": json.loads(row["groups"]),
+                "enabled": bool(row["enabled"]),
+            }
+            for row in self.conn.execute(
+                "SELECT * FROM access_users WHERE node_id = ? ORDER BY username", (node_id,)
+            )
+        ]
+
+    def set_access_user(
+        self, node_id: int, username: str, pw_hash: str | None, groups: list[str], enabled: bool
+    ) -> None:
+        with self._write():
+            self.conn.execute(
+                "INSERT OR REPLACE INTO access_users VALUES (?, ?, ?, ?, ?)",
+                (node_id, username, pw_hash, encode_json(groups), int(enabled)),
+            )
+
+    def delete_access_user(self, node_id: int, username: str) -> None:
+        with self._write():
+            cursor = self.conn.execute(
+                "DELETE FROM access_users WHERE node_id = ? AND username = ?", (node_id, username)
+            )
+        if cursor.rowcount == 0:
+            raise RegistryNotFound("user not found")
+
+    def rotation(self) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM control_rotation WHERE singleton = 1").fetchone()
+        return dict(row) if row else None
+
+    def set_rotation(self, active_path: str, next_path: str, started_at: str) -> None:
+        with self._write():
+            self.conn.execute(
+                "INSERT OR REPLACE INTO control_rotation VALUES (1, ?, ?, ?)",
+                (active_path, next_path, started_at),
+            )
 
     @contextmanager
     def _write(self) -> Iterator[None]:

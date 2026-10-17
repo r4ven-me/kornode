@@ -260,9 +260,7 @@ def test_routing_routes_refresh_fetches_and_caches(tmp_path: Path) -> None:
     assert payload["valid"] == 1
     assert payload["skipped"] == 1
     assert payload["saved"] is True
-    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == [
-        "10.60.0.0/16"
-    ]
+    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == ["10.60.0.0/16"]
 
 
 def test_routing_domains_refresh_preview_does_not_persist(tmp_path: Path) -> None:
@@ -294,9 +292,7 @@ def test_routing_domains_refresh_preview_does_not_persist(tmp_path: Path) -> Non
 def test_routing_host_routes_bulk_set_is_independent_of_client_routes(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
-    client.put(
-        "/api/routing/routes", auth=("admin", "secret"), json={"items": ["10.1.0.0/16"]}
-    )
+    client.put("/api/routing/routes", auth=("admin", "secret"), json={"items": ["10.1.0.0/16"]})
 
     response = client.put(
         "/api/routing/host-routes",
@@ -306,9 +302,7 @@ def test_routing_host_routes_bulk_set_is_independent_of_client_routes(tmp_path: 
 
     assert response.status_code == 200
     assert response.json() == ["10.2.0.0/16"]
-    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == [
-        "10.1.0.0/16"
-    ]
+    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == ["10.1.0.0/16"]
     assert client.get("/api/routing/host-routes", auth=("admin", "secret")).json() == [
         "10.2.0.0/16"
     ]

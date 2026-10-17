@@ -24,6 +24,8 @@
   trust.json                 # trusted signing keys (see Trust store)
   state.json                 # see State
   logs/
+  run/agent.lock             # exclusive process/enroll lock; inode is never unlinked
+  run/agent.sock             # owner-only local RPC (0600), not a TCP listener
 ```
 
 Writes are atomic: temp file in the same directory, fsync, rename, fsync of
@@ -184,13 +186,70 @@ the hub's next bundle is above `high_water` as usual.
 | `doctor [--json]` | Local doctor findings. |
 | `bundle show [<version>]` | Pretty-print bundle (secrets redacted). |
 | `bundle history` | Cached versions with results. |
-| `bundle rollback <version>` | Local emergency rollback to a cached confirmed version (reported to hub). |
+| `bundle rollback <version> [--dry-run]` | Local emergency rollback to a cached confirmed version (reported to hub); preview verifies the cache without applying. |
 | `diag [--out file.tar.gz]` | Same archive as the `collect_diag` command. |
-| `reconnect [<tunnel>]` | Restart a tunnel. |
+| `reconnect [<tunnel>] [--dry-run]` | Restart one named exit (`fabric`, `upstream:<name>`), or all; preview makes no network changes. |
 | `version` | Versions of agent and components. |
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 validation conflict, 4 hub unreachable.
-All commands support `--json`. No command prints secrets.
+All commands support `--json` before or after the command/subcommand. No command
+prints secrets. JSON success output is the command's data object; errors are
+`{ok: false, error, message, exit_code}`. Usage errors never echo rejected values
+(which could be enrollment tokens). Human output is labeled text, nested data is
+indented JSON. `run` remains a supervisor entrypoint (its internal restart code 75
+is unchanged).
+
+### Local CLI transport (P3-07, D-55)
+
+- `--root` (before the command), or `KORNODE_AGENT_DIR`, selects the agent directory;
+  default `/var/lib/kornode-agent`.
+- `status` uses the running process and an mTLS hub ping. A failed hub ping returns
+  the status **and exit 4**. With no local listener it reads `state.json` without
+  contacting the hub, returns exit 0 and `running: false`, and leaves
+  `hub_reachable`, `tunnels`, `sources`, `reconciler` as `null` (unknown, not healthy).
+  An unreadable/corrupt local state is an error, not a fabricated healthy state.
+- `bundle show` and `bundle history` work without the process or hub. Show verifies
+  the exact cached body/signature, node id, schema and sealed values with the same
+  cached-bundle validator used at boot, including retired-key bounds. It does not
+  change state/trust or weaken replay protection. Bootstrap version 0 has no body;
+  show returns conflict (3). History lists retained version metadata/results;
+  `cached` means the files exist, not that their signature has been checked.
+- `explain`, `doctor`, `diag`, `reconnect`, `bundle rollback` require the running
+  process, but not a reachable hub. A missing process is exit 1, not exit 4; none
+  starts a second reconciler. Rollback still requires the existing confirm window,
+  including fabric health, so an unreachable hub may prevent confirmation.
+- RPC: one JSON request line, one response line, fixed operations only (`status`,
+  `explain`, `doctor`, `diag`, `reconnect`, `rollback`), strict argument validation.
+  Requests ≤ 8 KiB, responses ≤ 8 MiB; incomplete frames expire after 5 s. The
+  diagnostic archive is base64 inside RPC, never in CLI stdout. Client deadlines
+  are 120 s for reads, 1500 s for mutations (a confirm window can be 600 s and
+  another apply can already hold the lock). A timeout is **not** permission to
+  retry a mutation blindly: inspect status first; an accepted operation can finish
+  after the client disconnects. There is no automatic retry.
+- Process lock is acquired before boot, held through shutdown/worker completion;
+  concurrent `run` or `enroll --force` is refused. Socket permissions are set
+  **before listen**. Only a stale socket owned by this uid is replaced; regular
+  files and symlinks are refused. A clean shutdown removes its own socket only.
+- Local and hub mutations share `Agent.perform`, `Applier.rollback_to`, the same
+  apply lock and reporting event. Cancellation does not release that lock while a
+  worker still changes state. Local rollback never lowers `high_water`.
+- `explain` uses `kornode.net.explain` and read-only `Kernel.route_get`. `--proto`
+  and `--port` are validated and included in the query; the current egress model
+  is address-based and the kernel lookup is mark-based, so an explicit warning
+  says these are **not L4 filters or a protocol-specific connectivity probe**.
+- `doctor` is read-only: desired/actual diff, sysctls, routes/guards, policy rules,
+  owned nft sets/schema, sources, connected-network overlaps, MTUs and certificate
+  dates. Errors produce exit 1, warnings/info alone exit 0. Unavailable checks are
+  findings, not success. nft version is informational, foreign NAT is conservatively
+  flagged for review (matching owned traffic is not proven); clock skew is explicitly
+  unchecked without a trusted hub-time observation. Findings join reports and diag.
+- `diag` uses the same collector as `collect_diag`: read-only rules/routes/nft,
+  report, state, doctor, bounded log tails (100 kB/file, 2 MiB total). Symlink logs
+  are excluded. It masks known current/cached credentials, secret fields, sealed
+  objects, private-key blocks/tails, auth headers and secret URL queries. Keys,
+  bootstrap config and raw bundles are not archived. Archive ≤ 5 MiB, output mode
+  0600, atomic no-clobber publication (existing files/symlinks are never overwritten).
+  Without `--out`, writes `kornode-agent-diag-<time_ns>.tar.gz` in the current directory.
 
 ## Role `access`
 

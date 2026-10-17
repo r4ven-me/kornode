@@ -86,9 +86,7 @@ def test_cookie_session_requires_csrf_for_mutations(tmp_path: Path) -> None:
 
 
 def test_protected_api_accepts_hashed_admin_password() -> None:
-    config = AppConfig.model_validate(
-        {"web": {"admin_password_hash": hash_password("secret")}}
-    )
+    config = AppConfig.model_validate({"web": {"admin_password_hash": hash_password("secret")}})
     response = TestClient(create_app(config)).get("/api/config", auth=("admin", "secret"))
 
     assert response.status_code == 200

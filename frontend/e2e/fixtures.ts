@@ -206,6 +206,7 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         listen: "10.10.10.1",
         port: 53,
         client_dns: ["1.1.1.1", "8.8.8.8"],
+        upstreams: [],
         default_upstreams: [],
         forward_upstreams: [],
         forward_domains: [],

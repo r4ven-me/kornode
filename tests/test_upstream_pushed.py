@@ -263,9 +263,10 @@ def test_dnsmasq_render_resolves_pushed_domains_through_upstream_dns(tmp_path: P
 
 def test_accepting_server_routes_keeps_dnsmasq_running(tmp_path: Path) -> None:
     assert "profile_server_routes" in _config(tmp_path).dnsmasq_active_reasons()
-    assert "profile_server_routes" not in _config(
-        tmp_path, accept_server_routes=False
-    ).dnsmasq_active_reasons()
+    assert (
+        "profile_server_routes"
+        not in _config(tmp_path, accept_server_routes=False).dnsmasq_active_reasons()
+    )
 
 
 def test_record_vpnc_event_stores_handshake_for_the_matching_profile(tmp_path: Path) -> None:
@@ -308,9 +309,7 @@ def test_record_vpnc_event_ignores_other_events_and_interfaces(
 
 def test_sync_server_routes_uses_the_profile_tunnel(tmp_path: Path) -> None:
     config = _config(tmp_path, sync_url="https://10.10.10.1:8443")
-    body = json.dumps(
-        {"version": "v2", "routes": ["10.40.0.0/16"], "split_dns": ["intra.example"]}
-    )
+    body = json.dumps({"version": "v2", "routes": ["10.40.0.0/16"], "split_dns": ["intra.example"]})
     runner = FakeRunner({"curl": CommandResult(("curl",), 0, body, "")})
     service = UpstreamService(config, runner=runner)
     profile = config.upstream.profiles[0]

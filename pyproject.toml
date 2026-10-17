@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "Ivan Cherniy" }]
 dependencies = [
-  "cryptography>=42,<46",
+  "cryptography>=44,<46",
   "dnspython>=2.6,<3",
   "fastapi>=0.111,<1",
   "jinja2>=3.1,<4",
@@ -57,7 +57,11 @@ kornode_agent = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["backend"]
-markers = ["netlab: real-kernel namespace integration tests, needs root"]
+markers = [
+  "netlab: real-kernel namespace integration tests, needs root",
+  "e2e: opt-in destructive four-VM tests; never enabled by ordinary pytest",
+  "e2e_case(name): isolated per-scenario deployment on leased disposable VMs",
+]
 filterwarnings = [
   # starlette's own TestClient still references this alias internally as of
   # 1.6.0 (the latest release) -- not kornode code, nothing to fix on our

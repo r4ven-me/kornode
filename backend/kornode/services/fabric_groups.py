@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import fcntl
+import os
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 from kornode.config.models import AppConfig
@@ -132,6 +135,24 @@ class FabricGroupsService:
         opens, so no ocserv reload is needed after this sync. P3-03/P3-08 call
         this after registry mutations.
         """
+        if dry_run:
+            return self._sync(dry_run=True)
+        with self.locked():
+            return self._sync(dry_run=False)
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        # Serialize snapshot + render + stale-file cleanup across management,
+        # enrollment, maintenance and full config saves. A stale writer must not
+        # recreate an agent's per-user guard after a concurrent revocation.
+        path = self.config.system.generated_dir / ".fabric-groups.lock"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "r+b") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            yield
+
+    def _sync(self, *, dry_run: bool) -> list[Path]:
         rendered = self.render_files(self.nodes()) if self.config.fabric.enabled else []
         stale = self.stale_files(rendered)
         changed = [item.path for item in rendered] + stale

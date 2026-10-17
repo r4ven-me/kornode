@@ -99,9 +99,7 @@ def test_golden_rulesets_load_into_a_real_kernel(lab: Lab, name: str) -> None:
     # `nft -c` only checks syntax; it accepted `reject` in postrouting, which
     # the kernel refuses. Every golden must survive a real load.
     ns = lab.add_namespace(f"g{name}")
-    result = ns.run(
-        ["nft", "-f", str(GOLDEN / f"{name}.nft")], check=False, timeout=30
-    )
+    result = ns.run(["nft", "-f", str(GOLDEN / f"{name}.nft")], check=False, timeout=30)
 
     assert result.ok, result.stderr
 
@@ -126,9 +124,7 @@ def _wait(predicate: Callable[[], bool], timeout: float) -> float:
 
 
 @pytest.mark.netlab
-def test_nl10_deleted_policy_route_is_restored_within_2s(
-    node: Namespace, tmp_path: Path
-) -> None:
+def test_nl10_deleted_policy_route_is_restored_within_2s(node: Namespace, tmp_path: Path) -> None:
     sock = tmp_path / "reconciler.sock"
     process = _start_reconciler(node, sock)
 

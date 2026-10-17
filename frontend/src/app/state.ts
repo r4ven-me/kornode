@@ -144,6 +144,7 @@ export const tabs: Array<{ id: Tab; label: string; icon: LucideIcon }> = [
   { id: "dashboard", label: "Dashboard", icon: Activity },
   { id: "config", label: "Config", icon: FileSliders },
   { id: "users", label: "Users", icon: Users },
+  { id: "agents", label: "Agents", icon: Server },
   { id: "groups", label: "Groups", icon: ShieldCheck },
   { id: "sessions", label: "Sessions", icon: Server },
   { id: "network", label: "Network", icon: Network },

@@ -106,9 +106,7 @@ def test_fabric_destination_on_an_agent_uses_the_hub_tunnel() -> None:
 
 def test_down_exit_reports_the_kill_switch() -> None:
     policy, facts = hub_case()
-    facts = dataclasses.replace(
-        facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)}
-    )
+    facts = dataclasses.replace(facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)})
     compiled = compile_policy(policy, facts)
 
     decision = explain(compiled, policy, facts, "10.100.1.15", "10.60.1.5")
@@ -129,17 +127,13 @@ def test_kernel_check_agreement_and_drift() -> None:
     assert ok.kernel_check == "ip route get 10.60.1.5 mark 0x0c000200 -> dev oc-office0"
     assert ok.warnings == []
 
-    leak = explain(
-        compiled, policy, facts, "10.100.1.15", "10.60.1.5", route_get=lambda *_: "eth0"
-    )
+    leak = explain(compiled, policy, facts, "10.100.1.15", "10.60.1.5", route_get=lambda *_: "eth0")
     assert leak.warnings == ["kernel routes it via eth0, compiled policy expects oc-office0"]
 
 
 def test_kernel_check_flags_traffic_escaping_a_down_exit() -> None:
     policy, facts = hub_case()
-    facts = dataclasses.replace(
-        facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)}
-    )
+    facts = dataclasses.replace(facts, tunnels={"upstream:office": TunnelFact("oc-office0", False)})
     compiled = compile_policy(policy, facts)
 
     escaping = explain(
@@ -149,7 +143,5 @@ def test_kernel_check_flags_traffic_escaping_a_down_exit() -> None:
         compiled, policy, facts, "10.100.1.15", "10.60.1.5", route_get=lambda *_: None
     )
 
-    assert escaping.warnings == [
-        "kernel routes it via eth0 although exit upstream:office is down"
-    ]
+    assert escaping.warnings == ["kernel routes it via eth0 although exit upstream:office is down"]
     assert blocked.warnings == []

@@ -152,9 +152,7 @@ def test_changed_route_device_is_a_replace_not_a_delete() -> None:
 def test_unchanged_schema_with_new_elements_only_updates_elements() -> None:
     actual = apply_to_state(ActualState(), diff(ActualState(), _desired()))
     desired = _desired(
-        elements=frozenset(
-            {NftElements("inet", "kornode", "corp_v4", frozenset({"10.61.0.0/16"}))}
-        )
+        elements=frozenset({NftElements("inet", "kornode", "corp_v4", frozenset({"10.61.0.0/16"}))})
     )
 
     plan = diff(actual, desired)
@@ -223,9 +221,7 @@ def test_unmanaged_nft_is_left_alone() -> None:
             "same key",
         ),
         (
-            lambda: _desired(
-                elements=frozenset({NftElements("inet", "filter", "x", frozenset())})
-            ),
+            lambda: _desired(elements=frozenset({NftElements("inet", "filter", "x", frozenset())})),
             "owned nft tables",
         ),
         (lambda: NftRuleset("table inet kornode { set s { elements = { 1.2.3.4 } } }"), "inline"),

@@ -28,9 +28,11 @@ import { InternalDnsView } from "./views/InternalDnsView";
 import { LoginScreen } from "./views/LoginScreen";
 import { LogsView } from "./views/LogsView";
 import { NetworkView } from "./views/NetworkView";
+import { AgentsView } from "./views/agents/AgentsView";
 import { SessionsView } from "./views/SessionsView";
 import { CertificatesView } from "./views/certificates/CertificatesView";
 import { ConfigSubnav } from "./views/config/ConfigSubnav";
+import { BackupPanel } from "./views/config/BackupPanel";
 import { ConfigView } from "./views/config/ConfigView";
 import { GroupMembersDialog } from "./views/groups/GroupMembersDialog";
 import { GroupsView } from "./views/groups/GroupsView";
@@ -300,6 +302,7 @@ export function App() {
         )}
 
         {tab === "network" && <NetworkView token={authToken} />}
+        {tab === "agents" && <AgentsView token={authToken} dryRun={dryRun} />}
 
         {tab === "config" && (
           <ConfigSubnav active={configSection} onSelect={setConfigSection} />
@@ -491,6 +494,8 @@ export function App() {
             }
           />
         )}
+
+        {tab === "config" && configSection === "backup" && <BackupPanel dryRun={dryRun} />}
 
         {tab === "config" && (
           <ConfigView

@@ -56,6 +56,11 @@ def load_or_create_signing_key(path: Path) -> Ed25519PrivateKey:
         tmp.unlink()
         return load_or_create_signing_key(path)
     tmp.unlink()
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
     return key
 
 

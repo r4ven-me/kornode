@@ -78,8 +78,10 @@ def test_client_full_and_host_full() -> None:
 def test_client_split_falls_back_to_local() -> None:
     config = _config(
         upstream={"enabled": True, "profiles": [PROFILE]},
-        routing={"client_policy": "split", "split": {"routes": ["10.20.0.0/16"],
-                                                     "domains": ["corp.example.com"]}},
+        routing={
+            "client_policy": "split",
+            "split": {"routes": ["10.20.0.0/16"], "domains": ["corp.example.com"]},
+        },
     )
     policy = legacy_policy(config, InlineLists(config))
 
@@ -98,8 +100,13 @@ def test_named_profiles_come_before_defaults() -> None:
             "active_profile": "office",
             "profiles": [
                 PROFILE,
-                {**PROFILE, "name": "finance", "routes": ["10.50.0.0/16"],
-                 "route_host_enabled": True, "host_routes": ["10.51.0.0/16"]},
+                {
+                    **PROFILE,
+                    "name": "finance",
+                    "routes": ["10.50.0.0/16"],
+                    "route_host_enabled": True,
+                    "host_routes": ["10.51.0.0/16"],
+                },
             ],
         },
         routing={"client_policy": "full", "host_policy": "full"},

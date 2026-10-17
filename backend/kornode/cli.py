@@ -11,6 +11,8 @@ from typing import Any
 import typer
 import yaml
 
+from kornode.cli_agents import register as register_agent_commands
+from kornode.cli_hub import register as register_hub_commands
 from kornode.config.defaults import DEFAULT_CONFIG
 from kornode.config.env import combined_environment, env_overrides_from_mapping
 from kornode.config.loader import (
@@ -1378,6 +1380,9 @@ app.add_typer(net_app, name="net")
 app.add_typer(host_dns_app, name="host-dns")
 app.add_typer(web_app, name="web")
 app.add_typer(registry_app, name="registry")
+
+register_agent_commands(app, get_config)
+register_hub_commands(app, get_config)
 
 
 if __name__ == "__main__":

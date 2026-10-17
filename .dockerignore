@@ -1,4 +1,8 @@
 .venv
+.e2e-venv
+artifacts
+test-results
+frontend/test-results
 frontend/node_modules
 frontend/dist
 config

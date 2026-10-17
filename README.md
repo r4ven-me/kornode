@@ -22,10 +22,21 @@ disabled by default.
 - atomic writes for generated files and secret/runtime files;
 - centralized secret masking in CLI/API/log-related output;
 - manages users, passwords, certificates, PKCS#12, OTP;
+- encrypted hub backup and non-destructive staged restore through CLI/API/panel
+  (P3-09, awaiting review/runtime acceptance): [recovery runbook](docs/runbooks/hub-recovery.md);
 - commands for sessions, upstream profiles, split routes/domains, nftables and
   diagnostics;
 - multi-stage Dockerfile with frontend/backend test stages;
 - compose file with `/dev/net/tun`, `NET_ADMIN`, `NET_RAW` and persistent volumes.
+
+## Disposable VM testing (redesign P3-10)
+
+The four-VM SSH/Docker harness and protected self-hosted workflow are implemented,
+**not yet accepted or executed on real VMs**. See the [E2E runbook](docs/runbooks/vm-e2e.md)
+for provisioning, safety gates, recovery and explicit P4/host-network limitations.
+`make e2e-plan` is entirely offline; ordinary `make check` skips all VM cases.
+`make e2e` requires explicit opt-in, pinned SSH and owner-designated disposable VMs;
+never run it on a development or production VPN host.
 
 ## Korvus Client
 

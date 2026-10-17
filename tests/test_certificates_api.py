@@ -159,9 +159,7 @@ def test_list_revoked_certificates_empty_by_default(tmp_path: Path) -> None:
 )
 def test_list_revoked_certificates_after_revoke(tmp_path: Path) -> None:
     client = _client(tmp_path / "config.yaml", tmp_path)
-    regenerate = client.post(
-        "/api/certificates/ca/regenerate", auth=("admin", "secret"), json={}
-    )
+    regenerate = client.post("/api/certificates/ca/regenerate", auth=("admin", "secret"), json={})
     assert regenerate.status_code == 200
     # create_user_certificate only validates the username's shape, not that a
     # user record already exists, so this doesn't need a real ocpasswd (which

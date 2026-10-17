@@ -129,15 +129,9 @@ def check_parity(
         if "exempt" in capability and not has_exempt:
             errors.append(f"capability {cap_id} has exempt but no non-empty reason")
 
-        missing_sides = [
-            side
-            for side in ("cli", "api", "ui")
-            if capability.get(side) is None
-        ]
+        missing_sides = [side for side in ("cli", "api", "ui") if capability.get(side) is None]
         if missing_sides and not has_exempt:
-            errors.append(
-                f"capability {cap_id} has {', '.join(missing_sides)} null without exempt"
-            )
+            errors.append(f"capability {cap_id} has {', '.join(missing_sides)} null without exempt")
 
         cli = capability.get("cli")
         if cli is not None:

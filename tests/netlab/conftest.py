@@ -108,12 +108,7 @@ def _capture_setup_failure_artifacts(item: pytest.Item, lab_instance: Lab) -> No
 
 
 def _capture_netlab_artifacts(item: pytest.Item, lab_instance: Lab) -> Path:
-    artifact_dir = (
-        item.config.rootpath
-        / "artifacts"
-        / "netlab"
-        / _sanitize_nodeid(item.nodeid)
-    )
+    artifact_dir = item.config.rootpath / "artifacts" / "netlab" / _sanitize_nodeid(item.nodeid)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     for namespace in lab_instance.namespaces:
         _write_namespace_dump(artifact_dir / f"{_sanitize_filename(namespace.name)}.txt", namespace)

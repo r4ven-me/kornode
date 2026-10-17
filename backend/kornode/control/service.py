@@ -147,6 +147,8 @@ class ControlService:
         check_version(since)
         with self.registry() as registry:
             node = registry.get_node(node_id)
+            if node.state == "active":
+                self.bundles.refresh_rotation(registry, node_id)
             latest = registry.latest_bundle(node_id)
             if latest is not None and latest.version > since:
                 return latest

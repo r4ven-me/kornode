@@ -367,8 +367,6 @@ def test_service_address_is_bound_to_lo() -> None:
     policy, facts = hub_case()
 
     assert compile_policy(policy, facts).desired.addresses == frozenset()
-    with_address = dataclasses.replace(
-        facts, service_address=ipaddress.IPv4Address("10.99.0.1")
-    )
+    with_address = dataclasses.replace(facts, service_address=ipaddress.IPv4Address("10.99.0.1"))
     desired = compile_policy(policy, with_address).desired
     assert desired.addresses == frozenset({Address("lo", "10.99.0.1/32")})
