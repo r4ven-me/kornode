@@ -1,0 +1,854 @@
+"""Stdlib-only root worker, sent as fixed Python source over pinned SSH.
+
+Never import application code on the VM host. All kernel tests run inside owned
+Docker network namespaces. No generic exec/upload/delete endpoint is exposed.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, BinaryIO
+
+BASE = Path("/var/lib/kornode-e2e")
+MARKER = Path("/etc/kornode-e2e-vm.json")
+CASES = {
+    "enroll",
+    "change",
+    "blackhole",
+    "revoke",
+    "restore",
+    "upgrade",
+    "cache",
+    "route",
+    "rollback",
+    "tamper",
+}
+ROLES = {"hub", "agent-a", "agent-b", "ext"}
+IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(?:@sha256:[0-9a-f]{64})?$")
+
+PROXY = """import select, socket, socketserver
+class Handler(socketserver.BaseRequestHandler):
+ def handle(self):
+  with socket.create_connection(("10.99.0.1",8444),timeout=5) as upstream:
+   self.request.settimeout(5)
+   while True:
+    ready,_,_=select.select([self.request,upstream],[],[],90)
+    if not ready: return
+    for src in ready:
+     data=src.recv(65536)
+     if not data: return
+     (upstream if src is self.request else self.request).sendall(data)
+class Server(socketserver.ThreadingTCPServer):
+ allow_reuse_address=True
+ daemon_threads=True
+with Server(("0.0.0.0",18444),Handler) as server: server.serve_forever()
+"""
+PROBE = """import http.client, json, ssl, subprocess, sys
+from pathlib import Path
+from urllib.parse import urlsplit
+import yaml
+root=Path("/var/lib/kornode-agent")
+ctx=ssl.create_default_context(cafile=str(root/"tls/ca.pem"))
+ctx.load_cert_chain(str(root/"tls/cert.pem"), str(root/"tls/key.pem"))
+options=json.load(sys.stdin)
+try:
+ if options.get("gateway"):
+  # Test-only TCP relay preserves mTLS/CA validation but changes the dial hostname.
+  # It is not the production control listener and never disables chain validation.
+  ctx.check_hostname=False
+  host,port,source=options["gateway"],18444,None
+ else:
+  cfg=yaml.safe_load((root/"agent.yaml").read_text())
+  url=urlsplit(cfg["hub"]["control_url"])
+  link=json.loads(subprocess.check_output(["ip","-j","addr","show","dev","oc-hub0"]))
+  ip=next(a["local"] for d in link for a in d["addr_info"] if a["family"]=="inet")
+  host,port,source=url.hostname,url.port,(ip,0)
+ conn=http.client.HTTPSConnection(host,port,context=ctx,source_address=source,timeout=3)
+ conn.request("GET","/agent/v1/ping")
+ response=conn.getresponse()
+ print(json.dumps({"status":response.status}))
+ conn.close()
+except Exception: print(json.dumps({"status":0}))
+"""
+ENROLL = """import sys
+from kornode_agent.cli import main
+raise SystemExit(main(["enroll",sys.stdin.read(),"--json"]))
+"""
+EXT_USER = """import json, os, sys
+from kornode.config.loader import load_config
+from kornode.services.users import UserService
+value=json.load(sys.stdin)
+result=UserService(load_config(os.environ["KORNODE_CONFIG"])).create_user("e2e",value["password"])
+raise SystemExit(0 if result.ok else 1)
+"""
+WATCHDOG = """import subprocess, sys, time
+time.sleep(60)
+container=sys.argv[1]
+# Immutable container ID: never touches a later run or any host nft table.
+subprocess.run(["docker","--host","unix:///var/run/docker.sock","exec",container,"nft","delete","table","inet","kn_e2e_fault"],
+ stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10)
+"""
+REPAIR_ROUTE = """import json,time
+from kornode.net.kernel import Kernel
+from kornode.net.diff import Plan, DelRoute
+kernel=Kernel()
+route=next(r for r in kernel.read().routes if r.dev=="oc-hub0" and r.type=="unicast")
+started=time.monotonic()
+kernel.apply(Plan((DelRoute(route),)))
+restored=False
+while time.monotonic()-started<=2:
+ if route in kernel.read().routes:
+  restored=True
+  break
+ time.sleep(.05)
+print(json.dumps({"restored":restored,"seconds":time.monotonic()-started}))
+"""
+INJECT_BUNDLE = """import hashlib,json,os,sys,time
+from contextlib import closing
+from kornode.config.loader import load_config
+from kornode.registry.db import open_registry,transaction
+from kornode.registry.repository import Registry
+from kornode.services.bundle import BundleService
+from kornode.bundle.canonical import canonical_json,body_sha256
+from kornode.bundle.signing import sign,key_id
+from kornode.bundle.validator import validate
+options=json.load(sys.stdin)
+config=load_config(os.environ["KORNODE_CONFIG"])
+with closing(open_registry(config.system.data_dir/"registry.db")) as conn, transaction(conn):
+ registry=Registry(conn)
+ node=registry.get_node_by_name("agent-a")
+ latest=registry.latest_bundle(node.id)
+ version=max(latest.version,node.desired_version,node.high_water_version)+1
+ body=json.loads(latest.body)
+ body["version"]=version
+ if not options["tamper"]: body["hubs"][0]["port"]=1
+ wire=canonical_json(body)
+ key=BundleService(config).signing_key(registry)
+ signature=sign(wire,key)
+ validate(wire,signature,trusted={key_id(key.public_key()):key.public_key()},
+          high_water_version=version-1,agent_version=config.control.min_agent_version,
+          expected_node_id=node.id)
+ if options["tamper"]: wire+=b" "
+ registry.add_bundle(node_id=node.id,version=version,body=wire,signature=signature,
+  sha256=body_sha256(wire),content_hash=hashlib.sha256(wire).hexdigest(),
+  key_id=key_id(key.public_key()),reason="test-only injected fault")
+ registry.update_node(node.id,desired_version=version)
+print(json.dumps({"version":version}))
+"""
+IDENTITY = """import hashlib,json
+from pathlib import Path
+p=Path("/var/lib/kornode-agent")
+print(json.dumps({"certificate":hashlib.sha256((p/"tls/cert.pem").read_bytes()).hexdigest()}))
+"""
+
+
+def atomic(path: Path, value: Any, mode: int = 0o600) -> None:
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".e2e-")
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(value, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(mode)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+class Worker:
+    def __init__(
+        self, request: dict[str, Any], *, base: Path = BASE, marker: Path = MARKER
+    ) -> None:
+        self.request = request
+        self.base, self.marker = base, marker
+        self.role, self.run_id, self.case = (
+            request["role"],
+            request["run_id"],
+            request.get("case", ""),
+        )
+        if self.role not in ROLES or not re.fullmatch(r"[0-9a-f]{24}", self.run_id):
+            raise ValueError("invalid identity")
+        if self.case and self.case not in CASES:
+            raise ValueError("invalid case")
+        self.root = base / self.run_id
+        self.directory = self.root / self.case if self.case else self.root
+        self.payload = request.get("payload", {})
+        self.machine_file = Path("/etc/machine-id")
+
+    def guard(self, *, lease: bool = True) -> str:
+        if os.geteuid() != 0:
+            raise ValueError("root worker required")
+        info = self.marker.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError("unsafe marker")
+        machine = self.machine_file.read_text().strip()
+        marker = json.loads(self.marker.read_text())
+        if marker != {
+            "purpose": "kornode-e2e-disposable",
+            "role": self.role,
+            "machine_id": machine,
+        }:
+            raise ValueError("VM not designated")
+        if self.base.is_symlink() or (self.base.exists() and self.base.stat().st_mode & 0o022):
+            raise ValueError("unsafe base")
+        if lease:
+            if self.root.is_symlink() or not self.root.is_dir():
+                raise ValueError("missing owner root")
+            path = self.base / "lease.json"
+            if path.is_symlink() or json.loads(path.read_text()) != self.owner():
+                raise ValueError("foreign lease")
+        return hashlib.sha256(machine.encode()).hexdigest()
+
+    def owner(self) -> dict[str, str]:
+        return {"role": self.role, "run_id": self.run_id}
+
+    def run(
+        self,
+        argv: list[str],
+        *,
+        data: bytes | None = None,
+        allowed: tuple[int, ...] = (0,),
+        timeout: int = 120,
+    ) -> tuple[int, bytes]:
+        if argv and argv[0] == "docker":
+            argv = ["docker", "--host", "unix:///var/run/docker.sock", *argv[1:]]
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            result = subprocess.run(
+                argv, input=data, stdout=out, stderr=err, timeout=timeout, check=False
+            )
+            if result.returncode not in allowed:
+                raise ValueError("command failed; output withheld")
+            out.seek(0)
+            reply = out.read(12 * 1024 * 1024 + 1)
+            if len(reply) > 12 * 1024 * 1024:
+                raise ValueError("reply too large")
+            return result.returncode, reply
+
+    def compose(self, *args: str, **kwargs: Any) -> tuple[int, bytes]:
+        return self.run(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                self.project(),
+                "--file",
+                str(self.directory / "compose.json"),
+                *args,
+            ],
+            **kwargs,
+        )
+
+    def project(self) -> str:
+        return f"ke2e-{self.run_id[:12]}-{self.role}-{self.case}"
+
+    def owned_case(self) -> dict[str, Any]:
+        if not self.case or self.directory.is_symlink():
+            raise ValueError("invalid case")
+        path = self.directory / "owner.json"
+        if path.is_symlink() or json.loads(path.read_text()) != self.owner():
+            raise ValueError("foreign case")
+        state = self.directory / "state.json"
+        return json.loads(state.read_text()) if state.exists() else {}
+
+    def container(self) -> str:
+        self.owned_case()
+        container = self.compose("ps", "-a", "--quiet", "node")[1].decode().strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", container):
+            raise ValueError("container missing")
+        labels = json.loads(
+            self.run(["docker", "inspect", "--format", "{{json .Config.Labels}}", container])[1]
+        )
+        expected = {
+            "org.kornode.e2e.run": self.run_id,
+            "org.kornode.e2e.role": self.role,
+            "org.kornode.e2e.case": self.case,
+        }
+        if any(labels.get(key) != value for key, value in expected.items()):
+            raise ValueError("foreign container")
+        return container
+
+    def execute(self, argv: list[str], **kwargs: Any) -> tuple[int, bytes]:
+        return self.run(["docker", "exec", "-i", self.container(), *argv], **kwargs)
+
+    def cli(self, *args: str, **kwargs: Any) -> Any:
+        state = self.owned_case()
+        raw = self.execute(["korctl", "--config", state["config"], *args, "--json"], **kwargs)[1]
+        return json.loads(raw)
+
+    def preflight(self) -> dict[str, Any]:
+        machine = self.guard(lease=False)
+        if sys.version_info < (3, 12) or not stat.S_ISCHR(Path("/dev/net/tun").stat().st_mode):
+            raise ValueError("missing prerequisites")
+        if shutil.disk_usage(self.base.parent).free < 8 * 1024**3:
+            raise ValueError("insufficient disk space")
+        self.run(["docker", "info", "--format", "{{.ServerVersion}}"])
+        self.run(["docker", "compose", "version"])
+        if self.role in {"hub", "ext"}:
+            for port in [443, 18444] if self.role == "hub" else [443]:
+                with socket.socket() as sock:
+                    sock.bind(("0.0.0.0", port))
+        return {"machine": machine, "role": self.role, "python": list(sys.version_info[:2])}
+
+    def claim(self) -> dict[str, bool]:
+        self.guard(lease=False)
+        self.base.mkdir(mode=0o700, exist_ok=True)
+        # No stale-lease stealing: interruption requires explicit owner recovery.
+        fd = os.open(
+            self.base / "lease.json", os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+        )
+        try:
+            with os.fdopen(fd, "w") as handle:
+                json.dump(self.owner(), handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            self.root.mkdir(mode=0o700)
+        except BaseException:
+            (self.base / "lease.json").unlink(missing_ok=True)
+            raise
+        return {"claimed": True}
+
+    def load_images(self, stream: BinaryIO) -> dict[str, bool]:
+        size = self.payload["size"]
+        if type(size) is not int or not 0 < size <= 3 * 1024**3:
+            raise ValueError("invalid image size")
+        with tempfile.TemporaryFile(dir=self.root) as handle:
+            remaining = size
+            while remaining:
+                chunk = stream.read(min(remaining, 1024 * 1024))
+                if not chunk:
+                    raise ValueError("truncated image")
+                handle.write(chunk)
+                remaining -= len(chunk)
+            if stream.read(1):
+                raise ValueError("trailing image data")
+            handle.seek(0)
+            with tempfile.TemporaryFile() as out:
+                result = subprocess.run(
+                    ["docker", "--host", "unix:///var/run/docker.sock", "load"],
+                    stdin=handle,
+                    stdout=out,
+                    stderr=out,
+                    timeout=500,
+                    check=False,
+                )
+                if result.returncode:
+                    raise ValueError("image load failed")
+        return {"loaded": True}
+
+    def image(self, value: str) -> str:
+        if not isinstance(value, str) or not IMAGE_RE.fullmatch(value):
+            raise ValueError("invalid image")
+        identifier = (
+            self.run(["docker", "image", "inspect", "--format", "{{.Id}}", value])[1]
+            .decode()
+            .strip()
+        )
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", identifier):
+            raise ValueError("invalid image identity")
+        return identifier
+
+    def deploy(self) -> dict[str, str]:
+        if not self.case:
+            raise ValueError("missing case")
+        image = self.payload["image"]
+        identifier = self.image(image)
+        self.directory.mkdir(mode=0o711)
+        atomic(self.directory / "owner.json", self.owner())
+        config_path = self.directory / "config.json"
+        state = {"config": str(config_path), "image": image}
+        atomic(self.directory / "state.json", state)
+        if self.role in {"hub", "ext"}:
+            endpoint = self.payload["endpoint"]
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", endpoint):
+                raise ValueError("invalid endpoint")
+            config = {
+                "system": {
+                    key: str(self.directory / suffix)
+                    for key, suffix in [
+                        ("data_dir", "data"),
+                        ("generated_dir", "generated"),
+                        ("secrets_dir", "secrets"),
+                        ("log_dir", "logs"),
+                    ]
+                },
+                "server": {"cn": endpoint, "port": 443, "udp_enabled": False},
+                "fabric": {"enabled": self.role == "hub"},
+                "control": {
+                    "enabled": self.role == "hub",
+                    "report_interval_seconds": 5,
+                    "long_poll_seconds": 5,
+                },
+                "web": {"enabled": False},
+                "routing": {"client_policy": "off", "host_policy": "off"},
+            }
+            atomic(config_path, config)
+        agent = self.role.startswith("agent-")
+        service: dict[str, Any] = {
+            "image": image,
+            "restart": "unless-stopped",
+            "init": True,
+            "cap_add": ["NET_ADMIN", "NET_RAW"],
+            "devices": ["/dev/net/tun:/dev/net/tun"],
+            # The reconciler writes these; /proc/sys is read-only in the container.
+            "sysctls": {"net.ipv4.ip_forward": 1, "net.ipv4.conf.all.src_valid_mark": 1},
+            "volumes": [
+                {
+                    "type": "bind",
+                    "source": str(self.directory),
+                    "target": str(self.directory),
+                    "read_only": True,
+                }
+            ],
+            "labels": {
+                "org.kornode.e2e.run": self.run_id,
+                "org.kornode.e2e.role": self.role,
+                "org.kornode.e2e.case": self.case,
+            },
+        }
+        if agent:
+            (self.directory / "agent").mkdir(mode=0o700)
+            service["volumes"].append(
+                {
+                    "type": "bind",
+                    "source": str(self.directory / "agent"),
+                    "target": "/var/lib/kornode-agent",
+                }
+            )
+        else:
+            for bucket in ("data", "generated", "secrets", "logs", "recovery"):
+                path = self.directory / bucket
+                path.mkdir(mode=0o711 if bucket == "recovery" else 0o700)
+                service["volumes"].append(
+                    {"type": "bind", "source": str(path), "target": str(path)}
+                )
+            service["environment"] = {"KORNODE_CONFIG": str(config_path)}
+            service["ports"] = ["443:443/tcp"] + (["18444:18444/tcp"] if self.role == "hub" else [])
+        atomic(self.directory / "compose.json", {"services": {"node": service}})
+        self.compose("create" if agent else "up", *([] if agent else ["-d"]), "node")
+        return {"image_id": identifier}
+
+    def ready(self) -> dict[str, bool]:
+        script = 'import socket; s=socket.create_connection(("127.0.0.1",443),2);s.close()'
+        if self.role == "hub":
+            script += ';s=socket.create_connection(("10.99.0.1",8444),2);s.close()'
+        code, _ = self.execute(["python", "-c", script], allowed=(0, 1))
+        return {"ready": code == 0}
+
+    def relay(self) -> dict[str, bool]:
+        if self.role != "hub":
+            raise ValueError("hub only")
+        self.run(["docker", "exec", "-d", self.container(), "python", "-c", PROXY])
+        return {"started": True}
+
+    def create_agent(self) -> Any:
+        if self.role != "hub" or self.payload["name"] not in {"agent-a", "agent-b"}:
+            raise ValueError("invalid agent")
+        return self.cli("agent", "create", self.payload["name"])
+
+    def enroll(self) -> Any:
+        if not self.role.startswith("agent-") or not isinstance(self.payload["token"], str):
+            raise ValueError("agent only")
+        result = self.compose(
+            "run",
+            "--rm",
+            "-T",
+            "--no-deps",
+            "--entrypoint",
+            "python",
+            "node",
+            "-c",
+            ENROLL,
+            data=self.payload["token"].encode(),
+            timeout=120,
+        )
+        self.compose("up", "-d", "node")
+        return json.loads(result[1])
+
+    def status(self) -> Any:
+        if self.role.startswith("agent-"):
+            code, data = self.execute(
+                ["kornode-agent", "status", "--json"], allowed=(0, 1, 3, 4), timeout=30
+            )
+            return {"code": code, "data": json.loads(data)}
+        return self.cli("control", "status")
+
+    def probe(self) -> Any:
+        if not self.role.startswith("agent-"):
+            raise ValueError("agent only")
+        gateway = self.payload.get("gateway")
+        if gateway and not re.fullmatch(r"[0-9.]+", gateway):
+            raise ValueError("invalid gateway")
+        code, data = self.execute(
+            ["python", "-c", PROBE],
+            data=json.dumps({"gateway": gateway}).encode(),
+            allowed=(0, 1),
+            timeout=10,
+        )
+        return json.loads(data) if code == 0 else {"status": 0}
+
+    def state(self) -> Any:
+        if not self.role.startswith("agent-"):
+            raise ValueError("agent only")
+        code = (
+            "import json;from pathlib import Path;from kornode_agent.store import Store;"
+            's=Store(Path("/var/lib/kornode-agent")).load_state();'
+            'print(json.dumps({"current":s.current,"high_water":s.high_water,'
+            '"last_apply":({"version":s.last_apply.version,"result":s.last_apply.result}'
+            "if s.last_apply else None)}))"
+        )
+        return json.loads(self.execute(["python", "-c", code])[1])
+
+    def identity(self) -> Any:
+        return json.loads(self.execute(["python", "-c", IDENTITY])[1])
+
+    def change(self) -> Any:
+        if self.role != "hub" or self.payload["name"] not in {"agent-a", "agent-b"}:
+            raise ValueError("invalid agent")
+        dpd = self.payload.get("dpd", 25)
+        if type(dpd) is not int or not 5 <= dpd <= 3600:
+            raise ValueError("invalid dpd")
+        return self.cli("agent", "set", self.payload["name"], "--dpd", str(dpd))
+
+    def repair_route(self) -> Any:
+        if not self.role.startswith("agent-") or self.case != "route":
+            raise ValueError("route case only")
+        return json.loads(self.execute(["python", "-c", REPAIR_ROUTE])[1])
+
+    def inject_bundle(self) -> Any:
+        if self.role != "hub" or self.case not in {"rollback", "tamper"}:
+            raise ValueError("bundle fault case only")
+        return json.loads(
+            self.execute(
+                ["python", "-c", INJECT_BUNDLE],
+                data=json.dumps({"tamper": self.case == "tamper"}).encode(),
+            )[1]
+        )
+
+    def rejected(self) -> Any:
+        if not self.role.startswith("agent-") or self.case != "tamper":
+            raise ValueError("tamper case only")
+
+        # Docker writes application stderr to its own stderr. Capture both streams
+        # privately below; never return logs or add raw Docker logs to artifacts.
+        with tempfile.TemporaryFile() as output:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "--host",
+                    "unix:///var/run/docker.sock",
+                    "logs",
+                    "--tail",
+                    "200",
+                    self.container(),
+                ],
+                stdout=output,
+                stderr=output,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode:
+                raise ValueError("log evidence unavailable")
+            output.seek(0)
+            raw = output.read(1024 * 1024)
+        return {"rejected": b"invalid_bundle bad_signature" in raw}
+
+    def rollback_report(self) -> Any:
+        if self.role != "hub" or self.case != "rollback":
+            raise ValueError("rollback case only")
+        version = self.payload["version"]
+        if type(version) is not int or not 1 <= version <= 2**31 - 1:
+            raise ValueError("invalid version")
+        reports = self.cli("agent", "status", "agent-a", "--limit", "20")["reports"]
+        return {
+            "reported": any(
+                row["body"].get("last_apply", {}).get("version") == version
+                and row["body"].get("last_apply", {}).get("result") == "rolled_back"
+                for row in reports
+                if row["body"].get("last_apply")
+            )
+        }
+
+    def revoke(self) -> Any:
+        if self.role != "hub":
+            raise ValueError("hub only")
+        return self.cli("agent", "revoke", "agent-b", "--yes")
+
+    def fault(self) -> Any:
+        if not self.role.startswith("agent-"):
+            raise ValueError("agent only")
+        container = self.container()
+        # Watchdog is armed before insertion, independent of SSH/pytest lifetime.
+        subprocess.Popen(
+            [sys.executable, "-c", WATCHDOG, container],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        rules = (
+            b"table inet kn_e2e_fault { chain output { type filter hook output priority -300; "
+            b'policy accept; oifname "lo" accept; counter drop; } }\n'
+        )
+        self.execute(["nft", "-f", "-"], data=rules)
+        return {"seconds": 60}
+
+    def ext_user(self) -> Any:
+        if self.role != "ext" or not isinstance(self.payload["password"], str):
+            raise ValueError("ext only")
+        self.execute(["python", "-c", EXT_USER], data=json.dumps(self.payload).encode())
+        return self.cli("certificates", "pin")
+
+    def upstream_ping(self) -> Any:
+        if self.role != "agent-a" or self.case != "cache":
+            raise ValueError("cache case only")
+        code, _ = self.execute(
+            ["ping", "-c", "1", "-W", "2", "-I", "oc-office", "10.8.0.1"],
+            allowed=(0, 1, 2),
+            timeout=5,
+        )
+        return {"reachable": code == 0}
+
+    def upstream(self) -> Any:
+        if self.role != "hub":
+            raise ValueError("hub only")
+        path = self.directory / "upstream.json"
+        atomic(path, self.payload["spec"])
+        try:
+            return self.cli("agent", "upstream", "set", "agent-a", "office", "--file", str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def rotate(self) -> Any:
+        if self.role != "hub":
+            raise ValueError("hub only")
+        return self.cli("control", "rotate-signing-key", "--yes")
+
+    def stop(self) -> Any:
+        self.owned_case()
+        self.compose("stop", "node")
+        return {"stopped": True}
+
+    def restart(self) -> Any:
+        state = self.owned_case()
+        image = self.payload.get("image", state["image"])
+        image_id = self.image(image)
+        compose = json.loads((self.directory / "compose.json").read_text())
+        compose["services"]["node"]["image"] = image
+        atomic(self.directory / "compose.json", compose)
+        state["image"] = image
+        atomic(self.directory / "state.json", state)
+        self.compose("up", "-d", "--force-recreate", "node")
+        if self.role == "hub":
+            self.relay()
+        return {"image_id": image_id}
+
+    def backup(self) -> Any:
+        if self.role != "hub":
+            raise ValueError("hub only")
+        # Generated on the VM; passphrase/key/archive are never returned or artifacts.
+        import secrets
+
+        path = self.directory / "recovery" / "passphrase"
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(secrets.token_urlsafe(48))
+            handle.flush()
+            os.fsync(handle.fileno())
+        return self.cli(
+            "hub",
+            "backup",
+            "--out",
+            str(self.directory / "recovery" / "hub.knbackup"),
+            "--passphrase-file",
+            str(path),
+        )
+
+    def restore(self) -> Any:
+        if self.role != "hub":
+            raise ValueError("hub only")
+        state = self.owned_case()
+        self.compose("stop", "node")
+        # ONLY the case's known bind-mounted data subtree, after stopping its hub.
+        data = self.directory / "data"
+        if data.is_symlink() or data.parent != self.directory:
+            raise ValueError("unsafe wipe")
+        shutil.rmtree(data)
+        data.mkdir(mode=0o700)
+        result = self.compose(
+            "run",
+            "--rm",
+            "-T",
+            "--no-deps",
+            "--entrypoint",
+            "korctl",
+            "node",
+            "--config",
+            state["config"],
+            "hub",
+            "restore",
+            str(self.directory / "recovery" / "hub.knbackup"),
+            "--target",
+            str(self.directory / "recovery" / "restored"),
+            "--passphrase-file",
+            str(self.directory / "recovery" / "passphrase"),
+            "--yes",
+            "--json",
+            timeout=300,
+        )
+        restored = json.loads(result[1])
+        expected = self.directory / "recovery" / "restored" / "config.yaml"
+        if (
+            restored["config_path"] != str(expected)
+            or expected.parent.is_symlink()
+            or expected.is_symlink()
+            or not expected.is_file()
+            or not expected.resolve().is_relative_to((self.directory / "recovery").resolve())
+        ):
+            raise ValueError("unexpected restore path")
+        expected.parent.chmod(0o711)  # explicit activation for dropped-privilege workers
+        state["config"] = str(expected)
+        compose = json.loads((self.directory / "compose.json").read_text())
+        compose["services"]["node"]["environment"]["KORNODE_CONFIG"] = str(expected)
+        atomic(self.directory / "compose.json", compose)
+        atomic(self.directory / "state.json", state)
+        self.compose("up", "-d", "--force-recreate", "node")
+        self.relay()
+        return {"staged_and_activated": True}
+
+    def diagnostics(self) -> Any:
+        if not self.role.startswith("agent-"):
+            return {"available": False}
+        path = self.directory / "agent" / "diagnostic.tar.gz"
+        if path.exists():
+            path.unlink()
+        self.execute(
+            ["kornode-agent", "diag", "--out", "/var/lib/kornode-agent/diagnostic.tar.gz", "--json"]
+        )
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 5 * 1024 * 1024:
+                raise ValueError("unsafe diagnostics")
+            data = handle.read(5 * 1024 * 1024 + 1)
+        if len(data) > 5 * 1024 * 1024:
+            raise ValueError("unsafe diagnostics")
+        return {"available": True, "archive": base64.b64encode(data).decode()}
+
+    def cleanup(self) -> Any:
+        if not self.directory.exists():
+            return {"clean": True}
+        self.owned_case()
+        if (self.directory / "compose.json").is_file():
+            self.compose("down", "--volumes", "--remove-orphans", timeout=120)
+        shutil.rmtree(self.directory)
+        return {"clean": True}
+
+    def release(self) -> Any:
+        if list(self.root.iterdir()):
+            raise ValueError("case cleanup incomplete; lease retained")
+        for kind in ("hub", "agent"):
+            tag = f"kornode-e2e:{kind}-{self.run_id}"
+            present, _ = self.run(["docker", "image", "inspect", tag], allowed=(0, 1))
+            if present == 0:
+                self.run(["docker", "image", "rm", tag])
+        self.root.rmdir()
+        (self.base / "lease.json").unlink()
+        return {"released": True}
+
+    def pull_previous(self) -> Any:
+        for field in ("hub", "agent"):
+            image = self.payload[field]
+            if not IMAGE_RE.fullmatch(image) or "@sha256:" not in image:
+                raise ValueError("immutable baseline required")
+            self.run(["docker", "pull", image], timeout=300)
+        return {"hub": self.image(self.payload["hub"]), "agent": self.image(self.payload["agent"])}
+
+    def recover(self) -> Any:
+        self.guard(lease=False)
+        lease = self.base / "lease.json"
+        if not lease.exists() and not self.root.exists():
+            return {"released": True}
+        self.guard()
+        try:
+            for case in sorted(CASES):
+                self.case, self.directory = case, self.root / case
+                if self.directory.exists():
+                    self.cleanup()
+        finally:
+            self.case, self.directory = "", self.root
+        return self.release()
+
+    def dispatch(self, stream: BinaryIO) -> Any:
+        action = self.request["action"]
+        if action == "preflight":
+            return self.preflight()
+        if action == "claim":
+            return self.claim()
+        if action == "recover":
+            return self.recover()
+        self.guard()
+        if action == "load_images":
+            return self.load_images(stream)
+        permitted = {
+            "deploy",
+            "ready",
+            "relay",
+            "create_agent",
+            "enroll",
+            "status",
+            "probe",
+            "identity",
+            "state",
+            "change",
+            "revoke",
+            "repair_route",
+            "inject_bundle",
+            "rejected",
+            "rollback_report",
+            "fault",
+            "ext_user",
+            "upstream",
+            "upstream_ping",
+            "rotate",
+            "stop",
+            "restart",
+            "backup",
+            "restore",
+            "diagnostics",
+            "cleanup",
+            "release",
+            "pull_previous",
+        }
+        if action not in permitted:
+            raise ValueError("unknown action")
+        return getattr(self, action)()
+
+
+def main() -> int:
+    try:
+        header = sys.stdin.buffer.readline(65537)
+        if len(header) > 65536 or not header.endswith(b"\n"):
+            raise ValueError("request too large")
+        worker = Worker(json.loads(header))
+        result = worker.dispatch(sys.stdin.buffer)
+        print(json.dumps({"ok": True, "result": result}))
+        return 0
+    except Exception:
+        print(json.dumps({"ok": False, "error": "remote_action_failed"}))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
