@@ -259,6 +259,44 @@ def test_reconciler_restart_with_the_tunnel_dying_meanwhile_leaks_nothing(
 
 
 @pytest.mark.netlab
+def test_established_flow_of_a_removed_exit_never_reaches_the_uplink(
+    topology: Topology,
+    connected_node3: UpstreamHandle,
+    reconciler_node3: subprocess.Popen[bytes],
+) -> None:
+    # D-32: the flow keeps the ct mark of the exit it started on. Once the
+    # profile is disabled that mark has no ip rule and no kill-switch, so only
+    # the stale-mark rule stands between the flow and the uplink.
+    uplink = _default_route_device(topology.node3)
+    flow = _start_long_flow(topology.node3.full_name, INET_HTTP_ADDR, HTTP_PORT, duration=30.0)
+    capture: subprocess.Popen[str] | None = None
+    try:
+        # Positive control: the flow really is inside the tunnel first.
+        before = _capture_packets(
+            topology.node3.full_name, UPSTREAM_INTERFACE, f"host {INET_HTTP_ADDR}"
+        )
+        capture = _start_capture(topology.node3.full_name, uplink, f"host {INET_HTTP_ADDR}")
+        korctl(
+            topology.node3,
+            connected_node3.config_path,
+            "upstream",
+            "disable",
+            connected_node3.profile,
+        )
+        korctl(topology.node3, connected_node3.config_path, "net", "apply")
+        time.sleep(2.0)
+    finally:
+        _terminate(flow)
+        packets = _stop_capture(capture) if capture else -1
+
+    ruleset = topology.node3.run(["nft", "list", "table", "inet", "kornode"]).stdout
+
+    assert before > 0
+    assert packets == 0
+    assert "meta mark & 0xff000000 == 0x0c000000" in ruleset
+
+
+@pytest.mark.netlab
 def test_suppress_rule_keeps_connected_routes_ahead_of_policy_table(
     topology: Topology,
     connected_node3: UpstreamHandle,
@@ -334,6 +372,38 @@ def _start_connect_loop(
                 socket.create_connection((host, port), timeout=0.2).close()
             except OSError:
                 pass
+            time.sleep(0.05)
+        """
+        )
+        .replace("HOST", repr(host))
+        .replace("PORT", repr(port))
+        .replace("DURATION", repr(duration))
+    )
+    return subprocess.Popen(  # noqa: S603 - explicit argv, no shell
+        ["ip", "netns", "exec", full_namespace, "python3", "-c", code],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _start_long_flow(
+    full_namespace: str, host: str, port: int, duration: float = 30.0
+) -> subprocess.Popen[bytes]:
+    """One TCP connection kept open, never redialed: a reconnect would start a
+    new flow under the new policy and prove nothing about the old ct mark."""
+    code = (
+        textwrap.dedent(
+            """
+        import socket
+        import time
+
+        sock = socket.create_connection((HOST, PORT), timeout=2)
+        deadline = time.monotonic() + DURATION
+        while time.monotonic() < deadline:
+            try:
+                sock.send(b"x")
+            except OSError:
+                break
             time.sleep(0.05)
         """
         )

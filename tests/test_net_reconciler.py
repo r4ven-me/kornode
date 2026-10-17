@@ -159,6 +159,46 @@ def test_loop_passes_at_start_and_debounces_a_burst_of_wakes() -> None:
     assert not thread.is_alive()
 
 
+def test_netlink_events_do_not_bypass_backoff_after_a_failed_pass() -> None:
+    # A half-applied pass emits netlink events itself; waking on those would
+    # turn the exponential backoff into a hot retry loop.
+    kernel = FakeKernel()
+    kernel.fail = True
+    reconciler = Reconciler(lambda: DESIRED, kernel, debounce=0.0, timer=60)
+    thread = _start(reconciler)
+    try:
+        _wait_for(lambda: reconciler.status()["passes"] == 1)
+        for _ in range(20):
+            reconciler.wake_netlink()
+            time.sleep(0.02)
+        assert reconciler.status()["passes"] == 1
+        # The backoff expires on its own and the loop passes again.
+        _wait_for(lambda: reconciler.status()["passes"] >= 2)
+    finally:
+        reconciler.stop()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_explicit_wake_still_retries_during_backoff() -> None:
+    # Inputs changed (config edit, `net wake`): retry now, the error may be
+    # exactly what the operator just fixed.
+    kernel = FakeKernel()
+    kernel.fail = True
+    reconciler = Reconciler(lambda: DESIRED, kernel, debounce=0.0, timer=60)
+    thread = _start(reconciler)
+    try:
+        _wait_for(lambda: reconciler.status()["passes"] == 1)
+        kernel.fail = False
+        reconciler.wake()
+        _wait_for(
+            lambda: reconciler.status()["passes"] >= 2 and reconciler.status()["last_error"] is None
+        )
+    finally:
+        reconciler.stop()
+        thread.join(timeout=2)
+
+
 def test_timer_triggers_full_passes() -> None:
     reconciler = Reconciler(lambda: DESIRED, FakeKernel(), debounce=0.0, timer=0.05)
     thread = _start(reconciler)

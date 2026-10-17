@@ -11,6 +11,7 @@ from whatever is really there).
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import select
@@ -19,7 +20,7 @@ import socketserver
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -31,6 +32,28 @@ DEBOUNCE_SECONDS = 0.2
 TIMER_SECONDS = 10.0
 BACKOFF_START = 1.0
 BACKOFF_MAX = 30.0
+
+
+class WriterLockBusy(RuntimeError):
+    """Another process is the kernel writer right now."""
+
+
+@contextlib.contextmanager
+def writer_lock(path: Path) -> Iterator[None]:
+    """Exclusive, non-blocking flock: whoever holds it is the only process
+    allowed to run reconciler passes. The daemon holds it for its whole life
+    (the kernel drops it on any exit, so autorestart never sees a stale one);
+    an in-process pass (`net apply` without a daemon) holds it for the pass."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise WriterLockBusy(str(path)) from exc
+        yield
+    finally:
+        os.close(fd)
 
 
 class KernelLike(Protocol):
@@ -87,14 +110,23 @@ class Reconciler:
         self.wall_clock = wall_clock
         self._status = ReconcilerStatus()
         self._wake = threading.Event()
+        self._explicit_wake = threading.Event()  # inputs changed: skips backoff
         self._stop = threading.Event()
         self._lock = threading.Lock()  # single flight
         self._last_desired: DesiredState | None = None
         self._backoff = 0.0
+        self._not_before = 0.0  # clock() before which netlink wakes are held
 
     # -- triggers -----------------------------------------------------------
 
     def wake(self) -> None:
+        """Inputs changed or an operator asked: pass now, even in backoff."""
+        self._explicit_wake.set()
+        self._wake.set()
+
+    def wake_netlink(self) -> None:
+        """A kernel event: pass, but not before the backoff after a failed
+        pass has run out (a half-applied pass emits events itself)."""
         self._wake.set()
 
     def stop(self) -> None:
@@ -133,6 +165,7 @@ class Reconciler:
                 status.last_error = None
                 status.consecutive_errors = 0
                 self._backoff = 0.0
+                self._not_before = 0.0
                 return plan
             except Exception as exc:  # noqa: BLE001
                 # Any failure (netlink read, broken config in the provider)
@@ -143,6 +176,7 @@ class Reconciler:
                 self._backoff = min(
                     BACKOFF_MAX, BACKOFF_START if not self._backoff else self._backoff * 2
                 )
+                self._not_before = self.clock() + self._backoff
                 return Plan()
 
     # -- loop ---------------------------------------------------------------
@@ -158,9 +192,14 @@ class Reconciler:
             if self._stop.is_set():
                 return
             if woken:
+                if not self._explicit_wake.is_set():
+                    held = self._not_before - self.clock()
+                    if held > 0 and self._stop.wait(held):
+                        return
                 # Debounce: let a burst of events settle into one pass.
                 time.sleep(self.debounce)
                 self._wake.clear()
+                self._explicit_wake.clear()
             self.run_once()
             next_timer = self.clock() + self.timer
 
@@ -195,7 +234,7 @@ def watch_netlink(reconciler: Reconciler, stop: threading.Event) -> None:
             if not ready:
                 continue
             if ipr.get():
-                reconciler.wake()
+                reconciler.wake_netlink()
 
 
 class _ControlHandler(socketserver.StreamRequestHandler):

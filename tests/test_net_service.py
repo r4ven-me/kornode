@@ -125,12 +125,15 @@ def test_api_requires_admin(client: TestClient) -> None:
     assert client.get("/api/net/plan").status_code == 401
 
 
-def test_cli_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                  capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     config = _config(tmp_path)
     monkeypatch.setattr(cli, "get_config", lambda: config)
     monkeypatch.setattr(
-        cli, "NetService", lambda c: NetService(c, runner=FakeRunner(), kernel=FakeKernel())  # type: ignore[arg-type]
+        cli,
+        "NetService",
+        lambda c: NetService(c, runner=FakeRunner(), kernel=FakeKernel()),  # type: ignore[arg-type]
     )
 
     cli.net_plan(as_json=False)
@@ -249,3 +252,61 @@ def test_a_failed_pass_is_not_reported_as_applied(tmp_path: Path) -> None:
     result = _service(tmp_path, FailingKernel()).apply()
 
     assert result["applied"] is False
+
+
+def test_apply_never_becomes_a_second_writer_while_the_daemon_holds_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Daemon started (lock taken) but its socket is not bound yet.
+    from kornode.net.reconciler import writer_lock
+    from kornode.services import net as net_module
+    from kornode.services.net import NetApplyError, reconciler_lock
+
+    monkeypatch.setattr(net_module, "APPLY_TIMEOUT_SECONDS", 0.3)
+    kernel = FakeKernel()
+    service = _service(tmp_path, kernel)
+    with (
+        writer_lock(reconciler_lock(service.config)),
+        pytest.raises(NetApplyError, match="starting"),
+    ):
+        service.apply()
+    assert kernel.state == ActualState()
+
+
+def test_apply_reaches_the_daemon_once_it_binds_its_socket(tmp_path: Path) -> None:
+    import threading
+    import time
+
+    from kornode.net.reconciler import Reconciler, serve_control, writer_lock
+    from kornode.services.net import reconciler_lock, reconciler_socket
+
+    config = _config(tmp_path)
+    kernel = FakeKernel()
+    service = NetService(config, runner=FakeRunner(), kernel=kernel)  # type: ignore[arg-type]
+    reconciler = Reconciler(service.inputs.desired, kernel)
+    servers: list[Any] = []
+
+    def daemon() -> None:
+        time.sleep(0.3)
+        servers.append(serve_control(reconciler, reconciler_socket(config)))
+
+    with writer_lock(reconciler_lock(config)):
+        thread = threading.Thread(target=daemon)
+        thread.start()
+        try:
+            assert service.apply()["via"] == "reconciler"
+        finally:
+            thread.join()
+            for server in servers:
+                server.shutdown()
+                server.server_close()
+
+
+def test_a_second_daemon_cannot_take_the_writer_lock(tmp_path: Path) -> None:
+    from kornode.net.reconciler import WriterLockBusy, writer_lock
+
+    path = tmp_path / "reconciler.lock"
+    with writer_lock(path), pytest.raises(WriterLockBusy), writer_lock(path):
+        pass
+    with writer_lock(path):  # released with the first holder
+        pass

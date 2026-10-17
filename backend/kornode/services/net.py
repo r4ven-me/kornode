@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import signal
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,14 @@ from kornode.config.models import AppConfig
 from kornode.net.diff import Plan, describe, diff
 from kornode.net.explain import explain
 from kornode.net.kernel import Kernel
-from kornode.net.reconciler import Reconciler, control_request, serve_control, watch_netlink
+from kornode.net.reconciler import (
+    Reconciler,
+    WriterLockBusy,
+    control_request,
+    serve_control,
+    watch_netlink,
+    writer_lock,
+)
 from kornode.services.command import CommandRunner
 from kornode.services.netinputs import HubNetInputs
 
@@ -31,6 +40,10 @@ class NetApplyError(RuntimeError):
 
 def reconciler_socket(config: AppConfig) -> Path:
     return config.system.generated_dir / "reconciler.sock"
+
+
+def reconciler_lock(config: AppConfig) -> Path:
+    return config.system.generated_dir / "reconciler.lock"
 
 
 def _plan_dict(plan: Plan) -> list[dict[str, str]]:
@@ -75,25 +88,41 @@ class NetService:
         if dry_run:
             return {"applied": False, "dry_run": True, **self.plan()}
         sock = reconciler_socket(self.config)
-        if sock.exists():
+        deadline = time.monotonic() + APPLY_TIMEOUT_SECONDS
+        while True:
+            if sock.exists():
+                try:
+                    reply = control_request(sock, "apply", timeout=APPLY_TIMEOUT_SECONDS)
+                except (FileNotFoundError, ConnectionRefusedError):
+                    pass  # stale socket, nobody listens (yet)
+                except (OSError, ValueError) as exc:
+                    # Somebody listens but did not answer (timeout, garbage): a
+                    # second in-process writer would race the reconciler's pass.
+                    raise NetApplyError(f"reconciler did not answer: {exc}") from exc
+                else:
+                    status = reply.get("status")
+                    if reply.get("ok") is not True or not isinstance(status, dict):
+                        detail = reply.get("error") or "empty reply"
+                        raise NetApplyError(f"reconciler refused the pass: {detail}")
+                    return {
+                        "applied": status.get("last_error") is None,
+                        "via": "reconciler",
+                        "status": {"running": True, **status},
+                    }
             try:
-                reply = control_request(sock, "apply", timeout=APPLY_TIMEOUT_SECONDS)
-            except (FileNotFoundError, ConnectionRefusedError):
-                pass  # stale socket, nobody listens: one in-process pass below
-            except (OSError, ValueError) as exc:
-                # Somebody listens but did not answer (timeout, garbage): a
-                # second in-process writer would race the reconciler's pass.
-                raise NetApplyError(f"reconciler did not answer: {exc}") from exc
-            else:
-                status = reply.get("status")
-                if reply.get("ok") is not True or not isinstance(status, dict):
-                    detail = reply.get("error") or "empty reply"
-                    raise NetApplyError(f"reconciler refused the pass: {detail}")
-                return {
-                    "applied": status.get("last_error") is None,
-                    "via": "reconciler",
-                    "status": {"running": True, **status},
-                }
+                with writer_lock(reconciler_lock(self.config)):
+                    return self._apply_in_process()
+            except WriterLockBusy:
+                # The daemon holds the lock but has not bound its socket yet
+                # (start or autorestart): never become a second kernel writer,
+                # wait for it to answer.
+                if time.monotonic() >= deadline:
+                    raise NetApplyError(
+                        "reconciler is starting but did not open its socket"
+                    ) from None
+                time.sleep(0.1)
+
+    def _apply_in_process(self) -> dict[str, Any]:
         reconciler = Reconciler(self.inputs.desired, self.kernel)
         plan = reconciler.run_once()
         status = reconciler.status()
@@ -153,6 +182,11 @@ def run_reconciler(config_path: Path, env_file: Path | None = None) -> None:
         return HubNetInputs(config).desired()
 
     config = load_config(config_path, env_file=env_file)
+    with writer_lock(reconciler_lock(config)):
+        _run_locked(config, provider)
+
+
+def _run_locked(config: AppConfig, provider: Callable[[], Any]) -> None:
     reconciler = Reconciler(provider, Kernel())
     stop = threading.Event()
 

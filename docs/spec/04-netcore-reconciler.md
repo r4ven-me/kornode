@@ -75,7 +75,9 @@ triggers:  inputs_changed (in-process event / file watch / control-plane push)
                     RTM_NEWRULE/DELRULE, address changes on tunnel/source ifaces
            timer: every 10 s (full read + diff)
 debounce:  200 ms; single-flight (one apply at a time; a trigger during apply schedules one more pass)
-on error:  any exception is an errored pass (never a dead loop); exponential backoff 1 s → 30 s, emit event
+on error:  any exception is an errored pass (never a dead loop); exponential backoff 1 s → 30 s, emit event.
+           Netlink events (including those a half-applied pass causes itself) are held until the
+           backoff expires; explicit wakes (`wake`, inputs changed) and the synchronous `apply` retry at once.
 ```
 
 Metrics/state exposed (`reconciler.status()`): last apply time, last plan size,
@@ -88,8 +90,11 @@ resolver), `{"op": "apply"}` (runs one pass inside the request and replies with
 the status — callers that must not proceed before the kernel converged, e.g.
 the kill-switch before dialing a tunnel; `korctl net apply`, the API and
 `UpstreamService` use it) and `{"op": "status"}`. A failed pass is an error for
-`apply` callers (`NetService.converge` raises), never a silent success. With no
-reconciler running, `apply` falls back to one in-process pass. Agent: the
+`apply` callers (`NetService.converge` raises), never a silent success. The daemon holds an exclusive
+`flock` on `generated_dir/reconciler.lock` for its whole life (D-60); a second daemon
+exits. With no reconciler running, `apply` takes the same lock and runs one in-process
+pass; if the lock is busy the daemon is starting, so `apply` waits for its socket
+(up to 30 s, then fails) and never becomes a second kernel writer. Agent: the
 reconciler runs inside the agent process.
 
 Hub inputs that are files, all re-read on every pass: the runtime-switched
