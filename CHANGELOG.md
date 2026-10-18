@@ -8,7 +8,8 @@
   for life, in-process `net apply` per pass, waits for a starting daemon instead of writing);
   netlink events no longer bypass the backoff after a failed pass (`Reconciler.wake_netlink`).
 - Tests: `tests/test_kernel_single_writer.py` is AST-based; new netlab scenario for D-32 (flow of a
-  removed exit sends 0 packets to the uplink; written, not yet run on the netlab VM).
+  removed exit sends 0 packets to the uplink; with the stale-mark rule disabled it leaks 2). Full
+  privileged netlab on the VM: 43 passed.
 - Review 2026-10-18: `kornode-agent diag` returns the archive (the redactor swallowed it);
   `credentials_set` and other boolean flags, public keys and hex digests stay readable;
   `rotate-signing-key --dry-run` no longer counts the hub; e2e workflow no longer uploads agent
