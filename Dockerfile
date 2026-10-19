@@ -213,7 +213,8 @@ RUN --mount=type=bind,source=.,target=/src,readonly \
     && pip install /tmp/kornode-src \
     && rm -rf /tmp/kornode-src \
     && ln -sfn /usr/local/sbin/ocserv /usr/sbin/ocserv \
-    && ln -sfn /opt/kornode/.venv/bin/python3 /usr/local/bin/python \
+    && printf '%s\n' '#!/bin/sh' 'exec /opt/kornode/.venv/bin/python3 "$@"' > /usr/local/bin/python \
+    && chmod 0755 /usr/local/bin/python \
     && ln -sfn /opt/kornode/.venv/bin/korctl /usr/local/bin/korctl \
     && ln -sfn /opt/kornode/.venv/bin/kornode /usr/local/bin/kornode \
     && ln -sfn /opt/kornode/.venv/bin/uvicorn /usr/local/bin/uvicorn \

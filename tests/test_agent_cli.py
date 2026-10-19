@@ -246,3 +246,17 @@ def test_redactor_escaped_quotes_and_partial_key_tail() -> None:
     value = '{"password": "first\\"trailing-secret", "token": "a\\\\b"}\n' + "A" * 64
     safe = Redactor().text(value)
     assert "trailing-secret" not in safe and "A" * 64 not in safe
+
+
+def test_enroll_waits_for_the_pushed_route_but_still_refuses_an_unrouted_hub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kornode_agent import cli as agent_cli
+
+    answers = iter([False, False, True])
+    monkeypatch.setattr(agent_cli, "_routed_through_enroll", lambda host: next(answers))
+    monkeypatch.setattr(agent_cli.time, "sleep", lambda seconds: None)
+    assert agent_cli._wait_routed_through_enroll("10.99.0.1", timeout=5) is True
+
+    monkeypatch.setattr(agent_cli, "_routed_through_enroll", lambda host: False)
+    assert agent_cli._wait_routed_through_enroll("10.99.0.1", timeout=0.0) is False

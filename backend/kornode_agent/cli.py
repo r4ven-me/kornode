@@ -229,11 +229,26 @@ def _routed_through_enroll(host: str) -> bool:
         return False
 
 
+ROUTE_WAIT_SECONDS = 10.0
+
+
+def _wait_routed_through_enroll(host: str, *, timeout: float = ROUTE_WAIT_SECONDS) -> bool:
+    """The interface exists as soon as openconnect backgrounds, but the
+    vpnc-script installs the pushed routes a moment later. Wait for them, but
+    never past the deadline: an unrouted hub address is refused, not sent."""
+    deadline = time.monotonic() + timeout
+    while not _routed_through_enroll(host):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+    return True
+
+
 async def _exchange(root: Path, token: EnrollToken) -> None:
     # The request is sent without server verification: it must stay inside the
     # pinned enroll session, never leak to the uplink.
     host = urlsplit(token.control_url).hostname or ""
-    if not _routed_through_enroll(host):
+    if not await asyncio.to_thread(_wait_routed_through_enroll, host):
         raise RuntimeError(f"{host} is not routed through {ENROLL_INTERFACE}; refusing to enroll")
     client = ControlClient.for_enroll(token.control_url)
     try:
