@@ -1,9 +1,10 @@
 # Disposable four-VM E2E (P3-10)
 
-**Harness implemented; real VM acceptance has NOT been demonstrated.**
-Local unit tests validate orchestration/safety, not VPN behavior. P3-07/P3-08/P3-09
-review, privileged netlab, outstanding P2 items and the existing clock-dependent
-enrollment tests still need acceptance. Never run this suite on dev/production.
+**Real VM acceptance demonstrated 2026-10-19: 9 passed, 13 skipped (E2E-06 needs previous image digests; the rest are P4 blockers) on four disposable Debian 13 VMs, run from hub over SSH (no GitHub Actions).**
+Never run this suite on dev/production. Practical notes from that run: VM root disks need
+≥10 GB and RAM ≥2 GB with swap for `apt`; set `TMPDIR` to a disk path on hub (a 1 GB
+tmpfs `/tmp` cannot hold the image archive); install `docker.io docker-cli docker-compose
+docker-buildx`; the first image build after a source change needs working PyPI access.
 
 ## What this stage covers
 

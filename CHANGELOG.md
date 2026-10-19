@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed (four-VM E2E acceptance, D-62)
+
+- Hub image: `python` on `PATH` for supervisor programs is an `exec` wrapper of the venv interpreter
+  (the symlink resolved to system python and `control-api` could not import `kornode`).
+- Agent enroll waits up to 10 s for the pushed route to the hub before refusing (race with
+  vpnc-script); an unrouted hub address is still never contacted.
+- E2E harness fixes (connect_script, nft fault script, `pin` output, ext network, NL-13 re-dial
+  window); real VM run: 9 passed, 13 skipped.
+
 ### Fixed (P2 tails, D-60)
 
 - Reconciler: single kernel writer enforced by `flock` on `generated_dir/reconciler.lock` (daemon
