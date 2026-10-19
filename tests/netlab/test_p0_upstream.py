@@ -293,7 +293,11 @@ def test_established_flow_of_a_removed_exit_never_reaches_the_uplink(
 
     assert before > 0
     assert packets == 0
-    assert "meta mark & 0xff000000 == 0x0c000000" in ruleset
+    # nft prints the same match differently across versions (1.0.x vs 1.1.x).
+    assert any(
+        form in ruleset
+        for form in ("meta mark & 0xff000000 == 0x0c000000", "meta mark 0x0c000000/8")
+    )
 
 
 @pytest.mark.netlab
@@ -341,8 +345,21 @@ def test_mss_clamp_rule_covers_host_traffic_leaving_the_tunnel(
     table = topology.node3.run(["nft", "list", "table", "inet", "kornode"]).stdout
     postrouting = table.split("chain postrouting {", 1)[1].split("\n\t}", 1)[0]
 
-    assert "tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu" in postrouting
-    assert f"meta mark & 0xffffff00 == {connected_node3.fwmark}" in postrouting
+    # nft prints the same match differently across versions (1.0.x vs 1.1.x).
+    assert any(
+        form in postrouting
+        for form in (
+            "tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu",
+            "tcp flags syn / syn,rst tcp option maxseg size set rt mtu",
+        )
+    )
+    assert any(
+        form in postrouting
+        for form in (
+            f"meta mark & 0xffffff00 == {connected_node3.fwmark}",
+            f"meta mark {connected_node3.fwmark}/24",
+        )
+    )
 
 
 def _default_route_device(ns: Namespace) -> str:
