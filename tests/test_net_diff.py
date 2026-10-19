@@ -260,3 +260,25 @@ def test_missing_address_is_added_and_never_removed() -> None:
     assert diff(after, desired).is_empty
     stray = ActualState(addresses=frozenset({Address("lo", "10.99.0.9/32"), hub}))
     assert diff(stray, desired).is_empty
+
+
+def test_main_table_routes_are_owned_only_with_the_kornode_protocol() -> None:
+    from kornode.net.state import KORNODE_RTPROTO, MAIN_TABLE
+
+    ours = Route(table=MAIN_TABLE, dst="192.168.3.0/24", dev="vpns0", proto=KORNODE_RTPROTO)
+    session = Route(table=MAIN_TABLE, dst="10.99.0.3/32", dev="vpns0")  # ocserv's own
+    base = apply_to_state(ActualState(), diff(ActualState(), _desired()))
+    actual = ActualState(
+        sysctls=base.sysctls,
+        rules=base.rules,
+        routes=base.routes | {FOREIGN_ROUTE, session, ours},
+        nft_schema_hash=base.nft_schema_hash,
+        elements=base.elements,
+    )
+
+    # Withdrawn prefix: only our own main route is deleted.
+    assert diff(actual, _desired()).ops == (DelRoute(ours),)
+    # Wanted prefix: added once, never touching the unmarked ones.
+    want = _desired(routes=frozenset({TUN_DEFAULT, KILL_SWITCH, ours}))
+    assert diff(ActualState(), want).ops.count(ReplaceRoute(ours)) == 1
+    assert diff(actual, want).is_empty

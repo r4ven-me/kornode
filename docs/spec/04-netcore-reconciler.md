@@ -71,7 +71,7 @@ tests snapshot the output for every example in `docs/spec/examples/`.
 
 ```
 triggers:  inputs_changed (in-process event / file watch / control-plane push)
-           netlink: RTM_NEWLINK/DELLINK, RTM_NEWROUTE/DELROUTE (tables 12000-12999 and main default),
+           netlink: RTM_NEWLINK/DELLINK, RTM_NEWROUTE/DELROUTE (tables 12000-12999 and main default; main routes with `proto 77` are kornode-owned, D-63),
                     RTM_NEWRULE/DELRULE, address changes on tunnel/source ifaces
            timer: every 10 s (full read + diff)
 debounce:  200 ms; single-flight (one apply at a time; a trigger during apply schedules one more pass)

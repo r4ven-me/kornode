@@ -6,6 +6,7 @@
 
 - Hub per-user ocserv files carry `iroute` for a node's exported prefixes, `route` for other nodes'
   exported prefixes and the node's `dpd`/`keepalive`; ocserv is reloaded when an existing file changes.
+- Hub reconciler installs connected agents' exported prefixes in the main table (`proto 77`, owned by protocol only); S-03 showed ocserv `iroute` does not.
 - Agent prefix API reports `runtime_supported: true`; test that the `fabric` exit is never masqueraded.
 
 ### Fixed (four-VM E2E acceptance, D-62)

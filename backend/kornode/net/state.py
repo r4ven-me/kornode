@@ -21,6 +21,10 @@ RULE_PRIORITY_MIN = 90
 RULE_PRIORITY_MAX = 199
 TABLE_ID_MIN = 12000
 TABLE_ID_MAX = 12999
+# Main table: owned only for routes carrying KORNODE_RTPROTO (D-63). The kernel
+# reader drops every other main route, so the diff can never delete them.
+MAIN_TABLE = 254
+KORNODE_RTPROTO = 77
 OWNED_NFT_TABLES: frozenset[tuple[str, str]] = frozenset(
     {("inet", "kornode"), ("ip", "kornode_nat")}
 )
@@ -91,6 +95,8 @@ class Route:
     gateway: str | None = None
     metric: int = 0
     family: Family = 4
+    # Routing protocol: KORNODE_RTPROTO marks the main-table routes kornode owns.
+    proto: int = 0
 
     def __post_init__(self) -> None:
         if self.dst != "default":
@@ -238,4 +244,6 @@ def owns_rule(rule: IpRule) -> bool:
 
 
 def owns_route(route: Route) -> bool:
+    if route.table == MAIN_TABLE:
+        return route.proto == KORNODE_RTPROTO
     return TABLE_ID_MIN <= route.table <= TABLE_ID_MAX

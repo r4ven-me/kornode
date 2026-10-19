@@ -47,6 +47,8 @@ from kornode.net.diff import (
 from kornode.net.errors import ApplyError
 from kornode.net.state import (
     COMPAT_COMMENT,
+    KORNODE_RTPROTO,
+    MAIN_TABLE,
     OWNED_NFT_TABLES,
     TABLE_ID_MAX,
     TABLE_ID_MIN,
@@ -407,7 +409,10 @@ def _parse_rule(message: Any) -> IpRule | None:
 def _parse_route(message: Any, links: dict[int, str]) -> Route | None:
     attrs = dict(message["attrs"])
     table = attrs.get("RTA_TABLE", message["table"])
-    if not TABLE_ID_MIN <= table <= TABLE_ID_MAX:
+    if table == MAIN_TABLE:
+        if message["proto"] != KORNODE_RTPROTO:
+            return None  # the kernel's and ocserv's own main-table routes are not ours
+    elif not TABLE_ID_MIN <= table <= TABLE_ID_MAX:
         return None
     route_type = _ROUTE_TYPES.get(message["type"])
     if route_type is None:
@@ -423,6 +428,7 @@ def _parse_route(message: Any, links: dict[int, str]) -> Route | None:
         gateway=attrs.get("RTA_GATEWAY") if unicast else None,
         metric=attrs.get("RTA_PRIORITY", 0),
         family=family,
+        proto=KORNODE_RTPROTO if table == MAIN_TABLE else 0,
     )
 
 
@@ -462,8 +468,10 @@ def _route_args(route: Route, ipr: Any, *, for_delete: bool = False) -> dict[str
         # default scope (universe) never matches a device route (scope link),
         # so the delete fails with ESRCH.
         args["scope"] = 255
-        args["proto"] = 0
+        args["proto"] = route.proto
     else:
+        if route.proto:
+            args["proto"] = route.proto
         if route.dev is not None:
             matches = ipr.link_lookup(ifname=route.dev)
             if not matches:

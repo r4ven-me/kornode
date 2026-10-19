@@ -36,7 +36,10 @@ dpd = 20                    # node transport settings, when set
 keepalive = 25
 ```
 
-`export: false` prefixes appear in neither list. Changes rewrite group/user
+`export: false` prefixes appear in neither list. ocserv does not install `iroute`
+routes in the kernel (spike S-03); the hub reconciler adds `<prefix> dev vpnsN` to
+the main table with `proto 77` while the agent's session is up and removes it
+afterwards. Changes rewrite group/user
 files atomically. ocserv reads `config-per-group` and `config-per-user` when a
 session opens, so new and removed files need no reload; when the content of an
 existing file changes the hub runs `occtl reload`. Existing sessions pick up

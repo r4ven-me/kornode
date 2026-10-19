@@ -90,6 +90,25 @@ def test_foreign_state_is_untouched_and_stale_owned_state_removed(node: Namespac
     assert node.run(["ip", "route", "show", "table", "12050"]).stdout.strip() == ""
 
 
+@pytest.mark.netlab
+def test_agent_prefix_route_in_main_is_owned_by_protocol_and_withdrawn(node: Namespace) -> None:
+    """P4-01 / S-03 fallback: the reconciler installs an agent's prefix in main
+    with the kornode protocol and removes only that route when it is withdrawn."""
+    node.run(["ip", "route", "add", "10.7.0.0/16", "dev", "kup0"])  # foreign, no proto
+    node.run(["ip", "route", "add", "10.6.0.0/16", "dev", "kup0", "proto", "static"])
+
+    assert drive(node, "converge", "--session", "192.168.77.0/24=kup0")["after"] == []
+    ours = node.run(["ip", "route", "show", "proto", "77"]).stdout
+    assert "192.168.77.0/24 dev kup0" in ours
+    assert "10.7.0.0/16" not in ours and "10.6.0.0/16" not in ours
+
+    assert drive(node, "plan", "--session", "192.168.77.0/24=kup0")["plan"] == []
+    assert drive(node, "converge")["after"] == []
+    main = node.run(["ip", "route", "show", "table", "main"]).stdout
+    assert "192.168.77.0/24" not in main
+    assert "10.7.0.0/16" in main and "10.6.0.0/16" in main
+
+
 GOLDEN = Path(__file__).resolve().parents[1] / "golden"
 
 

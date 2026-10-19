@@ -18,6 +18,8 @@ from kornode.net.addressing import derive_addresses
 from kornode.net.compile import Compiled, EnrollGuard, NodeFacts, TunnelFact, compile_policy
 from kornode.net.model import EgressPolicy
 from kornode.net.state import DesiredState
+from kornode.registry.db import migrate, open_registry
+from kornode.registry.repository import Registry
 from kornode.services.command import CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.network_stats import NetworkStatsService
@@ -151,6 +153,7 @@ class HubNetInputs:
             resolved=self._resolved(),
             upstreams=tuple(upstreams),
             node_prefixes={node_id: (pool,)},
+            session_routes=tuple(self._session_routes()),
             uplink=NetworkStatsService(config, runner=self.runner).resolve_interface(),
             all_rp_filter=self._read_sysctl("net.ipv4.conf.all.rp_filter"),
             enroll=self._enroll_guard(),
@@ -180,6 +183,57 @@ class HubNetInputs:
             for link in links
             if link.get("ifname")
         }
+
+    def _session_routes(self) -> list[tuple[Network, str]]:
+        """Exported prefixes of connected agents -> their ocserv session device.
+
+        ocserv does not install `iroute` routes itself (S-03), so the reconciler
+        does. A session is connected while its fabric address is a route on a
+        `vpns*` device in main; that is also what removes the prefix routes again
+        when the session ends.
+        """
+        config = self.config
+        db = config.system.data_dir / "registry.db"
+        if not config.fabric.enabled or not db.exists():
+            return []
+        result = self.runner.run(
+            ["ip", "-j", "-4", "route", "show", "table", "main"], check=False, timeout=5
+        )
+        if not result.ok:
+            return []
+        try:
+            routes: list[dict[str, Any]] = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError:
+            return []
+        device_of = {
+            str(route["dst"]).removesuffix("/32"): str(route["dev"])
+            for route in routes
+            if route.get("dst") and str(route.get("dev", "")).startswith(config.server.device)
+        }
+        conn = open_registry(db)
+        try:
+            migrate(conn)
+            registry = Registry(conn)
+            active = {node.id for node in registry.list_nodes() if node.state == "active"}
+            prefixes = registry.list_prefixes()
+        finally:
+            conn.close()
+        fabric = config.fabric
+        session_routes: list[tuple[Network, str]] = []
+        for item in prefixes:
+            if not item.export or item.node_id not in active or item.node_id == 1:
+                continue
+            address = derive_addresses(
+                item.node_id,
+                fabric_cidr=fabric.cidr,
+                client_pool=fabric.client_pool,
+                source_pool=fabric.source_pool,
+                domain=fabric.domain,
+            ).fabric_address
+            device = device_of.get(str(address))
+            if device is not None:
+                session_routes.append((ipaddress.ip_network(item.prefix), device))
+        return sorted(session_routes, key=lambda entry: (str(entry[0]), entry[1]))
 
     def _carrier(self, profile: UpstreamProfileConfig) -> list[str]:
         path = carrier_state_dir(self.config) / f"{profile.name}.addrs"

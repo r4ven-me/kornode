@@ -21,7 +21,7 @@ from kornode.net.model import EgressPolicy
 from kornode.net.reconciler import Reconciler, serve_control, watch_netlink
 
 
-def build(corp: list[str]):  # type: ignore[no-untyped-def]
+def build(corp: list[str], session: tuple[str, str] | None = None):  # type: ignore[no-untyped-def]
     policy = EgressPolicy.model_validate(
         {
             "sets": {"corp": {"routes": corp}},
@@ -45,14 +45,15 @@ def build(corp: list[str]):  # type: ignore[no-untyped-def]
         node_prefixes={1: (net("10.100.1.0/24"),), 2: (net("10.100.2.0/24"),)},
         fabric_ifaces=("ktun0",),
         local_networks=(net("192.168.3.0/24"),),
+        session_routes=((net(session[0]), session[1]),) if session else (),
         uplink="kup0",
         all_rp_filter="1",
     )
     return compile_policy(policy, facts), policy, facts
 
 
-def desired(corp: list[str]):  # type: ignore[no-untyped-def]
-    return build(corp)[0].desired
+def desired(corp: list[str], session: tuple[str, str] | None = None):  # type: ignore[no-untyped-def]
+    return build(corp, session)[0].desired
 
 
 def run(socket_path: Path) -> None:
@@ -84,7 +85,11 @@ def main() -> None:
     corp = ["10.60.0.0/16"]
     if "--corp" in sys.argv:
         corp = sys.argv[sys.argv.index("--corp") + 1].split(",")
-    want = desired(corp)
+    session = None
+    if "--session" in sys.argv:
+        cidr, dev = sys.argv[sys.argv.index("--session") + 1].split("=")
+        session = (cidr, dev)
+    want = desired(corp, session)
     kernel = Kernel()
     keys = [sysctl.key for sysctl in want.sysctls]
     chains = sorted({rule.chain_key for rule in want.foreign_rules})

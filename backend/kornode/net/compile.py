@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from kornode.net.errors import PolicyError
 from kornode.net.model import EgressPolicy, InlineDest, NodeRef, Rule, SetRef, Via
 from kornode.net.state import (
+    KORNODE_RTPROTO,
+    MAIN_TABLE,
     Address,
     DesiredState,
     Family,
@@ -77,6 +79,9 @@ class NodeFacts:
     upstreams: tuple[str, ...] = ()
     node_prefixes: Mapping[int, tuple[Network, ...]] = field(default_factory=dict)
     fabric_ifaces: tuple[str, ...] = ()
+    # Hub: (exported agent prefix, ocserv session device) for connected agents;
+    # installed in main since ocserv's iroute does not (S-03, D-63).
+    session_routes: tuple[tuple[Network, str], ...] = ()
     uplink: str | None = None
     all_rp_filter: str | None = None
     enroll: EnrollGuard | None = None
@@ -411,6 +416,16 @@ def _rules(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[IpRule]:
 
 def _routes(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[Route]:
     routes: set[Route] = set()
+    for prefix, dev in facts.session_routes:
+        routes.add(
+            Route(
+                table=MAIN_TABLE,
+                dst=str(prefix),
+                dev=dev,
+                proto=KORNODE_RTPROTO,
+                family=4 if prefix.version == 4 else 6,
+            )
+        )
     for exit_ in exits:
         if not exit_.has_table:
             continue

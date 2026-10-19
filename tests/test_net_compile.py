@@ -379,3 +379,17 @@ def test_service_address_is_bound_to_lo() -> None:
     with_address = dataclasses.replace(facts, service_address=ipaddress.IPv4Address("10.99.0.1"))
     desired = compile_policy(policy, with_address).desired
     assert desired.addresses == frozenset({Address("lo", "10.99.0.1/32")})
+
+
+def test_session_routes_become_kornode_owned_main_routes() -> None:
+    from kornode.net.state import KORNODE_RTPROTO, MAIN_TABLE
+
+    policy, facts = hub_case()
+    facts = dataclasses.replace(facts, session_routes=((n("192.168.3.0/24"), "vpns0"),))
+
+    routes = compile_policy(policy, facts).desired.routes
+
+    assert Route(
+        table=MAIN_TABLE, dst="192.168.3.0/24", dev="vpns0", proto=KORNODE_RTPROTO
+    ) in routes
+    assert not any(r.table == MAIN_TABLE for r in compile_policy(*hub_case()).desired.routes)

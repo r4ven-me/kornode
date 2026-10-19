@@ -177,3 +177,35 @@ def test_disabled_runtime_profile_leaves_no_active_upstream(tmp_path: Path) -> N
     inputs = HubNetInputs(config, runner=FakeRunner(), proc_sys=_proc(tmp_path, "0"))
 
     assert {rule.id for rule in inputs.policy().egress} == {"clients-local"}
+
+
+def test_session_routes_follow_connected_agents_and_exported_prefixes(tmp_path: Path) -> None:
+    from kornode.registry.db import migrate, open_registry
+    from kornode.registry.repository import Registry
+
+    config = _config(tmp_path, fabric={"enabled": True}, auth={"password": {"enabled": True}})
+    config.system.data_dir.mkdir(parents=True)
+    registry = Registry(open_registry(config.system.data_dir / "registry.db"))
+    migrate(registry.conn)
+    registry.create_node(id=1, name="hub", state="active")
+    for node_id in (2, 3, 4):
+        registry.create_node(id=node_id, name=f"n{node_id}", state="active")
+    registry.set_prefixes(2, [{"prefix": "192.168.2.0/24", "kind": "lan", "export": True}])
+    registry.set_prefixes(3, [{"prefix": "192.168.3.0/24", "kind": "lan", "export": True}])
+    registry.set_prefixes(4, [{"prefix": "192.168.4.0/24", "kind": "lan", "export": False}])
+
+    class Runner(FakeRunner):
+        def run(self, argv: list[str], **kwargs: Any) -> CommandResult:
+            if argv == ["ip", "-j", "-4", "route", "show", "table", "main"]:
+                routes = [
+                    {"dst": "10.99.0.3", "dev": "vpns0", "scope": "link"},
+                    {"dst": "10.99.0.4", "dev": "vpns1", "scope": "link"},
+                    {"dst": "10.99.0.9", "dev": "eth0", "scope": "link"},
+                ]
+                return CommandResult(tuple(argv), 0, json.dumps(routes), "")
+            return super().run(argv, **kwargs)
+
+    facts = HubNetInputs(config, runner=Runner(), proc_sys=_proc(tmp_path, "1")).facts()
+
+    # node 2 is not connected, node 4 does not export.
+    assert facts.session_routes == ((ipaddress.ip_network("192.168.3.0/24"), "vpns0"),)
