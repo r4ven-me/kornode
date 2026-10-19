@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (review LOW findings, D-64)
+
+- Hub backup of a new hub (no `master.key` yet); disk errors are `503 backup_io`; another agent's stale policy no longer blocks a mutation; agent report caches `doctor` for 120 s; hub validates diagnostic archives; netlab accepts both nft renderings.
+
 ### Added (P4-01, P4-02, D-63)
 
 - Hub per-user ocserv files carry `iroute` for a node's exported prefixes, `route` for other nodes'

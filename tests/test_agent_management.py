@@ -265,6 +265,24 @@ def test_password_changes_keep_groups_and_disabled_state(world) -> None:  # type
     assert user["groups"] == ["staff"] and user["enabled"] is False
 
 
+def _diag_archive(files: dict[str, bytes], *, link: str | None = None) -> bytes:
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, content in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+        if link:
+            info = tarfile.TarInfo(link)
+            info.type = tarfile.SYMTYPE
+            info.linkname = "/etc/passwd"
+            archive.addfile(info)
+    return buffer.getvalue()
+
+
 def test_artifact_ownership_size_and_metadata_without_base64(world) -> None:  # type: ignore[no-untyped-def]
     import base64
 
@@ -273,7 +291,7 @@ def test_artifact_ownership_size_and_metadata_without_base64(world) -> None:  # 
     env.add(3)
     cmd = service.enqueue("node2", {"type": "collect_diag"})
     env.registry.claim_commands(2, now=clock[0])
-    raw = b"archive-bytes"
+    raw = _diag_archive({"report.json": b"{}", "logs/agent.log": b"line\n"})
     env.registry.finish_command(
         2, cmd["id"], ok=True, result={"ok": True, "artefact_b64": base64.b64encode(raw).decode()}
     )
@@ -312,3 +330,46 @@ def test_unsupported_runtime_is_refused_not_delivered(world, policy) -> None:  #
     with pytest.raises(ManagementError) as exc:
         service.set_policy("branch", policy)
     assert exc.value.error == "runtime_unsupported"
+
+
+def test_stale_policy_of_one_agent_does_not_block_another(world) -> None:  # type: ignore[no-untyped-def]
+    env, service, _, _ = world
+    service.create(AgentCreate(name="old"))
+    service.create(AgentCreate(name="branch"))
+    old = env.registry.get_node_by_name("old")
+    # A policy the runtime no longer supports, left over from an earlier release.
+    env.registry.update_node(
+        old.id, policy={"sets": {"web": {"domains": ["example.org"]}}, "egress": []}
+    )
+
+    saved = service.set_policy("branch", {"egress": []})
+
+    assert saved["name"] == "branch"
+    with pytest.raises(ManagementError) as exc:
+        service.set_policy("old", {"sets": {"web": {"domains": ["example.org"]}}, "egress": []})
+    assert exc.value.error == "runtime_unsupported"
+
+
+@pytest.mark.parametrize(
+    "archive",
+    [
+        b"archive-bytes",
+        _diag_archive({"../escape.txt": b"x"}),
+        _diag_archive({"/abs.txt": b"x"}),
+        _diag_archive({"a/b/c.txt": b"x"}),
+        _diag_archive({"ok.txt": b"x"}, link="evil"),
+        _diag_archive({}),
+    ],
+)
+def test_artifact_must_be_a_plain_flat_tar_gz(world, archive: bytes) -> None:  # type: ignore[no-untyped-def]
+    import base64
+
+    env, service, _, clock = world
+    env.add(2)
+    cmd = service.enqueue("node2", {"type": "collect_diag"})
+    env.registry.claim_commands(2, now=clock[0])
+    encoded = base64.b64encode(archive).decode()
+    env.registry.finish_command(2, cmd["id"], ok=True, result={"ok": True, "artefact_b64": encoded})
+    with pytest.raises(ManagementError) as exc:
+        service.artifact("node2", cmd["id"])
+    assert exc.value.error == "invalid_artifact"

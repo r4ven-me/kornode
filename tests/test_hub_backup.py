@@ -460,3 +460,40 @@ def test_restored_tree_directories_are_all_private(hub: Any, tmp_path: Path) -> 
         os.umask(old)
     modes = {p: p.stat().st_mode & 0o777 for p in [target, *target.rglob("*")] if p.is_dir()}
     assert modes and all(mode == 0o700 for mode in modes.values()), modes
+
+
+def test_new_hub_without_master_key_can_be_backed_up(tmp_path: Path) -> None:
+    env = Env(tmp_path / "fresh")
+    certificate_pair(env.config.cert_path("ca.key").parent, "ca")
+    certificate_pair(env.config.cert_path("server.key").parent, "server")
+    env.config.system.secrets_dir.mkdir(parents=True)
+    master = env.config.system.data_dir / "control" / "master.key"
+    try:
+        assert not master.exists()
+        # Needs the signing key (created by the hub at init) but no compiled bundle.
+        load_or_create_signing_key(env.config.control.signing_key)
+        BackupService(env.config).create(PASSWORD)
+        assert master.exists() and len(master.read_bytes()) == 32
+    finally:
+        env.registry.conn.close()
+
+
+def test_missing_master_key_with_sealed_data_is_still_refused(hub: Any) -> None:
+    master = hub.config.system.data_dir / "control" / "master.key"
+    master.unlink()
+    with pytest.raises(ManagementError):
+        BackupService(hub.config).create(PASSWORD)
+    assert not master.exists()
+
+
+def test_disk_failure_is_a_503_not_a_validation_error(
+    hub: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("kornode.services.backup.encrypt", boom)
+    with pytest.raises(ManagementError) as exc:
+        BackupService(hub.config).create(PASSWORD)
+    assert exc.value.status == 503 and exc.value.error == "backup_io"
+    assert "space" not in str(exc.value)

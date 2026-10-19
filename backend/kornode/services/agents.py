@@ -6,10 +6,13 @@ import base64
 import contextlib
 import difflib
 import fcntl
+import gzip
+import io
 import ipaddress
 import json
 import os
 import re
+import tarfile
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -55,6 +58,32 @@ RUNTIME_GAPS = {
     "p12": False,
     "accept_server_routes": False,
 }
+
+
+DIAG_MEMBER_RE = re.compile(r"^(logs/)?[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+DIAG_MAX_UNPACKED = 32 * 1024 * 1024
+DIAG_MAX_MEMBERS = 64
+
+
+def _valid_diag_archive(raw: bytes) -> bool:
+    """A diagnostic archive is a tar.gz of regular files with flat safe names,
+    unpacking to a bounded size; anything else must never reach an operator."""
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
+            data = stream.read(DIAG_MAX_UNPACKED + 1)
+        if len(data) > DIAG_MAX_UNPACKED:
+            return False
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+            members = archive.getmembers()
+    except (OSError, EOFError, tarfile.TarError):
+        return False
+    return (
+        0 < len(members) <= DIAG_MAX_MEMBERS
+        and all(
+            member.isreg() and ".." not in member.name and DIAG_MEMBER_RE.match(member.name)
+            for member in members
+        )
+    )
 
 
 def parse[M: BaseModel](model: type[M], data: Any) -> M:
@@ -649,6 +678,10 @@ class AgentService:
                 raise ManagementError(
                     409, "invalid_artifact", "diagnostic artifact is empty or exceeds 5 MiB"
                 )
+            if not _valid_diag_archive(raw):
+                raise ManagementError(
+                    409, "invalid_artifact", "diagnostic artifact is not a plain tar.gz"
+                )
             return raw
 
     def _redactor(self, r: Registry, node: Node) -> Redactor:
@@ -699,6 +732,10 @@ class AgentService:
                             LocalNetwork(ipaddress.ip_network(network), node.id, "reported")
                         )
             policy = parse(EgressPolicy, node.policy)
+            owned.append(OwnedPrefix(address.source_pool, node.id, "source", node.id == changed))
+            if node.id != changed:
+                # Another node's stale policy must not block this mutation.
+                continue
             if any(s.domains or s.domain_urls or s.route_urls for s in policy.sets.values()) or any(
                 getattr(rule.to, "domains", ()) for rule in policy.egress
             ):
@@ -711,7 +748,6 @@ class AgentService:
                 raise ManagementError(
                     409, "runtime_unsupported", "exit via another node requires P4-06"
                 )
-            owned.append(OwnedPrefix(address.source_pool, node.id, "source", node.id == changed))
             for source in policy.sources:
                 network = ipaddress.ip_network(source.cidr)
                 if not source.allow_outside_pool and (

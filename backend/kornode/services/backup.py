@@ -35,6 +35,7 @@ from kornode.services.backup_state import (
     invalid,
     relocated,
 )
+from kornode.services.bundle import BundleService
 from kornode.services.files import FileManager
 
 
@@ -57,12 +58,38 @@ class BackupService:
                 yield
             except ManagementError:
                 raise
+            except OSError:
+                # Disk full, permissions, vanished mount: a server-side fault, not
+                # an invalid request. Still no filenames in the message.
+                raise ManagementError(
+                    503, "backup_io", "hub backup/restore failed on disk I/O"
+                ) from None
             except Exception:
                 # Neither filesystem errors nor validation exceptions may echo
                 # filenames, archive contents, private keys or passphrases.
                 raise ManagementError(
                     422, "backup_failed", "hub backup/restore failed validation or I/O"
                 ) from None
+
+    def _ensure_fresh_master_key(self, registry_path: Path) -> None:
+        """`control/master.key` is created lazily by the first bundle compile, so a
+        brand-new hub has none and backup would refuse it. Create it only while
+        nothing could have been sealed with it (no bundles, no externals); a key
+        that is missing from a hub with sealed data stays a refusal."""
+        if (self.config.system.data_dir / "control" / "master.key").exists():
+            return
+        conn = sqlite3.connect(f"file:{registry_path}?mode=ro", uri=True)
+        try:
+            sealed = any(
+                conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+                for table in ("bundles", "externals")
+            )
+        except sqlite3.Error:
+            return
+        finally:
+            conn.close()
+        if not sealed:
+            BundleService(self.config).master_key()
 
     def create(self, passphrase: str) -> bytes:
         password_bytes(passphrase)
@@ -71,6 +98,7 @@ class BackupService:
         path = self.config.system.data_dir / "registry.db"
         if not path.is_file() or path.is_symlink():
             raise ManagementError(409, "missing_state", "hub registry is missing")
+        self._ensure_fresh_master_key(path)
         with (
             self._operation(),
             AgentService(self.config).exclusive(),

@@ -47,6 +47,7 @@ DEFERRED_STABLE_SECONDS = 30.0
 RENEW_FRACTION = 2 / 3
 EXPIRY_WARNING = 14 * 86400
 MAX_DIAG_BYTES = 5 * 1024 * 1024
+DOCTOR_CACHE_SECONDS = 120
 RESTART_EXIT_CODE = 75
 INVALID_BUNDLE_PAUSE = 30.0
 
@@ -89,6 +90,9 @@ class Agent:
         self.exit_code = 0
         self.revoked = False
         self.rollbacks: list[dict[str, Any]] = []
+        # (monotonic time, applied version, findings): reports must not run the full
+        # doctor (nft --version, nft -j list ruleset) every few seconds.
+        self._doctor_cache: tuple[float, int | None, list[dict[str, str]]] | None = None
         self._report_now = asyncio.Event()
         self._apply_lock = asyncio.Lock()
         self._fabric_healthy_since: float | None = None
@@ -488,7 +492,17 @@ class Agent:
     def _doctor(self) -> list[dict[str, str]]:
         return run_doctor(self.inputs, self.root, self.kernel)
 
+    def _doctor_for_report(self, applied: int | None) -> list[dict[str, str]]:
+        cached = self._doctor_cache
+        now = time.monotonic()
+        if cached and cached[1] == applied and now - cached[0] < DOCTOR_CACHE_SECONDS:
+            return cached[2]
+        findings = self._doctor()
+        self._doctor_cache = (now, applied, findings)
+        return findings
+
     def _diag(self) -> bytes:
+        self._doctor_cache = None  # an archive for support must show the current state
         buffer = io.BytesIO()
         redactor = self._redactor()
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
@@ -569,7 +583,7 @@ class Agent:
                     },
                     "versions": self._versions,
                     "revoked": self.revoked,
-                    "doctor": self._doctor(),
+                    "doctor": self._doctor_for_report(state.current),
                 }
             ),
         )

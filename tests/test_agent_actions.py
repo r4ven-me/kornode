@@ -222,3 +222,22 @@ def test_local_diag_returns_a_decodable_archive_not_a_redaction(tmp_path: Path) 
         assert base64.b64decode(result["archive_b64"], validate=True)[:2] == b"\x1f\x8b"
 
     asyncio.run(run())
+
+
+def test_report_reuses_doctor_until_version_changes_or_cache_expires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent, w = fake_agent(tmp_path)
+    runs: list[int] = []
+    agent._doctor = lambda: runs.append(1) or []  # type: ignore[method-assign,func-returns-value]
+    clock = [1000.0]
+    monkeypatch.setattr("kornode_agent.agent.time.monotonic", lambda: clock[0])
+
+    agent._doctor_for_report(5)
+    agent._doctor_for_report(5)
+    assert len(runs) == 1
+    agent._doctor_for_report(6)  # a new applied version invalidates the cache
+    assert len(runs) == 2
+    clock[0] += 121
+    agent._doctor_for_report(6)
+    assert len(runs) == 3
