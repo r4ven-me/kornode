@@ -1,11 +1,12 @@
 # Prompt for the next session — открытые находки ревью, E2E через GitHub Actions, пуш
 
-> **Состояние на 2026-10-19.** Ветка `redesign/p3-08-agent-management` (поверх P3-06), последний коммит
-> `32cdc12`, рабочее дерево чистое. P3-07…P3-10 закоммичены **локально** и **приняты**: ревью
-> проведено дважды, привилегированный netlab зелёный (43 passed), четырёхмашинный E2E на реальных
-> VM зелёный (9 passed, 13 skipped). **Ничего не запушено**, в `main` ветки P3 не влиты, CI на
-> GitHub-раннере не запускался. Push, merge и запуск через GitHub Actions — только по отдельному
-> разрешению владельца.
+> **Состояние на 2026-10-20.** Ветка `redesign/p4-01-routed-fabric`, **запушена**, открыт PR
+> https://github.com/r4ven-me/kornode/pull/1 (в `main`; ничего не влито). Локально: `make check` 1105 passed /
+> 68 skipped, привилегированный netlab на VM 46 passed. На GitHub: `backend` и `frontend` зелёные; первый
+> `netlab` упал на двух тестах из-за формата вывода старой nft (исправлено в `61c7d7c`, нужен перезапуск CI).
+> Сделано сверх P3: P4-01/P4-02 (D-63, spike S-03 не прошёл → маршруты префиксов агентов ставит reconciler
+> хаба в `main` с `proto 77`) и закрытие LOW-находок ревью (D-64). e2e `.github/workflows/e2e.yml` не запускался
+> (нужны protected-ветка, environment `kornode-e2e`, секреты, раннер на hub).
 
 Вставь всё ниже черты в новую сессию Claude Code в
 `/home/lans/Cloud/Projects/public/kornode`. Начни в режиме плана.

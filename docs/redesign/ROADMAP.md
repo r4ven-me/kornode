@@ -107,8 +107,8 @@ Done when:
 
 | ID | Task |
 | --- | --- |
-| P4-01 | Per-user configs for agents from the registry: `explicit-ipv4`, `iroute` for exported prefixes, `route` for all other fabric prefixes; `occtl reload` on change. |
-| P4-02 | Agent exit `fabric` built from bundle routes (not from pushed routes); no masquerade toward fabric prefixes; transport settings (`transport`, `dpd`, `keepalive`, camouflage). |
+| P4-01 | Per-user configs for agents from the registry: `explicit-ipv4`, `iroute` for exported prefixes, `route` for all other fabric prefixes; `occtl reload` on change. **Done (D-63; spike S-03 failed, so the hub reconciler installs the prefix routes in main with `proto 77`); NL-01/NL-04 e2e cases still skipped.** |
+| P4-02 | **Done (D-63; verified, no-NAT test added; `dpd`/`keepalive` are hub-side only).** Agent exit `fabric` built from bundle routes (not from pushed routes); no masquerade toward fabric prefixes; transport settings (`transport`, `dpd`, `keepalive`, camouflage). |
 | P4-03 | DNS: per-node zone `node<id>.<fabric.domain>` on each dnsmasq, hub authoritative for `<fabric.domain>`, agents forward the zone to the hub service address. Records managed in the registry (`docs/spec/07-fabric.md`). |
 | P4-04 | Agent role `access`: local ocserv, users assigned on the hub, delivered as hashes, local auth works without the hub. |
 | P4-05 | Sources (`docs/spec/02-egress-and-sources.md`): wg-easy/Amnezia interfaces, export into the fabric, doctor checks for foreign NAT rules on the source subnet. |
