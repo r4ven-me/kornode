@@ -282,9 +282,10 @@ class Worker:
     def execute(self, argv: list[str], **kwargs: Any) -> tuple[int, bytes]:
         return self.run(["docker", "exec", "-i", self.container(), *argv], **kwargs)
 
-    def cli(self, *args: str, **kwargs: Any) -> Any:
+    def cli(self, *args: str, json_flag: bool = True, **kwargs: Any) -> Any:
         state = self.owned_case()
-        raw = self.execute(["korctl", "--config", state["config"], *args, "--json"], **kwargs)[1]
+        flag = ["--json"] if json_flag else []  # `certificates pin` prints JSON, takes no flag
+        raw = self.execute(["korctl", "--config", state["config"], *args, *flag], **kwargs)[1]
         return json.loads(raw)
 
     def preflight(self) -> dict[str, Any]:
@@ -383,7 +384,19 @@ class Worker:
                         ("log_dir", "logs"),
                     ]
                 },
-                "server": {"cn": endpoint, "port": 443, "udp_enabled": False},
+                "server": {
+                    "cn": endpoint,
+                    "port": 443,
+                    "udp_enabled": False,
+                    # The default points at /var/lib/kornode/generated; the case
+                    # keeps its own generated_dir, so name the hook explicitly.
+                    "connect_script": str(
+                        self.directory / "generated" / "ocserv-connect-script-kornode"
+                    ),
+                    # ext is the "office": its server address is the upstream
+                    # health/ping target (10.8.0.1) used by the NL-13 case.
+                    **({"ipv4_network": "10.8.0.0/24"} if self.role == "ext" else {}),
+                },
                 "fabric": {"enabled": self.role == "hub"},
                 "control": {
                     "enabled": self.role == "hub",
@@ -599,7 +612,7 @@ class Worker:
         )
         rules = (
             b"table inet kn_e2e_fault { chain output { type filter hook output priority -300; "
-            b'policy accept; oifname "lo" accept; counter drop; } }\n'
+            b'policy accept; oifname "lo" accept; counter drop; }; }\n'
         )
         self.execute(["nft", "-f", "-"], data=rules)
         return {"seconds": 60}
@@ -608,7 +621,7 @@ class Worker:
         if self.role != "ext" or not isinstance(self.payload["password"], str):
             raise ValueError("ext only")
         self.execute(["python", "-c", EXT_USER], data=json.dumps(self.payload).encode())
-        return self.cli("certificates", "pin")
+        return self.cli("certificates", "pin", json_flag=False)
 
     def upstream_ping(self) -> Any:
         if self.role != "agent-a" or self.case != "cache":

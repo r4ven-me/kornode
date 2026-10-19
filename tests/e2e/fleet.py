@@ -265,6 +265,7 @@ class Cluster:
     def __init__(self, fleet: Fleet, case: str) -> None:
         self.fleet, self.case = fleet, case
         self.enrollment_seconds: dict[str, float] = {}
+        self.last_upstream_status: dict[str, Any] = {}
 
     def call(self, role: str, action: str, **payload: Any) -> Any:
         return self.fleet.call(role, action, self.case, **payload)
@@ -343,11 +344,24 @@ class Cluster:
         del password
         wait_for(lambda: self.upstream_healthy(), 150, "external upstream did not become healthy")
 
+    def upstream_summary(self) -> str:
+        """Non-secret tunnel state of the last health check, for assertion messages."""
+        status = self.last_upstream_status
+        tunnels = [
+            (t.get("name"), t.get("up"), str(t.get("error") or "")[:80])
+            for t in status.get("tunnels") or []
+        ]
+        return (
+            f"running={status.get('running')} hub_reachable={status.get('hub_reachable')} "
+            f"pending={status.get('pending_version')} tunnels={tunnels}"
+        )
+
     def upstream_healthy(self) -> bool:
         status = self.status("agent-a")
+        self.last_upstream_status = status
         return status.get("pending_version") is None and any(
             tunnel.get("name") == "upstream:office" and tunnel.get("up")
-            for tunnel in status.get("tunnels", [])
+            for tunnel in status.get("tunnels") or []
         )
 
     def upgrade(self) -> float:

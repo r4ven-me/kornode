@@ -161,8 +161,18 @@ def test_nl_13_cache_boot_and_upstream_survive_10_minute_hub_outage(cluster: Clu
             45,
             "agent did not boot from confirmed cache without hub",
         )
+        # The restart recreates the container's network namespace, so the
+        # external tunnel is dialed again from the cached bundle, hub still
+        # down. Allow that bounded re-establishment, then it must stay healthy.
+        wait_for(
+            cluster.upstream_healthy,
+            60,
+            "external upstream did not re-establish from cache without the hub",
+        )
         while time.monotonic() - started < 600:
-            assert cluster.upstream_healthy(), "external upstream regressed while hub was down"
+            assert cluster.upstream_healthy(), (
+                f"external upstream regressed while hub was down: {cluster.upstream_summary()}"
+            )
             assert cluster.call("agent-a", "upstream_ping")["reachable"], (
                 "upstream packets failed during hub outage"
             )
