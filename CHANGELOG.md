@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added (P4-01, P4-02, D-63)
+
+- Hub per-user ocserv files carry `iroute` for a node's exported prefixes, `route` for other nodes'
+  exported prefixes and the node's `dpd`/`keepalive`; ocserv is reloaded when an existing file changes.
+- Agent prefix API reports `runtime_supported: true`; test that the `fabric` exit is never masqueraded.
+
 ### Fixed (four-VM E2E acceptance, D-62)
 
 - Hub image: `python` on `PATH` for supervisor programs is an `exec` wrapper of the venv interpreter

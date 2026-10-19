@@ -27,11 +27,20 @@ Per-user config for each agent (`config_per_user_dir/agent-<id>`):
 explicit-ipv4 = 10.99.0.3
 ```
 
-Until P4-01, generated per-user files carry only `explicit-ipv4`; `iroute` and
-per-agent route rendering are added with the routing reconciler work. Changes
-rewrite group/user files atomically. ocserv reads `config-per-group` and
-`config-per-user` when a session opens, so no ocserv reload is needed for these
-files; existing sessions pick up changes on reconnect.
+Since P4-01 (D-63) the per-user file also carries, from the registry:
+
+```
+iroute = 192.168.3.0/24     # this node's exported prefixes (pool included)
+route = 192.168.2.0/24      # every other active node's exported prefixes
+dpd = 20                    # node transport settings, when set
+keepalive = 25
+```
+
+`export: false` prefixes appear in neither list. Changes rewrite group/user
+files atomically. ocserv reads `config-per-group` and `config-per-user` when a
+session opens, so new and removed files need no reload; when the content of an
+existing file changes the hub runs `occtl reload`. Existing sessions pick up
+changes on reconnect.
 
 Hub egress for `from: fabric` (transit) is part of the hub's YAML policy;
 default compiled rules: `fabric → fabric via fabric` (agent ↔ agent),

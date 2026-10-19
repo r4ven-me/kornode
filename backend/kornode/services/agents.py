@@ -50,7 +50,7 @@ from kornode.services.sessions import SessionService
 RUNTIME_GAPS = {
     "access": False,
     "exit": False,
-    "routed_prefixes": False,
+    "routed_prefixes": True,
     "domain_sets": False,
     "p12": False,
     "accept_server_routes": False,
@@ -82,7 +82,7 @@ class AgentService:
         self.enrollment = enrollment or EnrollmentService(
             config, clock=self.clock, reload_ocserv=self._reload_ocserv
         )
-        self.sync = sync or FabricGroupsService(config).sync
+        self.sync = sync or FabricGroupsService(config, reload_ocserv=self._reload_ocserv).sync
         self.password_hasher = password_hasher or self._hash_password
         self.audit = AuditService(config)
 
@@ -343,7 +343,7 @@ class AgentService:
             return {"deleted": name, "quarantine_days": 30}
 
     def prefixes(self, name: str) -> dict[str, Any]:
-        return {"prefixes": self.show(name)["prefixes"], "runtime_supported": False}
+        return {"prefixes": self.show(name)["prefixes"], "runtime_supported": True}
 
     def add_prefix(self, name: str, payload: PrefixInput) -> dict[str, Any]:
         def change(r: Registry, node: Node) -> None:

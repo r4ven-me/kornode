@@ -253,6 +253,15 @@ def test_agent_fabric_exit_routes_only_other_nodes_prefixes() -> None:
     assert fabric == {"10.99.0.0/24", "10.100.1.0/24", "10.100.2.0/24", "192.168.2.0/24"}
 
 
+def test_no_masquerade_toward_the_fabric() -> None:
+    for case in (hub_case, node3_case):
+        compiled = compile_policy(*case())
+        fabric = next(exit_ for exit_ in compiled.exits if exit_.name == "fabric")
+        assert fabric.nat is False
+        assert 'oifname "oc-hub0" masquerade' not in compiled.script
+        assert 'oifname "vpns0" masquerade' not in compiled.script
+
+
 def test_carrier_rules_and_elements() -> None:
     compiled = compile_policy(*node3_case())
 

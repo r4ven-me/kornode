@@ -70,7 +70,9 @@ class ConfigService:
             from kornode.services.fabric_groups import FabricGroupsService
 
             fabric_groups = FabricGroupsService(config, self.file_manager)
-            files.extend(fabric_groups.render_files(fabric_groups.nodes()))
+            files.extend(
+                fabric_groups.render_files(fabric_groups.nodes(), fabric_groups.prefixes())
+            )
         return files
 
     def write_rendered_files(self, config: AppConfig) -> list[Path]:

@@ -140,3 +140,56 @@ def test_config_service_write_rendered_files_syncs_fabric_groups(tmp_path: Path)
         (user_dir / "agent-3").read_text(encoding="utf-8").endswith("explicit-ipv4 = 10.99.0.3\n")
     )
     assert passwd.read_text(encoding="utf-8") == "alice:clients:$5$hash\n"
+
+
+def test_user_files_carry_iroute_route_and_transport(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    registry = _registry(config)
+    registry.create_node(id=1, name="hub", state="active")
+    registry.create_node(id=2, name="a", state="active", transport={"dpd": 20, "keepalive": 25})
+    registry.create_node(id=3, name="b", state="active")
+    registry.create_node(id=4, name="gone", state="revoked")
+    registry.set_prefixes(2, [{"prefix": "192.168.2.0/24", "kind": "lan", "export": True}])
+    registry.set_prefixes(3, [{"prefix": "192.168.3.0/24", "kind": "lan", "export": True}])
+    registry.set_prefixes(3, registry.list_prefixes(3) + [
+        {"prefix": "192.168.30.0/24", "kind": "lan", "export": False}
+    ])
+    registry.set_prefixes(4, [{"prefix": "192.168.4.0/24", "kind": "lan", "export": True}])
+    service = FabricGroupsService(config)
+
+    rendered = {
+        item.path.name: item.content
+        for item in service.render_files(registry.list_nodes(), registry.list_prefixes())
+    }
+
+    assert rendered["agent-2"].splitlines()[1:] == [
+        "explicit-ipv4 = 10.99.0.2",
+        "iroute = 192.168.2.0/24",
+        "route = 192.168.3.0/24",
+        "dpd = 20",
+        "keepalive = 25",
+    ]
+    assert rendered["agent-3"].splitlines()[1:] == [
+        "explicit-ipv4 = 10.99.0.3",
+        "iroute = 192.168.3.0/24",
+        "route = 192.168.2.0/24",
+    ]
+
+
+def test_sync_reloads_ocserv_only_when_an_existing_file_changes(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    registry = _registry(config)
+    registry.create_node(id=1, name="hub", state="active")
+    registry.create_node(id=2, name="a", state="active")
+    reloads: list[int] = []
+    service = FabricGroupsService(config, reload_ocserv=lambda: reloads.append(1))
+
+    service.sync()
+    assert reloads == []  # first write: files are new
+    service.sync()
+    assert reloads == []  # nothing changed
+    registry.set_prefixes(2, [{"prefix": "192.168.2.0/24", "kind": "lan", "export": True}])
+    service.sync()
+    assert reloads == [1]
+    service.sync()
+    assert reloads == [1]
