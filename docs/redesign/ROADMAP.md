@@ -87,19 +87,19 @@ Done when:
 | P3-04 | Bundle compiler on the hub: per-agent JSON per `schemas/bundle.v1.schema.json`, Ed25519 signature, secret sealing, monotonic versions, stored history. **Done (D-48).** |
 | P3-05 | Control API service (`kornode.control`): separate supervisor program bound to the hub fabric address, mTLS, long-poll, reports, command queue. Runs with `web.enabled: false`. **Done (D-49…D-52).** |
 | P3-06 | Agent package `kornode_agent` + image `kornode-agent`: enroll, run loop, cache (3 versions), verify, apply-with-confirm, rollback, boot from cache, report, commands. Depends only on `kornode.net` + small deps. **Done (D-53, D-54; CLI beyond enroll/run/version is P3-07).** |
-| P3-07 | Agent CLI `kornode-agent` (`docs/spec/06-agent.md`). **Implemented, awaiting Claude review and privileged netlab execution (D-55).** |
-| P3-08 | Hub management surfaces with parity: `korctl agent ...`, `/api/agents/*`, panel "Agents" section (list, detail, enroll dialog, bundle history/diff, commands, revoke), control status/signing-key rotation. **Implemented, awaiting Claude review and privileged netlab execution (D-56; `P3-08-REVIEW.md`).** |
-| P3-09 | `korctl hub backup|restore` (+ API + panel), encrypted archive, restore test. **Implemented, awaiting Claude review and privileged wipe/restore/reconnect netlab (D-57; `P3-09-REVIEW.md`). Restore is staged, never a live replacement.** |
-| P3-10 | E2E harness on 4 VMs via self-hosted runner, workflow `e2e.yml` (manual + PR label `e2e`). **Harness implemented, NOT Done: awaiting Claude review, owner provisioning and real VM execution (D-58; `P3-10-REVIEW.md`, [runbook](../runbooks/vm-e2e.md)). Container-isolated P3 scope only; full client/P4 and production host-network coverage remain outstanding.** |
+| P3-07 | Agent CLI `kornode-agent` (`docs/spec/06-agent.md`). **Done (D-55, D-59; `07301e8`; privileged netlab green).** |
+| P3-08 | Hub management surfaces with parity: `korctl agent ...`, `/api/agents/*`, panel "Agents" section (list, detail, enroll dialog, bundle history/diff, commands, revoke), control status/signing-key rotation. **Done (D-56, D-59; `619d4d0`; `P3-08-REVIEW.md`; privileged netlab green).** |
+| P3-09 | `korctl hub backup|restore` (+ API + panel), encrypted archive, restore test. **Done (D-57, D-59; `51c813b`; `P3-09-REVIEW.md`; netlab wipe → restore → reconnect without re-enroll and E2E-05 green). Restore is staged, never a live replacement.** |
+| P3-10 | E2E harness on 4 VMs via self-hosted runner, workflow `e2e.yml` (`workflow_dispatch` only, protected branch; no `pull_request` trigger — D-59). **Done (D-58, D-62; `bfd4401` + `f51fa28`; `P3-10-REVIEW.md`, [runbook](../runbooks/vm-e2e.md)): real four-VM run 2026-10-19 from the hub over SSH — 9 passed / 13 skipped. Outstanding: run through GitHub Actions on the self-hosted runner (needs push), E2E-06 (needs previous image digests), flaky E2E-04 under investigation. Container-isolated P3 scope only; full client/P4 and production host-network coverage remain with P4.** |
 
-Status 2026-10-17: P3-01…P3-06 implemented as recorded above. P3-07…P3-10 are in the uncommitted working tree, **not finally accepted**. The owner explicitly authorized P3-09/P3-10 implementation before review; this does not waive Claude review, privileged netlab, P2 prerequisites or four-VM evidence. P3-10 local checks: 49 safety tests + 4 parity passed; 22 VM/P4 cases skipped. Full check: ruff/mypy passed, pytest 1069 passed / 64 skipped / 2 pre-existing enrollment clock failures. No VM/Docker deployment was run.
+Status 2026-10-19: P3-01…P3-10 done and committed locally on `redesign/p3-08-agent-management`; **nothing pushed**, CI (`netlab`, `e2e`) not yet run on GitHub runners. Evidence: two review rounds (2026-10-17, D-59; 2026-10-18, LOW/INFO findings left open in `P3-0X-REVIEW.md`); `make check` 1088 passed / 65 skipped, `make parity` 4 passed; privileged netlab on a VM 43 passed (full suite incl. P3-07/08/09 and D-32); four-VM E2E (D-62) 9 passed / 13 skipped — NL-10/11/12, E2E-01…05, partial NL-13; skipped: E2E-06 (no previous image digests) and 12 P4 cases in `tests/e2e/test_routed_fabric.py`. P2 tails closed (D-60). Agent image 396 MB, spec 06 target revised to ≤ 400 MB (D-61). Intermediate commits are not individually verified green — only HEAD is.
 
 Done when:
 - `kornode-agent enroll <token>` brings a fresh VM to `online` in ≤ 30 s [e2e];
 - a registry change reaches the agent in ≤ 10 s [e2e];
 - a bundle that cuts the fabric is rolled back in ≤ 70 s and reported [netlab + e2e];
 - tampered bundle rejected, applied version unchanged [unit + netlab];
-- hub stopped for 10 min: agent clients keep internet access; agent restart boots from cache [e2e];
+- hub stopped for 10 min: agent clients keep internet access; agent restart boots from cache [e2e] — covered by partial NL-13 (cache boot, external tunnel/ICMP traffic); client forwarding is verified with P4;
 - revoked agent loses fabric and gets 403 from the control API [e2e];
 - every new capability is in `parity.yaml` [unit].
 
