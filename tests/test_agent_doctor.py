@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 
 import pytest
@@ -106,3 +107,35 @@ def test_unavailable_checks_are_not_reported_healthy(
         "certificate_unavailable",
         "clock_skew_unchecked",
     } <= codes
+
+
+def test_per_session_routes_of_access_clients_are_not_overlaps() -> None:
+    """P4-04: ocserv puts a /32 per connected client on vpns*; they sit inside
+    the node's own client pool and are expected."""
+    policy = EgressPolicy.model_validate(
+        {"egress": [{"from": ["host"], "to": "any", "via": "fabric"}]}
+    )
+    pool = ipaddress.IPv4Network("10.100.3.0/24")
+    facts = NodeFacts(
+        node_id=3,
+        client_pool=pool,
+        tunnels={"fabric": TunnelFact(interface="oc-hub0", up=True)},
+        local_networks=(
+            ipaddress.IPv4Network("10.100.3.15/32"),
+            ipaddress.IPv4Network("10.100.3.0/24"),
+        ),
+    )
+    compiled = compile_policy(policy, facts)
+    codes = {f["code"] for f in inspect_state(compiled, policy, facts, ActualState(), {})}
+    assert "overlapping_networks" not in codes
+    foreign = NodeFacts(
+        node_id=3,
+        client_pool=pool,
+        tunnels={"fabric": TunnelFact(interface="oc-hub0", up=True)},
+        local_networks=(ipaddress.IPv4Network("10.100.3.0/25"),),
+    )
+    codes = {
+        f["code"]
+        for f in inspect_state(compile_policy(policy, foreign), policy, foreign, ActualState(), {})
+    }
+    assert "overlapping_networks" in codes

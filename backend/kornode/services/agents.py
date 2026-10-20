@@ -35,6 +35,7 @@ from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.models import Node, iso_time
 from kornode.registry.repository import Registry, RegistryConflict, RegistryNotFound
 from kornode.services.agent_models import (
+    AccessInput,
     AccessUserInput,
     AgentCreate,
     AgentPatch,
@@ -49,9 +50,12 @@ from kornode.services.command import CommandRunner
 from kornode.services.enrollment import EnrollmentError, EnrollmentService
 from kornode.services.fabric_groups import FabricGroupsService
 from kornode.services.sessions import SessionService
+from kornode.tunnels.pin import certificate_pin, pem_to_der
+
+ACCESS_CERT_DAYS = 825
 
 RUNTIME_GAPS = {
-    "access": False,
+    "access": True,
     "exit": False,
     "routed_prefixes": True,
     "domain_sets": False,
@@ -182,6 +186,7 @@ class AgentService:
         data = asdict(node)
         data.pop("seal_pubkey")
         data.pop("policy")
+        data["access"] = self._access_view(node)
         data["transport"] = {
             key: value for key, value in node.transport.items() if "camouflage" not in key
         }
@@ -521,9 +526,93 @@ class AgentService:
 
         return self._change(name, "agent.upstream", change)
 
+    @staticmethod
+    def _access_view(node: Node) -> dict[str, Any]:
+        """Listener settings without key material (the key never leaves sealed)."""
+        access = node.access
+        if not access:
+            return {"configured": False}
+        cert = access.get("cert_pem")
+        return {
+            "configured": bool(cert),
+            "hostname": access.get("hostname"),
+            "port": access.get("port"),
+            "udp": access.get("udp", False),
+            "certificate": {
+                "not_after": access.get("cert_not_after"),
+                "pin": certificate_pin(pem_to_der(cert)).pin if cert else None,
+            },
+        }
+
+    def access(self, name: str) -> dict[str, Any]:
+        with self.registry() as r:
+            node = self.node(r, name)
+            return {**self._access_view(node), "role": "access" in node.roles}
+
+    def set_access(self, name: str, data: dict[str, Any] | None) -> dict[str, Any]:
+        payload = parse(AccessInput, data) if data is not None else None
+        with self.registry() as r:
+            current = self.node(r, name)
+        if payload is not None and "access" not in current.roles:
+            raise ManagementError(409, "role_required", "agent requires access role")
+        issued: tuple[str, str] | None = None
+        if payload is not None and (
+            payload.reissue
+            or payload.hostname != current.access.get("hostname")
+            or not current.access.get("cert_pem")
+        ):
+            # certtool spawns a process: issue before the registry write lock.
+            try:
+                certificates = self.certificates()
+                issued = certificates.issue_access_server_certificate(
+                    current.id, payload.hostname, lifetime_days=ACCESS_CERT_DAYS
+                )
+                # Defence in depth (D-67): a hub-CA certificate without OU must never
+                # log in to the hub. Revoking it in the hub CRL makes ocserv refuse it
+                # as a client certificate whatever groups are configured; the agent's
+                # ocserv has no CRL and clients do not check one for a server.
+                certificates.revoke_certificate_pem(issued[0])
+                with contextlib.suppress(Exception):
+                    self._reload_ocserv()
+            except Exception:
+                raise ManagementError(
+                    503, "certificate_failed", "access server certificate could not be issued"
+                ) from None
+
+        def change(r: Registry, node: Node) -> None:
+            if payload is None:
+                r.update_node(node.id, access={})
+                return
+            access = {
+                key: value
+                for key, value in node.access.items()
+                if key in ("cert_pem", "cert_not_after", "key_enc")
+            }
+            if issued is not None:
+                cert_pem, key_pem = issued
+                blob = self.bundles.encrypt_external_secrets(
+                    node.id, ACCESS_SECRET_NAME, {"key": key_pem}
+                )
+                access.update(
+                    cert_pem=cert_pem,
+                    cert_not_after=_not_after(cert_pem),
+                    key_enc=base64.b64encode(blob).decode(),
+                )
+            access.update(hostname=payload.hostname, port=payload.port, udp=payload.udp)
+            r.update_node(node.id, access=access)
+
+        self._change(name, "agent.access", change)
+        return self.access(name)
+
+    def certificates(self) -> Any:
+        from kornode.services.certificates import CertificateService
+
+        return CertificateService(self.config)
+
     def users(self, name: str) -> dict[str, Any]:
         with self.registry() as r:
             node = self.node(r, name)
+            configured = bool(node.access.get("cert_pem"))
             return {
                 "users": [
                     {
@@ -534,8 +623,9 @@ class AgentService:
                     }
                     for u in r.access_users(node.id)
                 ],
-                "runtime_supported": False,
-                "reason": "access delivery is P4-04",
+                "runtime_supported": True,
+                "delivered": "access" in node.roles and configured,
+                "reason": None if configured else "configure the access listener to deliver users",
             }
 
     def set_user(self, name: str, user: str, data: dict[str, Any] | None) -> dict[str, Any]:
@@ -882,3 +972,13 @@ def validate_command(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     except (KeyError, TypeError, ValueError):
         raise ManagementError(422, "invalid", "invalid command arguments") from None
     return kind, args
+
+
+ACCESS_SECRET_NAME = "access-server"
+
+
+def _not_after(cert_pem: str) -> str:
+    from cryptography import x509
+
+    value = x509.load_pem_x509_certificate(cert_pem.encode()).not_valid_after_utc
+    return iso_time(value)

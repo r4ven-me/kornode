@@ -1,19 +1,21 @@
 # Prompt for the next session — слияние PR #1, P4-04…P4-07, E2E через GitHub Actions
 
-> **Состояние на 2026-10-20.** Ветка `redesign/p4-01-routed-fabric` **запушена**, открыт PR
-> https://github.com/r4ven-me/kornode/pull/1 в `main` (**не влит**, ревью и слияние — решение владельца).
-> Последний коммит ветки: `7713cac`. CI на PR зелёный: `backend`, `frontend`, `netlab` (первый успешный
-> `netlab` на GitHub-раннере). Локально: `make check` 1105 passed / 68 skipped, `make parity` 4 passed.
-> Привилегированный netlab на VM hub: 46 passed. Четырёхмашинный E2E: NL-01 и NL-04 (case `routed`) —
-> passed; остальной набор последний раз гонялся на прошлом HEAD (9 passed, 13 skipped, D-62).
-> Сделано: P2…P3-10, P4-01, P4-02, закрытие LOW-находок ревью. **Не сделано:** P4-04…P4-07, E2E-06,
-> прогон `e2e.yml` на GitHub Actions, расследование плавающего E2E-04.
+> **Состояние на 2026-10-20 (конец третьей сессии).** В `main` влиты PR #1 (P2…P4-02) и PR #2 (P4-03, DNS фабрики,
+> D-66). **P4-04** (роль `access`, D-67) сделан на ветке `redesign/p4-04-access-role` (от `main`), PR — см. `gh pr list`.
+> Локально: `make check` 1182 passed / 74 skipped, `make parity` 4 passed, frontend 33 passed. netlab на hub-VM:
+> 52 passed. E2E case `routed` на четырёх VM: NL-01, NL-02, NL-03, NL-04 — 4 passed (один раз NL-04 упал в полном
+> прогоне — «no connection agent-a → LAN agent-b», дамп маршрутов хаба и агентов был полным; в одиночку и в повторном
+> полном прогоне проходит, причина не найдена: если повторится, смотреть `net_dump` и `audit.jsonl` хаба); E2E-06 (обновление) —
+> passed (образы P4-02 из локального реестра на hub-VM); E2E-04 в цикле из 5 прогонов — 5 passed (плавающий сбой
+> не воспроизведён, расследование остановлено). **Не сделано:** P4-05…P4-07, прогон `e2e.yml` на GitHub Actions
+> (раннер и окружение настроены, см. ниже, сам workflow ещё не запускался).
 >
-> **Обновление 2026-10-20 (вторая сессия):** P4-03 (DNS фабрики, D-66) сделан на локальной ветке
-> `redesign/p4-03-fabric-dns`, ответвлённой от `redesign/p4-01-routed-fabric` (стек поверх PR #1, **не запушена**).
-> `make check` 1145 passed / 70 skipped, `make parity` 4 passed, frontend 32 passed; netlab на hub-VM —
-> полный набор 48 passed (из них `test_p4_dns` 2); E2E case `routed`: NL-01, NL-02, NL-04 — 3 passed.
-> На hub-VM поставлен `dnsmasq-base`; в CI netlab он тоже ставится.
+> **GitHub (настроено в третьей сессии по разрешению владельца):** окружение `kornode-e2e` (required reviewer —
+> владелец, только protected-ветки), секреты окружения `E2E_SSH_KEY`/`E2E_SSH_KNOWN_HOSTS` (отдельный ключ из
+> `~/.e2e` на hub-VM, не личный), переменные `E2E_*_HOST`, `E2E_SSH_USER/PORT`, `E2E_PREVIOUS_*_IMAGE`,
+> `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true`; self-hosted runner `kornode-e2e-hub` (метка `kornode-e2e`, сервис
+> systemd на hub-VM; **в момент записи показывал `offline`** — раннер подключился, но брокер GitHub из VM отвечает
+> медленно; проверить `gh api repos/r4ven-me/kornode/actions/runners`); `main` защищена от force-push/удаления.
 
 Вставь всё ниже черты в новую сессию Claude Code в
 `/home/lans/Cloud/Projects/public/kornode`. Начни в режиме плана.
@@ -22,7 +24,7 @@
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык — русский, обращайся ко мне «Ivan».
 Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (фаза P4), раздел «Дальнейшие
-действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-65), `docs/spec/07-fabric.md`,
+действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-67), `docs/spec/07-fabric.md`,
 `docs/runbooks/vm-e2e.md`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Что уже сделано (не переделывай)
@@ -55,7 +57,14 @@
   `internal_dns.listen`), dnsmasq агента (supervisor, `autostart=false`, асинхронно с повторами,
   `bind-dynamic`, форвард с `@<fabric_address>` — иначе RPF хаба режет запрос), адрес резолвера на `lo`
   ставит `kornode.net` (`NodeFacts.local_addresses`). Harness: `dns_record`, `dns_resolve`.
-- Остаётся 9 skip в `tests/e2e/test_routed_fabric.py`: E2E-07, NL-03, NL-05…NL-09, NL-13-forwarding,
+- **P4-04** (D-67): слушатель агента (`korctl agent access`, `/api/agents/{name}/access`, панель), серверный
+  сертификат от CA центра **без OU** (ключ шифруется мастер-ключом и запечатывается на агента), секция `access`
+  в пакете (хэши ocpasswd, строгая валидация), `kornode_agent.access` + общий `programs.Converger`, ocserv как
+  supervisor-программа в `/run/kornode-access` (каталог данных агента 0700 недоступен воркерам ocserv), строгий RPF
+  на `vpns*` (`NodeFacts.access_ifaces`). E2E-ловушки: контейнеры агентов E2E **не в host-сети** (порт 8443
+  публикуется у agent-a, 9100 — у хаба в кейсе `routed`); VPN-клиент agent-b живёт в отдельном compose-сервисе
+  `client`, иначе его внешний TLS попадает под политику `kornode.net` агента-b.
+- Остаётся 8 skip в `tests/e2e/test_routed_fabric.py`: E2E-07, NL-05…NL-09, NL-13-forwarding,
   E2E-06-clients (причины — в самом файле).
 
 ## Окружение
@@ -84,29 +93,25 @@
 ## Что делать дальше (по порядку)
 1. **PR #1** ждёт ревью владельца. Он большой (≈90 коммитов; промежуточные коммиты по отдельности не
    проверялись зелёными — зелёный только HEAD). Без слияния новые PR строить не на чем.
-2. **P4-04 … P4-07** (`ROADMAP.md`, `docs/spec/07-fabric.md`; P4-03 сделан на стековой ветке): роль `access`, источники
+2. **P4-05 … P4-07** (`ROADMAP.md`, `docs/spec/07-fabric.md`; P4-03 и P4-04 сделаны): источники
    (wg-easy/Amnezia), `via: exit:<node>`, панель/CLI/API фабрики. Каждая задача: spec → тесты → код →
    docs → `make check` → netlab → (E2E там, где задача трогает data plane); `parity.yaml` обновляется в той же
    задаче. Каждому E2E-кейсу из списка skip нужен реальный сценарий, не заглушка.
-3. **Плавающий E2E-04** («revocation incomplete; node is fail-closed; retry revoke», `committed: true`):
-   один раз упал, в одиночку и в двух чистых прогонах проходил. Причина не найдена; подробности в аудите
-   хаба (`agent.revoke`, `details.failures`), контейнеры после падения удалены. Воспроизвести циклом E2E-04
-   с копированием `audit.jsonl` хаба по ходу прогона (подозрение: `reload ocserv` / `disconnect` сразу
-   после старта хаба).
-4. **E2E-06 (обновление):** нужна пара совместимых предыдущих образов по digest'у
-   (`E2E_PREVIOUS_HUB_IMAGE`, `E2E_PREVIOUS_AGENT_IMAGE`) — их нет; попросить у владельца или собрать из
-   предыдущего коммита и положить в локальный реестр.
-5. **Прогон `e2e.yml` на GitHub Actions** (self-hosted runner на hub): нужны protected-ветка, Environment
-   `kornode-e2e` с approval, секреты `E2E_SSH_KEY`, `E2E_SSH_KNOWN_HOSTS`, переменные `E2E_*_HOST`,
-   `E2E_HUB_ADDRESS`, `E2E_SSH_USER`, `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true` (только при реально
-   настроенной защите), runner group с меткой `kornode-e2e`. Настраивает владелец.
+3. **E2E-04** в цикле из 5 прогонов (2026-10-20) — 5 passed, плавающий сбой не воспроизведён. Если появится снова,
+   снять `audit.jsonl` хаба по ходу прогона (подозрение: `reload ocserv` / `disconnect` сразу после старта хаба).
+4. **E2E-06 (обновление)** работает: предыдущие образы — сборка из слияния PR #1, лежат в registry-контейнере на
+   hub-VM (`192.168.122.123:5000`, insecure-registry прописан на всех четырёх VM). Digest'ы — переменные репозитория
+   `E2E_PREVIOUS_*_IMAGE` и `~/.e2e/env.sh` на hub. Когда образы устареют (несовместимый контракт), собрать новые так же.
+5. **Прогон `e2e.yml` на GitHub Actions**: всё настроено (см. блок «GitHub» вверху), нужно **запустить**
+   `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрить деплой (required reviewer —
+   владелец; если одобрение невозможно из CLI — попросить владельца). Предварительно убедиться, что раннер `online`.
+   Если раннер остаётся `offline`, смотреть `~/actions-runner/_diag/` на hub-VM (брокер GitHub из VM отвечает медленно).
 6. Обновлять `PLAN.ru.md`, `ROADMAP.md`, `CHANGELOG.md` и этот файл вместе с изменениями; отчёт — по формату
    из `CLAUDE.md` (что изменилось, ID задач, доказательства тестами, записи в `DECISIONS.md`).
 
 ## Что нужно от меня (напомни заранее)
-Ревью и слияние PR #1 (или решение резать его на части); разрешение на push следующих веток и на запуск
-workflow; настройка GitHub (protected-ветка, environment, секреты, runner) для `e2e.yml`; digest'ы
-предыдущих образов для E2E-06 или решение, как их получить.
+Одобрение деплоя окружения `kornode-e2e` для первого прогона `e2e.yml`; решение, нужен ли `E2E_HUB_ADDRESS`
+(сейчас используется адрес hub-VM). Push и слияние PR по задачам P4 мне разрешены (2026-10-20) — после зелёного CI.
 
 ## Правила
 Каждая задача — по `CLAUDE.md`: spec → тесты → код → docs → `make check` → netlab. Тесты не ослаблять; если

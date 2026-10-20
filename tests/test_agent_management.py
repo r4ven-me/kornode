@@ -147,13 +147,15 @@ def test_bundles_redact_sealed_values_and_safe_diff(world) -> None:  # type: ign
     assert "hidden-password" not in json.dumps(service.upstreams("node3"))
 
 
-def test_access_users_are_write_only_and_explicitly_not_deployed(world) -> None:  # type: ignore[no-untyped-def]
+def test_access_users_are_write_only_and_delivered_once_the_listener_exists(world) -> None:  # type: ignore[no-untyped-def]
+    # P4-04 (D-67) replaced "registry only": users are delivered with the bundle
+    # as soon as the access listener is configured.
     env, service, _, _ = world
     service.create(AgentCreate(name="branch", roles=["access"]))
     saved = service.set_user(
         "branch", "alice", {"password": "private-password", "groups": ["staff"]}
     )
-    assert saved["runtime_supported"] is False
+    assert saved["runtime_supported"] is True and saved["delivered"] is False
     assert "private-password" not in json.dumps(saved) and "$6$" not in json.dumps(saved)
     assert service.users("branch")["users"][0]["password_set"]
 

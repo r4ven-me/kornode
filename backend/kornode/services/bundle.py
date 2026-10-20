@@ -318,8 +318,9 @@ class BundleService:
                 "fabric": fabric_tunnel,
                 "upstreams": self._upstreams(registry, node.id),
             },
-            "policy": _policy_with_fabric_rule(node.policy),
+            "policy": _policy_with_fabric_rule(node.policy, node.roles),
             "dns": self._dns(registry, node.id, hub.client_pool),
+            **self._access(registry, node),
             "settings": {
                 "report_interval_seconds": self.config.control.report_interval_seconds,
                 "confirm_window_seconds": 60,
@@ -330,6 +331,38 @@ class BundleService:
         if announcement:
             plan["next_signing_pubkey"] = announcement
         return plan
+
+    def _access(self, registry: Registry, node: Node) -> dict[str, Any]:
+        """`access` only for role `access` with a configured listener (D-67).
+        Users travel as ocpasswd hashes; the server key is sealed to the
+        agent. Password authentication only in P4-04."""
+        access = node.access
+        if "access" not in node.roles or not access.get("cert_pem"):
+            return {}
+        key = self._decrypt_external_secrets(
+            node.id, "access-server", base64.b64decode(access["key_enc"])
+        )["key"]
+        users = [
+            {
+                "username": user["username"],
+                "pw_hash": user["pw_hash"],
+                "groups": list(user["groups"]),
+                "enabled": bool(user["enabled"]),
+            }
+            for user in registry.access_users(node.id)
+            if user["pw_hash"]
+        ]
+        return {
+            "access": {
+                "port": int(access["port"]),
+                "udp": bool(access.get("udp", False)),
+                "auth": ["password"],
+                "ca_pem": self.config.cert_path("ca.crt").read_text(encoding="utf-8"),
+                "server_cert_pem": access["cert_pem"],
+                "server_key": {SECRET_MARKER: key},
+                "users": users,
+            }
+        }
 
     def _dns(
         self, registry: Registry, node_id: int, hub_pool: ipaddress.IPv4Network
@@ -374,15 +407,23 @@ def _external_aad(node_id: int, name: str) -> bytes:
     return f"kornode-external-secrets-v1|{node_id}|{name}".encode()
 
 
-def _policy_with_fabric_rule(policy: dict[str, Any]) -> dict[str, Any]:
+def _policy_with_fabric_rule(policy: dict[str, Any], roles: list[str]) -> dict[str, Any]:
     """A bundle must keep the agent's path to the hub (spec 11): add the
-    fabric rule when the operator's policy has none."""
+    fabric rule when no rule gives `host` that path.
+
+    VPN clients of an `access` node are not in the implicit rule (D-67): a
+    branch user does not get the whole fabric, including the hub's services,
+    unless the operator writes `from: [clients] to: fabric via: fabric`."""
     result: dict[str, Any] = json.loads(json.dumps(policy))
     result.setdefault("sources", [])
     result.setdefault("sets", {})
     rules = result.setdefault("egress", [])
-    if not any(rule.get("via") == "fabric" for rule in rules):
-        names = ["clients", "host", *(item["name"] for item in result["sources"])]
+    if not any(
+        rule.get("via") == "fabric" and "host" in (rule.get("from") or []) for rule in rules
+    ):
+        names = ["host", *(item["name"] for item in result["sources"])]
+        if "access" not in roles:
+            names.insert(0, "clients")
         taken = {rule.get("id") for rule in rules}
         rule_id = _FABRIC_RULE_ID
         while rule_id in taken:

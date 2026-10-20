@@ -115,7 +115,7 @@ def spike_tmp() -> Iterator[Path]:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _start(lab: Lab, tmp: Path, *, guard: bool) -> GroupsLab:
+def _start(lab: Lab, tmp: Path, *, guard: bool, revoke_client_cert: bool = False) -> GroupsLab:
     hub = lab.add_namespace("hub")
     inet = lab.add_namespace("inet")
     hub.run(["sysctl", "-qw", "net.ipv4.ip_forward=1"])
@@ -146,6 +146,8 @@ def _start(lab: Lab, tmp: Path, *, guard: bool) -> GroupsLab:
         hub, tmp / "pki" / "ca.crt", tmp / "pki" / "ca.key", tmp / "pki", CLIENT_USER, unit=None
     )
     _write_ocserv_files(hub, tmp, guard=guard)
+    if revoke_client_cert:
+        _revoke(hub, tmp, client_cert[0])
     (tmp / "enroll.nft").write_text(ENROLL_NFT, encoding="utf-8")
     hub.run(["nft", "-f", str(tmp / "enroll.nft")])
 
@@ -238,6 +240,24 @@ def _make_pki(hub: Namespace, tmp: Path) -> str:
     match = re.search(r"pin-sha256:[A-Za-z0-9+/=]+", info)
     assert match is not None, info
     return match.group(0)
+
+
+def _revoke(hub: Namespace, tmp: Path, certificate: Path) -> None:
+    """What CertificateService.revoke_certificate_pem does: CRL signed by the CA."""
+    pki = tmp / "pki"
+    (pki / "crl.tmpl").write_text("crl_next_update = 30\n", encoding="utf-8")
+    hub.run(
+        [
+            "certtool", "--generate-crl",
+            "--load-ca-privkey", str(pki / "ca.key"),
+            "--load-ca-certificate", str(pki / "ca.crt"),
+            "--load-certificate", str(certificate),
+            "--template", str(pki / "crl.tmpl"),
+            "--outfile", str(pki / "crl.pem"),
+        ]
+    )  # fmt: skip
+    with (tmp / "ocserv.conf").open("a", encoding="utf-8") as conf:
+        conf.write(f"crl = {pki}/crl.pem\n")
 
 
 def _write_ocserv_files(hub: Namespace, tmp: Path, *, guard: bool) -> None:
@@ -371,6 +391,20 @@ def test_s01_without_guard_a_client_certificate_bypasses_the_password(
             else "no connect-script call"
         )  # noqa: E501, T201
         assert connected
+    finally:
+        handle.stop()
+
+
+def test_a_revoked_ou_less_certificate_is_refused_even_without_the_guard(
+    lab: Lab, spike_tmp: Path
+) -> None:
+    """P4-04 (D-67): the listener certificate of an access agent is hub-CA signed
+    without OU and is revoked in the hub CRL when it is issued, so the hub refuses it
+    by itself, independent of the connect-script guard and of group selection."""
+    handle = _start(lab, spike_tmp, guard=False, revoke_client_cert=True)
+    try:
+        assert not handle.rogue.connect(handle.pin, cert=handle.client_cert)
+        assert handle.rogue.address() is None
     finally:
         handle.stop()
 

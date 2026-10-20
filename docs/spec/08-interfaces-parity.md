@@ -62,7 +62,8 @@ capabilities:
 | agent.policy | `agent egress show/edit/set <name> [--file]` | `GET/PUT /api/agents/{name}/policy` | Detail → Egress editor |
 | agent.sources | `agent source add/set <name> <source> --file <json>`; `del/list` | `GET /api/agents/{name}/sources`, `PUT/DELETE .../sources/{source}` | Detail → Networks and sources |
 | agent.externals | `agent upstream add/set <name> <upstream> --file <json>`; `del/list` | `GET /api/agents/{name}/upstreams`, `PUT/DELETE .../upstreams/{upstream}` | Detail → Upstreams |
-| agent.users | `agent user add/del/list/passwd/enable/disable <name> ...`; `set --file <json>` | `GET /api/agents/{name}/users`, `PUT/DELETE .../users/{username}` | Detail → Access users (role access, registry only) |
+| agent.access | `agent access show/set/del <name> [--hostname H --port P --udp --reissue]` | `GET/PUT/DELETE /api/agents/{name}/access` | Detail → Access listener and users (role access) |
+| agent.users | `agent user add/del/list/passwd/enable/disable <name> ...`; `set --file <json>` | `GET /api/agents/{name}/users`, `PUT/DELETE .../users/{username}` | Detail → Access listener and users (role access; delivered in the bundle) |
 | agent.bundle | `agent bundle list/show/diff <name> [v1] [v2]` | `GET /api/agents/{name}/bundles[/{v}]`, `GET .../diff?a=&b=` | Detail → Bundles |
 | agent.reports | `agent status <name> [--watch]` | `GET /api/agents/{name}/reports?limit=` | Detail → Status |
 | agent.command | `agent exec <name> reconnect/explain/collect-diag/restart/rollback ...` | `POST /api/agents/{name}/commands`, `GET .../commands/{id}` | Detail → Actions |
@@ -154,8 +155,8 @@ not a promise that a later operation will succeed against changed state.
 Agent list/detail show reported online/desired/applied status, not an active
 network probe. Reports/commands refresh every 5 s without overwriting form drafts.
 Policies have ordered rule controls and JSON destination/set controls; the full
-polished egress editor belongs to P5. Access users are explicitly registry-only
-until P4-04, while unsupported runtime policies/auth modes are rejected (05).
+polished egress editor belongs to P5. Access users and the listener are delivered with
+the bundle since P4-04 (password authentication only); unsupported runtime policies/auth modes are rejected (05).
 
 ## Panel structure (hub)
 

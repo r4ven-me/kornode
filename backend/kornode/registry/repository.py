@@ -116,6 +116,7 @@ class Registry:
             "seal_pubkey",
             "policy",
             "transport",
+            "access",
             "desired_version",
             "applied_version",
             "high_water_version",
@@ -130,7 +131,7 @@ class Registry:
         assignments: list[str] = []
         for key, value in fields.items():
             assignments.append(f"{key} = ?")
-            if key in {"roles", "policy", "transport"}:
+            if key in {"roles", "policy", "transport", "access"}:
                 values.append(encode_json(value))
             else:
                 values.append(value)
@@ -570,9 +571,7 @@ class Registry:
                 value=str(row["value"]),
                 node_id=None if row["node_id"] is None else int(row["node_id"]),
             )
-            for row in self.conn.execute(
-                "SELECT * FROM dns_records ORDER BY name, type, value"
-            )
+            for row in self.conn.execute("SELECT * FROM dns_records ORDER BY name, type, value")
         ]
 
     def add_dns_record(self, record: DnsRecord) -> None:
@@ -625,6 +624,7 @@ def _node_from_row(row: sqlite3.Row) -> Node:
         seal_pubkey=cast(bytes | None, row["seal_pubkey"]),
         policy=decode_json_object(str(row["policy"])),
         transport=decode_json_object(str(row["transport"])),
+        access=decode_json_object(str(row["access"])),
         desired_version=int(row["desired_version"]),
         applied_version=int(row["applied_version"]),
         high_water_version=int(row["high_water_version"]),

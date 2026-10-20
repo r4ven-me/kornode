@@ -37,6 +37,7 @@ CASES = {
     "routed",
 }
 ROLES = {"hub", "agent-a", "agent-b", "ext"}
+ACCESS_PORT = 8443  # published by agent-a in case `routed`
 IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(?:@sha256:[0-9a-f]{64})?$")
 
 PROXY = """import select, socket, socketserver
@@ -170,6 +171,42 @@ try:
  print(json.dumps({"ok":True}))
 except OSError:
  print(json.dumps({"ok":False}))
+"""
+# Throwaway VPN client (P4-04, NL-03) in its own container of the agent-b VM, so the
+# `kornode.net` policy of agent-b does not touch the outer connection. The tunnel
+# gets the listed routes only.
+ACCESS_CLIENT = """import json,os,subprocess,sys,time
+o=json.load(sys.stdin)
+d="/tmp/kn-access"
+os.makedirs(d,exist_ok=True)
+script="\\n".join([
+ "#!/bin/sh",
+ '[ "$reason" = connect ] || exit 0',
+ 'ip link set dev "$TUNDEV" up mtu "${INTERNAL_IP4_MTU:-1400}"',
+ 'ip addr add "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"',
+ *["ip route add %s dev \\"$TUNDEV\\""%r for r in o["routes"]],
+ ""])
+open(d+"/vpnc","w").write(script)
+os.chmod(d+"/vpnc",0o755)
+url="https://%s:%d"%(o["host"],o["port"])
+subprocess.run(["openconnect","--background","--pid-file="+d+"/pid",
+ "--interface","kn-vpnc0","--script="+d+"/vpnc","--servercert",o["pin"],
+ "--non-inter","--user",o["user"],"--passwd-on-stdin",url],
+ input=(o["password"]+"\\n").encode(),stdout=open(d+"/log","ab"),
+ stderr=subprocess.STDOUT,timeout=60,check=True)
+addr=None
+for _ in range(50):
+ r=subprocess.run(["ip","-4","-j","addr","show","dev","kn-vpnc0"],capture_output=True)
+ if r.returncode==0 and json.loads(r.stdout)[0]["addr_info"]:
+  addr=json.loads(r.stdout)[0]["addr_info"][0]["local"];break
+ time.sleep(0.2)
+if addr is None: raise SystemExit("no tunnel address")
+print(json.dumps({"address":addr}))
+"""
+ACCESS_CLIENT_STOP = """import os,signal
+try:
+ os.kill(int(open("/tmp/kn-access/pid").read()),signal.SIGTERM)
+except (OSError,ValueError): pass
 """
 # One A query to the agent's resolver (stdlib only; the agent image has no dig).
 RESOLVE = """import json,random,socket,struct,sys
@@ -310,9 +347,9 @@ class Worker:
         state = self.directory / "state.json"
         return json.loads(state.read_text()) if state.exists() else {}
 
-    def container(self) -> str:
+    def container(self, service: str = "node") -> str:
         self.owned_case()
-        container = self.compose("ps", "-a", "--quiet", "node")[1].decode().strip()
+        container = self.compose("ps", "-a", "--quiet", service)[1].decode().strip()
         if not re.fullmatch(r"[0-9a-f]{64}", container):
             raise ValueError("container missing")
         labels = json.loads(
@@ -479,6 +516,9 @@ class Worker:
             },
         }
         if agent:
+            if self.role == "agent-a" and self.case == "routed":
+                # The access server of agent-a (P4-04, NL-03) must be reachable on the VM.
+                service["ports"] = [f"{ACCESS_PORT}:{ACCESS_PORT}/tcp"]
             (self.directory / "agent").mkdir(mode=0o700)
             service["volumes"].append(
                 {
@@ -496,7 +536,21 @@ class Worker:
                 )
             service["environment"] = {"KORNODE_CONFIG": str(config_path)}
             service["ports"] = ["443:443/tcp"] + (["18444:18444/tcp"] if self.role == "hub" else [])
-        atomic(self.directory / "compose.json", {"services": {"node": service}})
+            if self.role == "hub" and self.case == "routed":
+                # NL-03: a client of agent-a reaches the hub test listener from outside.
+                service["ports"].append("9100:9100/tcp")
+        services = {"node": service}
+        if self.role == "agent-b" and self.case == "routed":
+            # Throwaway VPN client of NL-03: same image, own network namespace, no kornode.
+            services["client"] = {
+                "image": image,
+                "init": True,
+                "entrypoint": ["sleep", "infinity"],
+                "cap_add": ["NET_ADMIN"],
+                "devices": ["/dev/net/tun:/dev/net/tun"],
+                "labels": service["labels"],
+            }
+        atomic(self.directory / "compose.json", {"services": services})
         self.compose("create" if agent else "up", *([] if agent else ["-d"]), "node")
         return {"image_id": identifier}
 
@@ -627,6 +681,111 @@ class Worker:
         cidr = str(ipaddress.ip_network(self.payload["cidr"]))
         return self.cli("agent", "prefix", "add", self.payload["name"], cidr, "--kind", "lan")
 
+    def access_setup(self) -> Any:
+        """Role access + listener + one user on a case agent (hub only)."""
+        if self.role != "hub" or self.case != "routed" or self.payload["name"] != "agent-a":
+            raise ValueError("routed case, hub, agent-a only")
+        host = str(ipaddress.ip_address(self.payload["host"]))
+        port, user, password = self.payload["port"], self.payload["user"], self.payload["password"]
+        if port != ACCESS_PORT:
+            raise ValueError("invalid port")
+        if not re.fullmatch(r"[a-z][a-z0-9]{1,20}", user) or not isinstance(password, str):
+            raise ValueError("invalid user")
+        self.cli("agent", "set", "agent-a", "--role", "access")
+        self.cli("agent", "access", "set", "agent-a", "--hostname", host, "--port", str(port))
+        self.cli(
+            "agent", "user", "add", "agent-a", user, "--password-stdin",
+            data=password.encode() + b"\n",
+        )  # fmt: skip
+        return self.cli("agent", "access", "show", "agent-a")
+
+    def access_policy(self) -> Any:
+        """Clients of agent-a may use the fabric and leave through the node (fixed policy;
+        neither is implied for the clients of an access node)."""
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        path = self.directory / "access-policy.json"
+        rules = [
+            {"id": "clients-fabric", "from": ["clients"], "to": "fabric", "via": "fabric"},
+            {"id": "clients-out", "from": ["clients"], "to": "any", "via": "local"},
+        ]
+        atomic(path, {"egress": rules})
+        try:
+            return self.cli("agent", "egress", "set", "agent-a", "--file", str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def access_client(self) -> Any:
+        if self.role != "agent-b" or self.case != "routed":
+            raise ValueError("routed case, agent-b only")
+        o = self.payload
+        options = {
+            "host": str(ipaddress.ip_address(o["host"])),
+            "port": o["port"],
+            "pin": o["pin"],
+            "user": o["user"],
+            "password": o["password"],
+        }
+        if not re.fullmatch(r"pin-sha256:[A-Za-z0-9+/=]{44}", options["pin"]):
+            raise ValueError("invalid pin")
+        options["routes"] = [str(ipaddress.ip_network(route)) for route in o["routes"]]
+        self.compose("up", "-d", "client")
+        _, data = self.run(
+            ["docker", "exec", "-i", self.container("client"), "python", "-c", ACCESS_CLIENT],
+            data=json.dumps(options).encode(),
+            timeout=90,
+        )
+        return json.loads(data)
+
+    def access_diag(self) -> Any:
+        """Why a VPN login failed: supervisor state, ocserv/agent log lines and the
+        client log. No credentials: ocserv never logs passwords and the client log is
+        openconnect's own output."""
+        if not self.role.startswith("agent-") or self.case != "routed":
+            raise ValueError("routed case, agent only")
+        out: dict[str, str] = {}
+        if self.role == "agent-a":
+            argv = ["supervisorctl", "-c", "/etc/supervisor/conf.d/kornode-agent.conf", "status"]
+            out["supervisor"] = self.execute(argv, allowed=tuple(range(256)), timeout=20)[
+                1
+            ].decode()
+            out["listening"] = self.execute(["ss", "-ltnp"], allowed=tuple(range(256)), timeout=20)[
+                1
+            ].decode()
+            out["conf"] = self.execute(
+                ["cat", "/run/kornode-access/ocserv.conf"],
+                allowed=tuple(range(256)),
+                timeout=10,
+            )[1].decode()
+            _, logs = self.run(
+                ["docker", "logs", "--tail", "400", self.container()],
+                allowed=tuple(range(256)),
+                timeout=30,
+            )
+            wanted = re.compile(rb"ocserv|access|dnsmasq|resolver", re.I)
+            noise = re.compile(rb"spawned:|exited:|entered RUNNING|gave up")
+            lines = [
+                line for line in logs.splitlines() if wanted.search(line) and not noise.search(line)
+            ]
+            out["log"] = b"\n".join(lines[:30]).decode(errors="replace")
+        else:
+            _, log = self.run(
+                [
+                    "docker", "exec", self.container("client"),
+                    "tail", "-n", "25", "/tmp/kn-access/log",
+                ],
+                allowed=tuple(range(256)),
+                timeout=10,
+            )  # fmt: skip
+            out["client_log"] = log.decode(errors="replace")
+        return {key: value[-3000:] for key, value in out.items()}
+
+    def access_client_stop(self) -> Any:
+        if self.role != "agent-b" or self.case != "routed":
+            raise ValueError("routed case, agent-b only")
+        self.compose("stop", "client")
+        return {"stopped": True}
+
     def dns_record(self) -> Any:
         if self.role != "hub" or self.case != "routed":
             raise ValueError("routed case, hub only")
@@ -670,12 +829,13 @@ class Worker:
         source = self.payload.get("source")
         if source is not None:
             source = str(ipaddress.ip_address(source))
-        _, data = self.execute(
-            ["python", "-c", CONNECT],
-            data=json.dumps({"host": host, "port": 9100, "source": source}).encode(),
-            timeout=20,
-        )
-        return json.loads(data)
+        data = json.dumps({"host": host, "port": 9100, "source": source}).encode()
+        if self.payload.get("client"):
+            if self.role != "agent-b":
+                raise ValueError("the VPN client runs on agent-b")
+            argv = ["docker", "exec", "-i", self.container("client"), "python", "-c", CONNECT]
+            return json.loads(self.run(argv, data=data, timeout=20)[1])
+        return json.loads(self.execute(["python", "-c", CONNECT], data=data, timeout=20)[1])
 
     def repair_route(self) -> Any:
         if not self.role.startswith("agent-") or self.case != "route":
@@ -976,6 +1136,11 @@ class Worker:
             "export_prefix",
             "dns_record",
             "dns_resolve",
+            "access_setup",
+            "access_policy",
+            "access_client",
+            "access_diag",
+            "access_client_stop",
             "fabric_listen",
             "fabric_connect",
             "inject_bundle",

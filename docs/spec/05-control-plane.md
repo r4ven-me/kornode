@@ -41,6 +41,7 @@ CREATE TABLE nodes (
   seal_pubkey   BLOB,                               -- X25519 public key (32 bytes)
   policy        TEXT NOT NULL DEFAULT '{}',         -- JSON: egress, sources, sets (02)
   transport     TEXT NOT NULL DEFAULT '{}',         -- JSON: transport, dpd, keepalive, camouflage_enc
+  access        TEXT NOT NULL DEFAULT '{}',         -- JSON (migration 0003): hostname, port, udp, cert_pem, cert_not_after, key_enc (D-67)
   desired_version INTEGER NOT NULL DEFAULT 0,       -- latest stored bundle version
   applied_version INTEGER NOT NULL DEFAULT 0,       -- from the last report
   high_water_version INTEGER NOT NULL DEFAULT 0,    -- highest version the agent ever accepted (D-37)
@@ -150,7 +151,7 @@ maintenance for sync, explicit token reissue for failed issuance.
 master key as external credentials (AAD distinguishes the node/fabric transport).
 The compiler decrypts and seals it for that agent. Normal management views
 only return `camouflage_set`/`credentials_set`/`password_set`, never credentials,
-hashes or ciphertext. Access users remain registry-only until P4-04.
+hashes or ciphertext. Access users are delivered with the bundle as ocpasswd hashes (P4-04, D-67).
 
 ## Operator management (P3-08)
 
@@ -178,8 +179,8 @@ and no-clobber. The queue is not proof of execution or successful application.
 
 The P3 agent still lacks domain/URL resolution, p12 upstreams, pushed routes
 and node-to-node exit routing. Operator validation refuses these inputs rather
-than silently delivering nonworking policies; access roles/users and exported
-prefixes clearly report their P4 runtime boundary.
+than silently delivering nonworking policies; exported
+prefixes report their runtime boundary; access roles/users are delivered since P4-04.
 
 ## Enrollment
 

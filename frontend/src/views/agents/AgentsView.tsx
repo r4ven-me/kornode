@@ -3,7 +3,7 @@ import "./agents.css";
 import { agentGet, agentPath, agentWrite, downloadAgentArtifact, loadAgent, type Agent, type ControlStatus, type Detail, type JsonObject, type Mutate } from "../../agentsApi";
 import { AgentActivity } from "./AgentActivity";
 import { AgentPolicy } from "./AgentPolicy";
-import { AccessUserEditor, PrefixEditor, SourceEditor, UpstreamEditor } from "./AgentResources";
+import { AccessListenerEditor, AccessUserEditor, PrefixEditor, SourceEditor, UpstreamEditor } from "./AgentResources";
 import { AgentSettings } from "./AgentSettings";
 import { FabricDns } from "./FabricDns";
 
@@ -146,7 +146,7 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
     </fieldset><div className="panel-footer"><button className="action-button primary" disabled={busy || !control?.fabric_enabled} data-capability="agent.create">{dryRun ? "Preview creation" : "Create agent and token"}</button></div></form></details>
     {selected && !detail && <p role="status">Loading agent details…</p>}
     {detail && <>
-      <label className="agent-section">Agent section<select value={section} onChange={e => setSection(e.target.value as Section)}><option value="settings">Settings and enrollment</option><option value="networks">Networks and sources</option><option value="policy">Egress policy</option><option value="upstreams">Upstreams</option>{detail.agent.roles.includes("access") && <option value="users">Access users (registry only)</option>}<option value="activity">Reports, bundles and commands</option></select></label>
+      <label className="agent-section">Agent section<select value={section} onChange={e => setSection(e.target.value as Section)}><option value="settings">Settings and enrollment</option><option value="networks">Networks and sources</option><option value="policy">Egress policy</option><option value="upstreams">Upstreams</option>{detail.agent.roles.includes("access") && <option value="users">Access listener and users</option>}<option value="activity">Reports, bundles and commands</option></select></label>
       {live && <p role="status">{live.online ? "Online" : "Offline"} · last seen {live.last_seen ?? "never"} · desired {live.desired_version} / reported {live.applied_version}</p>}
       <div key={detail.agent.id}>
         {section === "settings" && <AgentSettings agent={detail.agent} busy={busy} mutate={mutate} />}
@@ -154,7 +154,7 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
           {section === "networks" && <><PrefixEditor prefixes={detail.prefixes} busy={busy} mutate={mutate} /><SourceEditor sources={detail.policy.sources ?? []} busy={busy} mutate={mutate} /></>}
           {section === "policy" && <AgentPolicy policy={detail.policy} busy={busy} mutate={mutate} />}
           {section === "upstreams" && <UpstreamEditor upstreams={detail.upstreams} busy={busy} mutate={mutate} />}
-          {section === "users" && detail.agent.roles.includes("access") && <AccessUserEditor users={detail.users} busy={busy} mutate={mutate} />}
+          {section === "users" && detail.agent.roles.includes("access") && <><AccessListenerEditor access={detail.access} busy={busy} mutate={mutate} /><AccessUserEditor users={detail.users} busy={busy} mutate={mutate} /></>}
         </fieldset>
         {section === "activity" && <AgentActivity name={detail.agent.name} reports={detail.reports} commands={detail.commands} bundles={detail.bundles} busy={busy} mutate={mutate} read={read} download={async id => { try { await downloadAgentArtifact(detail.agent.name, id, token); } catch (reason) { setError(String(reason instanceof Error ? reason.message : reason)); } }} />}
       </div>

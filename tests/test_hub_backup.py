@@ -373,7 +373,7 @@ def test_newer_database_is_refused_without_touching_original(hub: Any, tmp_path:
         BackupService(hub.config).restore(
             encrypt(json.dumps(state).encode(), PASSWORD), PASSWORD, target=tmp_path / "restored"
         )
-    assert hub.registry.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert hub.registry.conn.execute("PRAGMA user_version").fetchone()[0] == 3
     assert not (tmp_path / "restored").exists()
 
 

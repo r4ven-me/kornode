@@ -109,6 +109,21 @@ class ExternalInput(Model):
         return self
 
 
+class AccessInput(Model):
+    """Access listener of an agent with role `access` (P4-04, D-67)."""
+
+    # At most 64 characters: it becomes the certificate's CN.
+    hostname: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$",
+    )
+    port: int = Field(default=443, ge=1, le=65535)
+    udp: bool = False
+    # Issue a new server certificate even though the hostname is unchanged.
+    reissue: bool = False
+
+
 class AccessUserInput(Model):
     password: SecretStr | None = None
     groups: list[str] = Field(default_factory=list, max_length=32)

@@ -255,11 +255,34 @@ is unchanged).
 
 ## Role `access`
 
-- Bundle contains `access`: ocserv settings subset (port, auth methods:
-  password/certificate), `users` (username, ocpasswd hash, groups, enabled),
-  `groups` (config-per-group bodies), CA for client certs.
-- The agent renders `ocserv.conf`, `ocpasswd`, group configs with the same
-  renderers as the hub (`kornode.renderers.ocserv` is shared; keep it free of
-  hub-only imports).
-- Client pool and DNS are the node's derived values.
-- User changes on the hub → new bundle → agent applies → `occtl reload`.
+Implemented in P4-04 (D-67), password authentication only.
+
+- The hub stores the listener per node (`korctl agent access set <name> --hostname H
+  [--port P] [--udp]`): public hostname or IP, port, DTLS. It issues a server
+  certificate from the hub CA for that name — **no OU**, so it can never authenticate
+  to the hub (the hub's certificate login refuses OU-less certificates) — and keeps the
+  key encrypted with the master key. A new certificate is issued only for a new
+  hostname or with `--reissue`.
+- The bundle contains `access` **only** for role `access` with a configured listener:
+  `port`, `udp`, `auth: ["password"]`, CA, server certificate, the server key
+  **sealed to the agent** (`/access/server_key`), `users` (username, ocpasswd hash,
+  groups, enabled). Usernames, hashes and groups are validated strictly in the bundle
+  model: they become `ocpasswd` lines.
+- The agent (`kornode_agent.access`) renders `/run/kornode-access/{ocserv.conf, ocpasswd,
+  server.crt, server.key}` (keys/hashes 0600; not under the 0700 data directory, which
+  ocserv's unprivileged workers cannot traverse, and not on the persistent volume) and runs ocserv as the `autostart=false`
+  supervisor program `ocserv`. Pool and DNS are the node's derived values; clients get
+  `route = default` and the node's `from: clients` egress rules decide where they go.
+- Changes of users only rewrite `ocpasswd` (ocserv reads it at every login) and
+  `occtl disconnect` the users that lost access; any other change restarts ocserv;
+  removing the listener stops ocserv and deletes its secrets. Applied asynchronously
+  with retries (`kornode_agent.programs.Converger`); a failure is the doctor finding
+  `access_failed`, never a rollback.
+- **Local auth works without the hub**: the hashes are in the cached bundle and ocserv
+  needs nothing else (E2E NL-03 logs in with the hub stopped).
+- Clients get **no implicit access to the fabric** (the bundle's implicit `to-fabric` rule is for `host` and sources on an `access` node); grant it with `from: [clients] to: fabric via: fabric`, and an exit with `from: [clients] to: any via: local` (masquerade) or `upstream:<name>`. Toward the node itself clients may only use DNS on the service address and ping; the connected LAN is reachable through the forwarding path.
+- The listener certificate is revoked in the hub CRL when issued (it is a hub-CA certificate without OU and must never authenticate to the hub); the hub doctor check `access-certificates` warns 30 days before it expires.
+- `kornode.net` adds the strict reverse-path rule for `vpns*` (`NodeFacts.access_ifaces`,
+  as the hub's enroll guard, D-47); the doctor ignores the per-session host routes in the
+  client pool.
+- Not in P4-04: certificate authentication, per-group ocserv policies, CRL, OTP.
