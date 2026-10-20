@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added (P4-05, D-68)
+
+- Doctor: a foreign `masquerade`/`snat` rule that matches a source's subnet or interface (nftables and the legacy iptables backend) is the error `foreign_nat_on_source`; an absent source interface is a single `missing_source` warning; `docs/sources.md` (wg-easy/Amnezia setup, NAT hooks, MTU, DNS); `AgentService.sources()` reports `runtime_supported: true`; agent image ships `iptables` (read-only checks).
+- Tests: source export into bundles and hub per-user routes, `allow_outside_pool`, doctor matching; E2E NL-06 (client behind a source of agent-b).
+- Hub-attached sources are deferred to P4-06 (D-68).
+
 ### Added (P4-04, D-67)
 
 - Role `access` on agents: `korctl agent access show/set/del`, `GET/PUT/DELETE /api/agents/{name}/access`, panel listener editor. The hub issues the listener's server certificate from its CA **without OU** (it can never log in to the hub), keeps the key encrypted and seals it to the agent; the bundle carries `access` (port, DTLS, password auth, CA, certificate, sealed key, users as ocpasswd hashes) with strict validation of usernames, hashes and groups.

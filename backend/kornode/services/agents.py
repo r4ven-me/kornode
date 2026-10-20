@@ -437,7 +437,7 @@ class AgentService:
     def sources(self, name: str) -> dict[str, Any]:
         return {
             "sources": self.policy(name)["policy"].get("sources", []),
-            "runtime_supported": False,
+            "runtime_supported": True,
         }
 
     def set_source(

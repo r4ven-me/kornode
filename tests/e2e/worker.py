@@ -38,6 +38,11 @@ CASES = {
 }
 ROLES = {"hub", "agent-a", "agent-b", "ext"}
 ACCESS_PORT = 8443  # published by agent-a in case `routed`
+# NL-06: the "source" network of agent-b (node 3, default source pool 10.8.<id>.0/24):
+# the node container is 10.8.3.2, the throwaway client container 10.8.3.20.
+SOURCE_CIDR = "10.8.3.0/24"
+SOURCE_NODE_ADDRESS = "10.8.3.2"
+SOURCE_CLIENT_ADDRESS = "10.8.3.20"
 IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(?:@sha256:[0-9a-f]{64})?$")
 
 PROXY = """import select, socket, socketserver
@@ -540,8 +545,10 @@ class Worker:
                 # NL-03: a client of agent-a reaches the hub test listener from outside.
                 service["ports"].append("9100:9100/tcp")
         services = {"node": service}
+        compose: dict[str, Any] = {"services": services}
         if self.role == "agent-b" and self.case == "routed":
-            # Throwaway VPN client of NL-03: same image, own network namespace, no kornode.
+            # Throwaway VPN client of NL-03 and client behind a source of NL-06: same
+            # image, own network namespace, no kornode.
             services["client"] = {
                 "image": image,
                 "init": True,
@@ -550,7 +557,18 @@ class Worker:
                 "devices": ["/dev/net/tun:/dev/net/tun"],
                 "labels": service["labels"],
             }
-        atomic(self.directory / "compose.json", {"services": services})
+            services["node"]["networks"] = {
+                "default": {},
+                "source": {"ipv4_address": SOURCE_NODE_ADDRESS},
+            }
+            services["client"]["networks"] = {
+                "default": {},
+                "source": {"ipv4_address": SOURCE_CLIENT_ADDRESS},
+            }
+            compose["networks"] = {
+                "source": {"ipam": {"config": [{"subnet": SOURCE_CIDR}]}},
+            }
+        atomic(self.directory / "compose.json", compose)
         self.compose("create" if agent else "up", *([] if agent else ["-d"]), "node")
         return {"image_id": identifier}
 
@@ -680,6 +698,46 @@ class Worker:
             raise ValueError("invalid agent")
         cidr = str(ipaddress.ip_network(self.payload["cidr"]))
         return self.cli("agent", "prefix", "add", self.payload["name"], cidr, "--kind", "lan")
+
+    def source_iface(self) -> Any:
+        """The interface of agent-b's node container on the source network (docker names it)."""
+        if self.role != "agent-b" or self.case != "routed":
+            raise ValueError("routed case, agent-b only")
+        out = self.execute(["ip", "-4", "-j", "addr", "show"])[1]
+        for link in json.loads(out):
+            if any(a.get("local") == SOURCE_NODE_ADDRESS for a in link.get("addr_info", [])):
+                return {"interface": link["ifname"]}
+        raise ValueError("source network interface not found")
+
+    def source_add(self) -> Any:
+        """Declare agent-b's source (hub only); the interface comes from `source_iface`."""
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        interface = self.payload["interface"]
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", interface):
+            raise ValueError("invalid interface")
+        path = self.directory / "source.json"
+        atomic(path, {"interface": interface, "cidr": SOURCE_CIDR, "export": True})
+        try:
+            return self.cli("agent", "source", "add", "agent-b", "e2e-source", "--file", str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def client_route(self) -> Any:
+        """Routes of the client container through agent-b's source address."""
+        if self.role != "agent-b" or self.case != "routed":
+            raise ValueError("routed case, agent-b only")
+        self.compose("up", "-d", "client")
+        for route in self.payload["routes"]:
+            network = str(ipaddress.ip_network(route))
+            self.run(
+                [
+                    "docker", "exec", self.container("client"),
+                    "ip", "route", "replace", network, "via", SOURCE_NODE_ADDRESS,
+                ],
+                timeout=20,
+            )  # fmt: skip
+        return {"routed": True}
 
     def access_setup(self) -> Any:
         """Role access + listener + one user on a case agent (hub only)."""
@@ -815,12 +873,15 @@ class Worker:
         seconds = self.payload["seconds"]
         if type(seconds) is not int or not 1 <= seconds <= 120:
             raise ValueError("invalid window")
-        _, data = self.execute(
-            ["python", "-c", LISTEN],
-            data=json.dumps({"port": 9100, "seconds": seconds}).encode(),
-            timeout=seconds + 20,
+        data = json.dumps({"port": 9100, "seconds": seconds}).encode()
+        if self.payload.get("client"):
+            if self.role != "agent-b":
+                raise ValueError("the client container belongs to agent-b")
+            argv = ["docker", "exec", "-i", self.container("client"), "python", "-c", LISTEN]
+            return json.loads(self.run(argv, data=data, timeout=seconds + 20)[1])
+        return json.loads(
+            self.execute(["python", "-c", LISTEN], data=data, timeout=seconds + 20)[1]
         )
-        return json.loads(data)
 
     def fabric_connect(self) -> Any:
         if self.case != "routed":
@@ -1136,6 +1197,9 @@ class Worker:
             "export_prefix",
             "dns_record",
             "dns_resolve",
+            "source_iface",
+            "source_add",
+            "client_route",
             "access_setup",
             "access_policy",
             "access_client",

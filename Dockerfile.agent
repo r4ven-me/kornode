@@ -9,10 +9,11 @@ ENV PYTHONUNBUFFERED=1 \
 # openconnect/nftables/iproute2 are the data plane; vpnc-scripts is used by the
 # short-lived enroll session; iputils-ping backs the upstream check_host probe;
 # dnsmasq-base is the node resolver (P4-03, no Debian service/unit files).
-# ocserv is the access server of role access (P4-04).
+# ocserv is the access server of role access (P4-04); iptables only for the doctor's
+# read-only look at a source server's legacy NAT rules (P4-05).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates dnsmasq-base iproute2 iputils-ping nftables ocserv openconnect \
+        ca-certificates dnsmasq-base iproute2 iptables iputils-ping nftables ocserv openconnect \
         supervisor vpnc-scripts \
     && rm -rf /var/lib/apt/lists/*
 

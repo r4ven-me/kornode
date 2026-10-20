@@ -46,14 +46,16 @@ contracts (P3-07+) and forward-only DB schema. This does not attempt a downgrade
 already-current data: the upgrade scenario starts fresh on previous images.
 
 **P4 blockers stay skipped**, with reasons in `test_routed_fabric.py`, the offline
-plan and summary: E2E-07; NL-05…09; access-client traffic during upgrade and hub
+plan and summary: E2E-07; NL-05, NL-07…09; access-client traffic during upgrade and hub
 outage. An existing upstream tunnel is not proof of access-client forwarding,
 wg-easy integration, no fabric NAT, domain-based exit selection or no traffic leak.
 No production P4 feature or GUI/AppConfig field is added by test tooling.
 Running (case `routed`): NL-01, NL-04, NL-03 (access client of agent-a: reaches the hub without NAT,
 leaves through the node with NAT, logs in again with the hub stopped; the throwaway openconnect client
 runs in its own `client` compose service on the agent-b VM, agent-a publishes 8443 and the hub 9100
-for it; MSS is not measured) and NL-02 (fabric DNS: the agent resolves its
+for it; MSS is not measured), NL-06 (a source of agent-b: docker network `source` 10.8.3.0/24
+shared by the node and `client` containers; the client and the hub, agent-a reach each other
+without NAT) and NL-02 (fabric DNS: the agent resolves its
 own zone locally and `monitoring.<domain>` through the hub, then connects with its
 fabric address).
 
