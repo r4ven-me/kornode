@@ -1,12 +1,13 @@
-# Prompt for the next session — открытые находки ревью, E2E через GitHub Actions, пуш
+# Prompt for the next session — слияние PR #1, P4-03…P4-07, E2E через GitHub Actions
 
-> **Состояние на 2026-10-20.** Ветка `redesign/p4-01-routed-fabric`, **запушена**, открыт PR
-> https://github.com/r4ven-me/kornode/pull/1 (в `main`; ничего не влито). Локально: `make check` 1105 passed /
-> 68 skipped, привилегированный netlab на VM 46 passed. На GitHub: `backend` и `frontend` зелёные; первый
-> `netlab` упал на двух тестах из-за формата вывода старой nft (исправлено в `61c7d7c`, нужен перезапуск CI).
-> Сделано сверх P3: P4-01/P4-02 (D-63, spike S-03 не прошёл → маршруты префиксов агентов ставит reconciler
-> хаба в `main` с `proto 77`) и закрытие LOW-находок ревью (D-64). e2e `.github/workflows/e2e.yml` не запускался
-> (нужны protected-ветка, environment `kornode-e2e`, секреты, раннер на hub).
+> **Состояние на 2026-10-20.** Ветка `redesign/p4-01-routed-fabric` **запушена**, открыт PR
+> https://github.com/r4ven-me/kornode/pull/1 в `main` (**не влит**, ревью и слияние — решение владельца).
+> Последний коммит ветки: `7713cac`. CI на PR зелёный: `backend`, `frontend`, `netlab` (первый успешный
+> `netlab` на GitHub-раннере). Локально: `make check` 1105 passed / 68 skipped, `make parity` 4 passed.
+> Привилегированный netlab на VM hub: 46 passed. Четырёхмашинный E2E: NL-01 и NL-04 (case `routed`) —
+> passed; остальной набор последний раз гонялся на прошлом HEAD (9 passed, 13 skipped, D-62).
+> Сделано: P2…P3-10, P4-01, P4-02, закрытие LOW-находок ревью. **Не сделано:** P4-03…P4-07, E2E-06,
+> прогон `e2e.yml` на GitHub Actions, расследование плавающего E2E-04.
 
 Вставь всё ниже черты в новую сессию Claude Code в
 `/home/lans/Cloud/Projects/public/kornode`. Начни в режиме плана.
@@ -14,88 +15,88 @@
 ---
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык — русский, обращайся ко мне «Ivan».
-Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, раздел «Дальнейшие действия» в `docs/redesign/PLAN.ru.md`,
-`docs/redesign/CLAUDE-HANDOFF.md`, четыре `P3-0{7,8,9}-REVIEW.md` / `P3-10-REVIEW.md`,
-`docs/redesign/DECISIONS.md` (D-55…D-62), `docs/runbooks/hub-recovery.md`, `docs/runbooks/vm-e2e.md`.
-Активируй проект Serena `kornode` до поиска по коду.
+Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (фаза P4), раздел «Дальнейшие
+действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-65), `docs/spec/07-fabric.md`,
+`docs/runbooks/vm-e2e.md`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Что уже сделано (не переделывай)
-- Коммиты ветки (по порядку): `a92c985` P2 tails, `bfd4401` P3-10, `51c813b` P3-09, `07301e8` P3-07,
-  `619d4d0` P3-08, `3ba311e`/`f375e57`/`f9f729b` docs, `122a236` исправления по E2E (hub-образ, enroll),
-  `f51fa28` исправления harness, `32cdc12` docs. Разбиение P3-07…P3-10 по путям: общие файлы
-  (`cli.py`, `app.py`, `parity.yaml`, спеки, `Makefile`) лежат в коммите P3-08, поэтому **промежуточные
-  коммиты по отдельности не проверялись зелёными** — зелёный только HEAD.
-- Хвосты P2 закрыты (D-60): `flock` на `generated_dir/reconciler.lock` (демон на всю жизнь, in-process
-  `net apply` на проход, ожидание сокета запускающегося демона вместо второго писателя);
-  `Reconciler.wake_netlink` уважает backoff, явный `wake()` и синхронный `apply` — нет; тест единственного
-  писателя ядра переписан на AST (`tests/test_kernel_single_writer.py`, allowlist универсальных раннеров);
-  netlab-сценарий D-32 (`test_established_flow_of_a_removed_exit_never_reaches_the_uplink`: с правилом
-  stale-marks 0 пакетов на uplink, без него 2).
-- Ревью 2026-10-18 (code-reviewer, security-reviewer; найденное — в `P3-0X-REVIEW.md`). Исправлено:
-  `kornode-agent diag` отдавал `[redacted]` вместо архива; `credentials_set` и булевы флаги под секретными
-  именами; публичные ключи и hex-дайджесты больше не маскируются; `rotate-signing-key --dry-run` считал хаб
-  агентом; workflow e2e не публикует диагностические архивы агентов в артефакты публичного репозитория.
-- `Dockerfile.agent` собран: 396 МБ; цель в spec 06 пересмотрена до ≤400 МБ (D-61).
-- Привилегированный netlab на VM: 43 passed (весь набор, включая P3-07/08/09 и D-32).
-- Четырёхмашинный E2E (D-62), запуск с hub по SSH: NL-10/11/12, E2E-01…05, NL-13 — **9 passed, 13 skipped**.
-  Найдено и исправлено: `python` в hub-образе (симлинк в venv вёл на системный python → `control-api` не
-  стартовал), гонка маршрута при enroll агента (теперь ждёт до 10 с), ошибки harness (`connect_script`,
-  синтаксис nft, `certificates pin` без `--json`, сеть ext 10.8.0.0/24, окно 60 с на re-dial в NL-13).
-- Проверки на dev-машине: `make check` — 1088 passed / 65 skipped; `make parity` — 4 passed.
-  Фронтенд после правок этой сессии не прогонялся (vitest 30 passed + build были в предыдущей).
+- **P2 tails, P3-07…P3-10** (D-55…D-62): CLI агента, управление агентами на хабе (CLI/API/панель), backup/restore,
+  E2E-harness на 4 VM. Подробности и ревью — `P3-0X-REVIEW.md`.
+- **P4-01/P4-02** (D-63, D-65):
+  - Per-user файлы ocserv (`FabricGroupsService.render_files`): `explicit-ipv4`, `iroute` для экспортируемых
+    префиксов узла, `route` для чужих, `dpd`/`keepalive` узла. `occtl reload` только при изменении
+    существующего файла. `export=false` не попадает никуда. `dpd`/`keepalive` действуют только на хабе.
+  - **Spike S-03 не прошёл:** ocserv не ставит маршруты `iroute` без `route-add-cmd` (это сделало бы его
+    вторым писателем в ядро). Поэтому reconciler хаба ставит `<prefix> dev vpnsN` в таблицу `main` с
+    `proto 77` (`KORNODE_RTPROTO`, `Route.proto`, `NodeFacts.session_routes`, `HubNetInputs._session_routes`).
+    Сессия считается подключённой, пока `10.99.0.<id>` — маршрут на `vpns*` в `main`. Владение `main`
+    только по протоколу: `kernel._parse_route` и `owns_route` игнорируют любые другие маршруты.
+  - Тест «нет NAT к fabric» (`tests/test_net_compile.py`), netlab `test_spike_p4_iroute.py` и
+    `test_agent_prefix_route_in_main_is_owned_by_protocol_and_withdrawn`.
+  - **E2E NL-01** (хаб → агент по fabric, source `10.99.0.1`) и **NL-04** (агент-a → LAN агента-b через
+    хаб, source = fabric-адрес агента-a): оба passed на четырёх VM. Трафик хоста агента обязан идти с
+    fabric-адресом как source (иначе хаб отбрасывает строгим RPF, D-47). Клиентский путь (cli3 в spec 09)
+    возможен только с ролью `access` из P4-04.
+  - Harness: действия `fabric_address`, `lan_setup`, `export_prefix`, `fabric_listen`, `fabric_connect`,
+    `net_dump` (маршруты/правила/nft без секретов печатаются в сообщении падения `Cluster.tcp_peer`).
+- **LOW-находки ревью 2026-10-18 закрыты (D-64):** backup нового хаба (мастер-ключ создаётся, пока ничего не
+  запечатано), `OSError` → `503 backup_io`, `_validate` проверяет политику только изменяемого узла, кэш
+  `doctor` в отчёте агента (120 с по версии), проверка формата diag-архива на хабе, netlab принимает оба
+  формата вывода nft (1.0 и 1.1).
+- Остаётся 10 skip в `tests/e2e/test_routed_fabric.py`: E2E-07, NL-02, NL-03, NL-05…NL-09, NL-13-forwarding,
+  E2E-06-clients (причины — в самом файле).
 
 ## Окружение
-- Используй `.venv` (`make` подхватывает его сам): `.venv/bin/python -m pytest`, `.venv/bin/python -m mypy --strict backend`.
-  Системный python не годится (нет `argon2` в `cryptography`). Не гоняй `ruff format` по всему репо
-  (проект проверяет `ruff check`).
-- Все команды на VM — через `bash`, не zsh (zsh не разбивает переменные с аргументами `ssh`).
-- SSH на VM: пользователь `lans`, ключ `~/.ssh/id_ed25519`, `-o IdentitiesOnly=yes` (иначе «Too many
-  authentication failures»), passwordless sudo. Синхронизация дерева: `rsync -a --delete` с исключением
-  `/artifacts`, `.git`, `.venv`, `node_modules`.
-- **Одноразовые VM для E2E** (владелец подтвердил, что они одноразовые): hub `192.168.122.123`,
-  agent-a `192.168.122.211`, agent-b `192.168.122.26`, ext `192.168.122.202`. На них стоят Docker
-  (`docker.io docker-cli docker-compose docker-buildx`), `/etc/kornode-e2e-vm.json` с ролями, на hub —
-  выделенный ключ `~/.e2e/id_ed25519`, `~/.e2e/known_hosts`, `~/.e2e/env.sh`, venv в `~/kornode/.venv`,
-  swap 2 ГБ на hub и ext (apt иначе убивался по OOM при 2 ГБ RAM). Старый netlab-стенд
-  `192.168.122.30` в конце сессии был недоступен («No route to host»).
-- Запуск E2E на hub: `. ~/.e2e/env.sh; export TMPDIR=/var/tmp` (`/tmp` — tmpfs 1 ГБ, архив образов не влезает),
-  затем `.venv/bin/python -m tests.e2e preflight` и `.venv/bin/python -m pytest tests/e2e --e2e-run -q --tb=short`.
-  Полный прогон ≈ 29 минут (NL-13 — 10 минут простоя хаба). После падения: `python -m tests.e2e cleanup --all-owned --yes`.
-- Первая сборка образа после смены исходников требует работающего PyPI; на VM сеть нестабильна, дважды
-  сборка падала с «local image command failed» и проходила со второй попытки (слои в кэше).
-- Диагностика harness намеренно скрыта (`output withheld`); для разбора падения временно писали stderr
-  `transport._invoke` и `worker.run` в файл на VM — в репозиторий это не попадало. Тест NL-13 теперь
-  печатает состояние туннелей в сообщении assert (`Cluster.upstream_summary`).
+- Используй `.venv`: `.venv/bin/python -m pytest`, `.venv/bin/python -m mypy --strict backend`,
+  `.venv/bin/python -m ruff check backend tests` (не `ruff format` по всему репо). Системный python не годится.
+- Shell пользователя — zsh: переменные с аргументами `ssh` не разбиваются. Используй функцию
+  `vm() { ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 lans@192.168.122.123 "$@"; }`.
+- `gh` установлен и залогинен (аккаунт `r4ven-me`, протокол SSH); `git push` по SSH работает. Push, merge,
+  запуск workflow — только по явному разрешению владельца в чате.
+- **Одноразовые VM:** hub `192.168.122.123`, agent-a `.211`, agent-b `.26`, ext `.202`. SSH: пользователь
+  `lans`, ключ `~/.ssh/id_ed25519`, `-o IdentitiesOnly=yes`, passwordless sudo. Синхронизация дерева на hub:
+  `rsync -a --delete` с исключением `/artifacts`, `.git`, `.venv`, `node_modules` в `~/kornode/`.
+  Старый netlab-стенд `.30` недоступен; **netlab гоняется на hub-VM** (там поставлены `ocserv openconnect
+  nftables gnutls-bin`, есть `tcpdump iproute2`): `sudo -n .venv/bin/python -m pytest -m netlab -q`
+  из `~/kornode` (полный набор ≈ 6,5 мин, 46 passed).
+- **E2E на hub:** `. ~/.e2e/env.sh; export TMPDIR=/var/tmp`, затем `.venv/bin/python -m tests.e2e preflight`
+  и `.venv/bin/python -m pytest tests/e2e/test_routed_fabric.py --e2e-run -q --tb=short` (оба P4-кейса ≈ 5 мин;
+  весь набор ≈ 29 мин). Запускай в фоне (`nohup ... > /var/tmp/x.out`) и жди по `grep` в файле вывода,
+  а не по `pgrep -f` (он находит собственную команду). После падения:
+  `python -m tests.e2e cleanup --all-owned --yes`.
+- Сборка образа на VM после смены исходников требует рабочего PyPI и иногда падает «local image command
+  failed» за ~20 с; помогает повторить (слои в кэше) или собрать `docker build --builder default --file
+  Dockerfile[.agent] .` вручную на hub.
+- Вывод harness намеренно скрыт (`output withheld`). Для разбора сетевых падений используй `net_dump`.
 
 ## Что делать дальше (по порядку)
-1. ~~Открытые LOW-находки ревью 2026-10-18~~ — закрыты в D-64.
-2. **Плавающий E2E-04** («revocation incomplete; node is fail-closed; retry revoke», `committed: true`):
-   один раз упал, в одиночку и в двух чистых прогонах проходил. Причину не нашли — подробностей нет, они
-   в аудите хаба (`agent.revoke`, `details.failures`), а контейнеры после падения удалены. Воспроизвести
-   циклом E2E-04 с копированием `audit.jsonl` хаба по ходу прогона (подозрение: шаги `reload ocserv` /
-   `disconnect` сразу после старта хаба).
-3. **E2E-06 (обновление):** нужны пара совместимых предыдущих образов по digest'у
-   (`E2E_PREVIOUS_HUB_IMAGE`, `E2E_PREVIOUS_AGENT_IMAGE`) — их ещё нет; попросить у владельца или собрать
-   из предыдущего коммита с публикацией на локальный реестр.
-4. **Прогон через GitHub Actions** (`.github/workflows/e2e.yml`, self-hosted runner на hub): только после
-   разрешения владельца на push. Нужны: ветка с protected-веткой, GitHub Environment `kornode-e2e` с approval,
-   секреты `E2E_SSH_KEY`, `E2E_SSH_KNOWN_HOSTS`, переменные `E2E_*_HOST`, `E2E_SSH_USER`,
-   `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true` (только при реально настроенной защите), runner group.
-   Также впервые прогнать CI-задачу `netlab` на GitHub-раннере.
-5. **Решение владельца про push:** варианты — ветка `redesign/p2` + один PR в `origin/main` со списком
-   P2-01…P2-11 (предпочтительно), либо push напрямую; затем PR'ы P3. Локальный `main` опережает
-   `origin/main` на 44 коммита.
-6. Дальше по `ROADMAP.md` — фаза P4 (маршрутизируемая фабрика; её сценарии в `tests/e2e/test_routed_fabric.py`
-   пока skip с причинами).
-7. Обновить `PLAN.ru.md`, `ROADMAP.md`, `CHANGELOG.md`, этот файл; отчёт по формату из `CLAUDE.md`.
+1. **PR #1** ждёт ревью владельца. Он большой (≈90 коммитов; промежуточные коммиты по отдельности не
+   проверялись зелёными — зелёный только HEAD). Без слияния новые PR строить не на чем.
+2. **P4-03 … P4-07** (`ROADMAP.md`, `docs/spec/07-fabric.md`): DNS по зонам узлов, роль `access`, источники
+   (wg-easy/Amnezia), `via: exit:<node>`, панель/CLI/API фабрики. Каждая задача: spec → тесты → код →
+   docs → `make check` → netlab → (E2E там, где задача трогает data plane); `parity.yaml` обновляется в той же
+   задаче. Каждому E2E-кейсу из списка skip нужен реальный сценарий, не заглушка.
+3. **Плавающий E2E-04** («revocation incomplete; node is fail-closed; retry revoke», `committed: true`):
+   один раз упал, в одиночку и в двух чистых прогонах проходил. Причина не найдена; подробности в аудите
+   хаба (`agent.revoke`, `details.failures`), контейнеры после падения удалены. Воспроизвести циклом E2E-04
+   с копированием `audit.jsonl` хаба по ходу прогона (подозрение: `reload ocserv` / `disconnect` сразу
+   после старта хаба).
+4. **E2E-06 (обновление):** нужна пара совместимых предыдущих образов по digest'у
+   (`E2E_PREVIOUS_HUB_IMAGE`, `E2E_PREVIOUS_AGENT_IMAGE`) — их нет; попросить у владельца или собрать из
+   предыдущего коммита и положить в локальный реестр.
+5. **Прогон `e2e.yml` на GitHub Actions** (self-hosted runner на hub): нужны protected-ветка, Environment
+   `kornode-e2e` с approval, секреты `E2E_SSH_KEY`, `E2E_SSH_KNOWN_HOSTS`, переменные `E2E_*_HOST`,
+   `E2E_HUB_ADDRESS`, `E2E_SSH_USER`, `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true` (только при реально
+   настроенной защите), runner group с меткой `kornode-e2e`. Настраивает владелец.
+6. Обновлять `PLAN.ru.md`, `ROADMAP.md`, `CHANGELOG.md` и этот файл вместе с изменениями; отчёт — по формату
+   из `CLAUDE.md` (что изменилось, ID задач, доказательства тестами, записи в `DECISIONS.md`).
 
 ## Что нужно от меня (напомни заранее)
-Разрешение на push и запуск через GitHub Actions; digest'ы предыдущих образов для E2E-06 (или решение,
-как их получить); решение по оставшимся LOW-находкам (чинить сейчас или оставить в REVIEW-файлах);
-если нужен netlab — рабочий стенд (`192.168.122.30` недоступен, либо поднять netlab на одной из
-одноразовых VM, там нужны `ocserv openconnect nftables tcpdump gnutls-bin iproute2`).
+Ревью и слияние PR #1 (или решение резать его на части); разрешение на push следующих веток и на запуск
+workflow; настройка GitHub (protected-ветка, environment, секреты, runner) для `e2e.yml`; digest'ы
+предыдущих образов для E2E-06 или решение, как их получить.
 
 ## Правила
-Каждая задача — по `CLAUDE.md`: spec → тесты → код → docs → `make check` → netlab; `parity.yaml` обновляется
-в той же задаче. Тесты не ослаблять; если тест кодирует убираемое поведение — удалить в том же PR и сказать
-об этом. Значимые изменения — локальным коммитом (без push), `--no-verify` не использовать.
+Каждая задача — по `CLAUDE.md`: spec → тесты → код → docs → `make check` → netlab. Тесты не ослаблять; если
+тест кодирует убираемое поведение — удалить/обновить в том же PR и сказать об этом. Значимые изменения —
+локальным коммитом, `--no-verify` не использовать. Ядро трогает только `kornode.net`.
