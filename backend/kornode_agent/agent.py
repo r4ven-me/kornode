@@ -78,9 +78,9 @@ class AgentRuntime:
         # tunnel manager converges before each dial).
         self.inputs.set_bundle(validated)
         self.tunnels.set_desired(specs_for(validated, self.config, self.root))
-        # dnsmasq uses bind-dynamic, so it may start before the reconciler
-        # puts the resolver address on lo.
-        self.resolver.apply(validated.bundle if validated is not None else None)
+        # Asynchronous: the switch never waits for supervisorctl. dnsmasq uses
+        # bind-dynamic, so it may start before the reconciler binds its address.
+        self.resolver.submit(validated.bundle if validated is not None else None)
 
     def converge(self) -> Convergence:
         plan = self.reconciler.run_once()

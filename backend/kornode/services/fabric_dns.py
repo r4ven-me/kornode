@@ -214,9 +214,11 @@ class FabricDnsService:
         def change(r: Registry) -> None:
             record = self._record(r, payload, deleting=True)
             r.delete_dns_record(record.name, record.type, record.value)
+            fqdn = _fqdn(record.name, self.config.fabric.domain)
             records = zone_records(self.config, r)
-            names = {item.fqdn for item in records}
-            if any(item.type == "CNAME" and item.value not in names for item in records):
+            if not any(item.fqdn == fqdn for item in records) and any(
+                item.type == "CNAME" and item.value == fqdn for item in records
+            ):
                 raise ManagementError(409, "cname_target", "a CNAME still points at this name")
 
         return self._change("dns.record.delete", change)
@@ -304,7 +306,12 @@ class FabricDnsService:
             ) from None
 
     def sync(self) -> bool:
-        """Rewrite the hub's dnsmasq.conf and restart dnsmasq when it changed."""
+        """Rewrite the hub's dnsmasq.conf and restart dnsmasq when it changed.
+
+        A marker written before the file and removed only after a successful
+        restart makes a failed restart retried by the next sync (`korctl
+        registry maintain`), although the file already matches.
+        """
         if not self.config.fabric.enabled:
             return False
         from kornode.renderers import DnsmasqConfigRenderer
@@ -312,23 +319,33 @@ class FabricDnsService:
 
         renderer = DnsmasqConfigRenderer()
         path: Path = renderer.target_path(self.config)
+        pending = path.with_name("dnsmasq.restart-pending")
         content = renderer.render(self.config)
         try:
-            if path.read_text(encoding="utf-8") == content:
-                return False
+            unchanged = path.read_text(encoding="utf-8") == content
         except FileNotFoundError:
-            pass
+            unchanged = False
+        if unchanged and not pending.exists():
+            return False
         files = FileManager()
         files.ensure_dir(path.parent)
-        files.atomic_write_text(path, content)
+        if not unchanged:
+            files.atomic_write_text(pending, "")
+            files.atomic_write_text(path, content)
         self.restart_dnsmasq()
+        pending.unlink(missing_ok=True)
         return True
 
     def _restart_dnsmasq(self) -> None:
+        """Restart the supervised dnsmasq. Without a supervisor that knows the
+        program (a host running korctl without the hub image) there is no
+        resolver to restart: whoever starts dnsmasq reads the new file."""
         from kornode.services.internal_dns import InternalDnsService
         from kornode.services.server import ServerService
 
+        server = ServerService(self.config)
+        if not server.process_action("status", "dnsmasq").ok:
+            return
         InternalDnsService(self.config).ensure_listen_address()
-        result = ServerService(self.config).process_action("restart", "dnsmasq")
-        if not result.ok:
+        if not server.process_action("restart", "dnsmasq").ok:
             raise RuntimeError("dnsmasq restart failed")

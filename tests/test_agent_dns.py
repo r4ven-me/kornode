@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import ipaddress
+import threading
+import time
 from pathlib import Path
 
 from tests.test_agent_inputs import CONFIG, FakeCarriers, FakeProbes, _validated
@@ -81,11 +83,50 @@ def test_bootstrap_stops_a_resolver_left_from_a_previous_bundle(tmp_path: Path) 
     assert control.calls == ["stop"]
 
 
-def test_supervisor_failure_is_kept_not_raised(tmp_path: Path) -> None:
+def test_supervisor_failure_is_kept_not_raised_and_retried(tmp_path: Path) -> None:
     bundle = _validated(tmp_path).bundle
-    resolver = NodeResolver(tmp_path / "agent", control=Control(ok=False))
-    resolver.apply(bundle)
+    control = Control(ok=False)
+    resolver = NodeResolver(tmp_path / "agent", control=control)
+    assert resolver.apply(bundle) is False
     assert resolver.error == "supervisorctl restart dnsmasq failed"
+    # Same bundle again: a failed restart is not "applied", so it is retried.
+    control.ok = True
+    assert resolver.apply(bundle) is True
+    assert control.calls == ["restart", "restart"] and resolver.error is None
+
+
+def test_failed_stop_keeps_the_configuration_for_a_retry(tmp_path: Path) -> None:
+    bundle = _validated(tmp_path).bundle
+    control = Control()
+    resolver = NodeResolver(tmp_path / "agent", control=control)
+    resolver.apply(bundle)
+    control.ok = False
+    assert resolver.apply(None) is False
+    assert (tmp_path / "agent/run/dnsmasq.conf").exists()
+    control.ok = True
+    assert resolver.apply(None) is True
+    assert not (tmp_path / "agent/run/dnsmasq.conf").exists()
+
+
+def test_submit_never_blocks_and_retries_in_the_background(tmp_path: Path) -> None:
+    bundle = _validated(tmp_path).bundle
+    release = threading.Event()
+    calls: list[str] = []
+
+    def slow(action: str) -> bool:
+        calls.append(action)
+        release.wait(5)
+        return len(calls) > 1  # the first attempt fails
+
+    resolver = NodeResolver(tmp_path / "agent", control=slow, retry_seconds=0.05)
+    started = time.monotonic()
+    resolver.submit(bundle)
+    assert time.monotonic() - started < 1
+    release.set()
+    deadline = time.monotonic() + 5
+    while resolver._worker is not None and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert calls == ["restart", "restart"] and resolver.error is None
 
 
 def test_resolver_address_is_bound_to_lo_by_the_reconciler(tmp_path: Path) -> None:

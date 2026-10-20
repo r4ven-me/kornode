@@ -33,10 +33,15 @@ def _supervisorctl(action: str) -> bool:
             timeout=30,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("supervisorctl %s dnsmasq: %s", action, type(exc).__name__)
         return False
+    output = result.stdout + result.stderr
     # `stop` of a stopped program reports "not running" with a non-zero code.
-    return result.returncode == 0 or "not running" in result.stdout
+    if result.returncode == 0 or (action == "stop" and "not running" in output):
+        return True
+    log.warning("supervisorctl %s dnsmasq: %s", action, output.strip()[:200])
+    return False
 
 
 def render(bundle: Bundle) -> str | None:
@@ -83,51 +88,86 @@ def render(bundle: Bundle) -> str | None:
     return "\n".join(lines) + "\n"
 
 
+_UNSET = object()
+
+
 class NodeResolver:
+    """Converges dnsmasq to the active bundle off the activation path.
+
+    `submit` only records the desired configuration; a worker thread applies
+    it and retries failed supervisor calls, so a slow or broken supervisor
+    never delays a bundle switch and a failure is not final.
+    """
+
     def __init__(
         self,
         root: Path,
         *,
         control: Callable[[str], bool] = _supervisorctl,
+        retry_seconds: float = 15.0,
     ) -> None:
         self.path = root / "run" / "dnsmasq.conf"
         self.control = control
+        self.retry_seconds = retry_seconds
         self._lock = threading.Lock()
-        # The first apply of a process always (re)starts dnsmasq: after an
-        # agent or container restart the program is not running yet.
-        self._started = False
+        self._wake = threading.Event()
+        self._desired: str | None = None
+        # Nothing is applied in a new process: the first configuration always
+        # (re)starts or stops dnsmasq, whatever the file on disk says.
+        self._applied: object = _UNSET
+        self._worker: threading.Thread | None = None
         self.error: str | None = None
 
-    def apply(self, bundle: Bundle | None) -> None:
-        """Converge dnsmasq to the bundle; failures are logged and kept in
-        `error`, never raised: a resolver must not roll back the data plane."""
+    def submit(self, bundle: Bundle | None) -> None:
         content = render(bundle) if bundle is not None else None
         with self._lock:
+            self._desired = content
+            if self._worker is None:
+                self._worker = threading.Thread(
+                    target=self._run, name="node-resolver", daemon=True
+                )
+                self._worker.start()
+        self._wake.set()
+
+    def _run(self) -> None:
+        while True:
+            self._wake.clear()
+            with self._lock:
+                desired = self._desired
+            if not self.apply_content(desired):
+                self._wake.wait(self.retry_seconds)
+                continue
+            with self._lock:
+                if self._desired == desired:
+                    self._worker = None
+                    return
+
+    def apply(self, bundle: Bundle | None) -> bool:
+        return self.apply_content(render(bundle) if bundle is not None else None)
+
+    def apply_content(self, content: str | None) -> bool:
+        """One synchronous attempt; True when dnsmasq matches `content`.
+        Failures are kept in `error` (a doctor finding), never raised: the
+        resolver must not roll back the data plane."""
+        if content == self._applied:
             self.error = None
-            try:
-                self._apply(content)
-            except OSError as exc:
-                self.error = f"cannot write resolver configuration: {exc.strerror}"
-            if self.error:
-                log.warning("node resolver: %s", self.error)
-
-    def _apply(self, content: str | None) -> None:
-        if content is None:
-            if self.path.exists() or not self._started:
-                self._control("stop")
-                self.path.unlink(missing_ok=True)
-            self._started = True
-            return
+            return True
         try:
-            unchanged = self.path.read_text(encoding="utf-8") == content
-        except FileNotFoundError:
-            unchanged = False
-        if unchanged and self._started:
-            return
-        atomic_write(self.path, content.encode())
-        self._control("restart")
-        self._started = True
-
-    def _control(self, action: str) -> None:
-        if not self.control(action):
+            if content is None:
+                ok, action = self.control("stop"), "stop"
+                if ok:
+                    self.path.unlink(missing_ok=True)
+            else:
+                atomic_write(self.path, content.encode())
+                ok, action = self.control("restart"), "restart"
+        except OSError as exc:
+            self.error = f"cannot write resolver configuration: {exc.strerror}"
+            log.warning("node resolver: %s", self.error)
+            return False
+        if not ok:
             self.error = f"supervisorctl {action} dnsmasq failed"
+            log.warning("node resolver: %s", self.error)
+            return False
+        self._applied = content
+        self.error = None
+        return True

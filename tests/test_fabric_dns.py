@@ -188,6 +188,21 @@ def test_failed_restart_is_reported_as_committed(world: World) -> None:
     assert raised.value.error == "dns_sync_failed"
     assert raised.value.details == {"committed": True, "recovery": "korctl registry maintain"}
     assert len(world.env.registry.dns_records()) == 1
+    # The file already matches, but the failed restart is still retried.
+    world.dns.restart_dnsmasq = world._restart
+    assert world.dns.sync() is True
+    assert world.restarts == 1
+    assert world.dns.sync() is False
+
+
+def test_dangling_cname_elsewhere_does_not_block_unrelated_deletes(world: World) -> None:
+    world.env.add(3)
+    world.dns.add(record(name="box", type="A", value="10.100.3.9", node="node3"))
+    world.dns.add(record(name="cam", type="CNAME", value="box.node3"))
+    world.dns.add(record(name="web", type="A", value="10.100.1.40"))
+    world.env.registry.delete_node(3)  # orphans the hub-wide CNAME
+    world.dns.delete(record(name="web", type="A", value="10.100.1.40"))
+    assert "cname=cam" not in world.conf()
 
 
 def test_node_records_go_with_the_node(world: World) -> None:
@@ -295,3 +310,40 @@ def test_cli_adds_lists_and_deletes(world: World, monkeypatch: pytest.MonkeyPatc
         app, ["dns", "record", "del", "cam", "A", "192.168.3.7", "--node", "node3", "--json"]
     )
     assert deleted.exit_code == 0, deleted.output
+
+
+def test_unsupervised_hub_has_no_resolver_to_restart(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kornode.services.command import CommandResult
+
+    actions: list[str] = []
+
+    def process_action(self: Any, action: str, process: str) -> CommandResult:
+        actions.append(action)
+        return CommandResult(("supervisor-rpc", action, process), 1, "", "no supervisor")
+
+    monkeypatch.setattr("kornode.services.server.ServerService.process_action", process_action)
+    service = FabricDnsService(world.env.config, agents=world.agents)
+    service.add(record(name="web", type="A", value="10.100.1.40"))
+    assert actions == ["status"]
+    assert "web.kornode.internal" in world.conf()
+
+
+def test_supervised_restart_failure_is_reported(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kornode.services.command import CommandResult
+
+    def process_action(self: Any, action: str, process: str) -> CommandResult:
+        return CommandResult(("supervisor-rpc", action, process), 0 if action == "status" else 1)
+
+    monkeypatch.setattr("kornode.services.server.ServerService.process_action", process_action)
+    monkeypatch.setattr(
+        "kornode.services.internal_dns.InternalDnsService.ensure_listen_address",
+        lambda self: None,
+    )
+    service = FabricDnsService(world.env.config, agents=world.agents)
+    with pytest.raises(ManagementError) as raised:
+        service.add(record(name="web", type="A", value="10.100.1.40"))
+    assert raised.value.error == "dns_sync_failed"

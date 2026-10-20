@@ -171,6 +171,29 @@ try:
 except OSError:
  print(json.dumps({"ok":False}))
 """
+# One A query to the agent's resolver (stdlib only; the agent image has no dig).
+RESOLVE = """import json,random,socket,struct,sys
+o=json.load(sys.stdin)
+q=random.randrange(65536)
+n=b"".join(bytes([len(p)])+p.encode() for p in o["name"].split("."))+b"\\0"
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+s.settimeout(3)
+try:
+ s.sendto(struct.pack("!6H",q,256,1,0,0,0)+n+struct.pack("!2H",1,1),(o["server"],53))
+ d=s.recv(4096)
+except OSError:
+ print(json.dumps({"address":None,"rcode":None}));sys.exit()
+i,f,qd,an,_,_=struct.unpack("!6H",d[:12])
+p=12+len(n)+4
+a=None
+for _ in range(an if i==q else 0):
+ while d[p]&192!=192 and d[p]:p+=d[p]+1
+ p+=2 if d[p]&192==192 else 1
+ t,c,_,l=struct.unpack("!2HIH",d[p:p+10]);p+=10
+ if t==1 and l==4:a=socket.inet_ntoa(d[p:p+4]);break
+ p+=l
+print(json.dumps({"address":a,"rcode":f&15}))
+"""
 IDENTITY = """import hashlib,json
 from pathlib import Path
 p=Path("/var/lib/kornode-agent")
@@ -604,9 +627,32 @@ class Worker:
         cidr = str(ipaddress.ip_network(self.payload["cidr"]))
         return self.cli("agent", "prefix", "add", self.payload["name"], cidr, "--kind", "lan")
 
-    def fabric_listen(self) -> Any:
+    def dns_record(self) -> Any:
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        name, kind = self.payload["name"], self.payload["type"]
+        if not re.fullmatch(r"[a-z0-9-]{1,63}", name) or kind not in {"A", "AAAA", "CNAME"}:
+            raise ValueError("invalid record")
+        value = str(ipaddress.ip_address(self.payload["value"]))
+        return self.cli("dns", "record", "add", name, kind, value)
+
+    def dns_resolve(self) -> Any:
         if not self.role.startswith("agent-") or self.case != "routed":
             raise ValueError("routed case, agent only")
+        name = self.payload["name"]
+        if not re.fullmatch(r"[a-z0-9.-]{1,253}", name):
+            raise ValueError("invalid name")
+        server = str(ipaddress.ip_address(self.payload["server"]))
+        _, data = self.execute(
+            ["python", "-c", RESOLVE],
+            data=json.dumps({"name": name, "server": server}).encode(),
+            timeout=20,
+        )
+        return json.loads(data)
+
+    def fabric_listen(self) -> Any:
+        if not (self.role == "hub" or self.role.startswith("agent-")) or self.case != "routed":
+            raise ValueError("routed case only")
         seconds = self.payload["seconds"]
         if type(seconds) is not int or not 1 <= seconds <= 120:
             raise ValueError("invalid window")
@@ -928,6 +974,8 @@ class Worker:
             "lan_setup",
             "net_dump",
             "export_prefix",
+            "dns_record",
+            "dns_resolve",
             "fabric_listen",
             "fabric_connect",
             "inject_bundle",
