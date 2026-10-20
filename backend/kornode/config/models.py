@@ -1548,6 +1548,9 @@ class AppConfig(StrictModel):
             reasons.append("local_records_enabled")
         if settings.forward_domains:
             reasons.append("forward_domains")
+        # The hub answers the fabric zone for agents and clients (D-66).
+        if self.fabric.enabled:
+            reasons.append("fabric_dns")
         # routing.split/host_split domains and a profile's own plain
         # domains/host_domains do NOT need dnsmasq any more: they're
         # resolved into their nftables *_dynamic sets by the independent

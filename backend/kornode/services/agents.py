@@ -111,7 +111,7 @@ class AgentService:
         self.enrollment = enrollment or EnrollmentService(
             config, clock=self.clock, reload_ocserv=self._reload_ocserv
         )
-        self.sync = sync or FabricGroupsService(config, reload_ocserv=self._reload_ocserv).sync
+        self.sync = sync or self._sync_hub
         self.password_hasher = password_hasher or self._hash_password
         self.audit = AuditService(config)
 
@@ -159,6 +159,13 @@ class AgentService:
         if node.id == 1:
             raise ManagementError(409, "hub_reserved", "node 1 is the hub, not an agent")
         return node
+
+    def _sync_hub(self) -> None:
+        """ocserv group/user files, then the hub zone (`node<N>` names, D-66)."""
+        from kornode.services.fabric_dns import FabricDnsService
+
+        FabricGroupsService(self.config, reload_ocserv=self._reload_ocserv).sync()
+        FabricDnsService(self.config, agents=self).sync()
 
     def _synced(self) -> None:
         try:

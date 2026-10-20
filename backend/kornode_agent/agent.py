@@ -30,7 +30,8 @@ from kornode_agent import __version__
 from kornode_agent.apply import Applier, Convergence, Outcome
 from kornode_agent.config import AgentConfig, load_config
 from kornode_agent.control import Command, ControlClient, ControlError, HubUnreachable
-from kornode_agent.doctor import run_doctor
+from kornode_agent.dns import NodeResolver
+from kornode_agent.doctor import finding, run_doctor
 from kornode_agent.enroll import load_seal_key
 from kornode_agent.health import AgentHealth
 from kornode_agent.inputs import AgentNetInputs, SystemProbes
@@ -62,12 +63,14 @@ class AgentRuntime:
         reconciler: Reconciler,
         config: AgentConfig,
         root: Path,
+        resolver: NodeResolver | None = None,
     ) -> None:
         self.inputs = inputs
         self.tunnels = tunnels
         self.reconciler = reconciler
         self.config = config
         self.root = root
+        self.resolver = resolver or NodeResolver(root)
 
     def activate(self, validated: Any) -> None:
         # Kill-switches of the exits in use are part of every desired state, so
@@ -75,6 +78,9 @@ class AgentRuntime:
         # tunnel manager converges before each dial).
         self.inputs.set_bundle(validated)
         self.tunnels.set_desired(specs_for(validated, self.config, self.root))
+        # dnsmasq uses bind-dynamic, so it may start before the reconciler
+        # puts the resolver address on lo.
+        self.resolver.apply(validated.bundle if validated is not None else None)
 
     def converge(self) -> Convergence:
         plan = self.reconciler.run_once()
@@ -490,7 +496,13 @@ class Agent:
         return cache_redactor(self.root, known)
 
     def _doctor(self) -> list[dict[str, str]]:
-        return run_doctor(self.inputs, self.root, self.kernel)
+        findings = run_doctor(self.inputs, self.root, self.kernel)
+        error = self.runtime.resolver.error
+        if error:
+            findings.append(
+                finding("resolver_failed", error, "Check the dnsmasq program in supervisorctl.")
+            )
+        return findings
 
     def _doctor_for_report(self, applied: int | None) -> list[dict[str, str]]:
         cached = self._doctor_cache

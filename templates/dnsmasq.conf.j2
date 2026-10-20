@@ -39,6 +39,14 @@ server=/{{ domain }}/{{ dns }}
 {% endfor %}
 {% endfor %}
 
+{% if fabric_zone %}
+# Fabric zone (D-66): answered from local data only, never forwarded.
+local=/{{ fabric_zone.domain }}/
+{% for line in fabric_zone.lines %}
+{{ line }}
+{% endfor %}
+{% endif %}
+
 {% for record in local_records %}
 address=/{{ record.host }}/{{ record.ip }}
 {% endfor %}

@@ -160,11 +160,15 @@ class AgentNetInputs:
                 )
                 node_prefixes[HUB_NODE_ID] = (ipaddress.ip_network(f"{hub_address}/32"),)
         client_pool: ipaddress.IPv4Network | None = None
+        local_addresses: tuple[ipaddress.IPv4Address, ...] = ()
         node_id = self.config.node_id
         if active:
             bundle = active.bundle
             node_id = bundle.node_id
             client_pool = ipaddress.IPv4Network(bundle.node.client_pool, strict=False)
+            if bundle.dns is not None and bundle.dns.enabled:
+                # The node resolver listens on the service address (D-66).
+                local_addresses = (ipaddress.IPv4Address(bundle.node.service_address),)
             for upstream in bundle.tunnels.upstreams:
                 if not upstream.enabled:
                     continue
@@ -195,6 +199,7 @@ class AgentNetInputs:
             fabric_ifaces=(fabric_iface,),
             uplink=self.probes.uplink(tunnel_ifaces),
             all_rp_filter=self.probes.rp_filter(),
+            local_addresses=local_addresses,
         )
 
     def desired(self) -> DesiredState:

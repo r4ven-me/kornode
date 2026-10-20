@@ -63,17 +63,34 @@ default compiled rules: `fabric → fabric via fabric` (agent ↔ agent),
 
 ## DNS
 
-- Zone `<fabric.domain>` (default `kornode.internal`). Hub dnsmasq is
-  authoritative (`auth-zone`/local records) for the whole zone, records from
-  `dns_records` plus generated ones:
-  `node<id>.<domain>` → service address, `hub.<domain>` → `10.100.1.1`.
-- Each agent's dnsmasq (when DNS enabled in its bundle) forwards
-  `<domain>` to `10.100.1.1` (via fabric) and serves its own clients/sources;
-  other queries go to the node's configured upstream resolvers or, if an
-  egress rule routes DNS servers via an upstream, through it (existing
-  behaviour).
-- Records can be managed per node (`korctl dns record add monitoring A
-  10.100.1.20`) with parity in API/panel.
+Zone `<fabric.domain>` (default `kornode.internal`), D-66.
+
+- **Hub.** dnsmasq answers the whole zone from local data only:
+  `local=/<domain>/` plus `host-record` (all A/AAAA of a name on one line) and
+  `cname`; a name the hub does not know is NXDOMAIN, never forwarded. Generated
+  names: `hub.<domain>` and `node1.<domain>` → hub service address
+  (`10.100.1.1`), `node<N>.<domain>` → service address of every registered
+  node. With `fabric.enabled` the hub dnsmasq always runs (`fabric_dns`
+  reason). The hub restarts dnsmasq only when the rendered file changes, after
+  record or agent mutations.
+- **Records** live in `dns_records`, names relative to the domain. Hub-wide:
+  `korctl dns record add monitoring A 10.100.1.20` → `monitoring.<domain>`
+  (`hub`/`node<N>` are reserved as the last label). Per node:
+  `korctl dns record add nas A 192.168.3.10 --node branch` →
+  `nas.node3.<domain>`. A CNAME target must exist in the zone; an agent's CNAME
+  must stay inside its node zone. API: `GET/POST/DELETE /api/dns/records`
+  (`{name, type, value, node}`); panel: Agents → Fabric DNS (Fabric → DNS from
+  P4-07).
+- **Agent.** The bundle `dns` section carries the node's own zone as
+  `local_records` (absolute names) and `forward_zones: [{zone: <domain>,
+  servers: [<hub internal_dns.listen>]}]`. The agent's dnsmasq listens on the
+  node service address `10.100.<id>.1` (bound to `lo` by `kornode.net`,
+  `bind-dynamic`), answers `node<id>.<domain>` locally — also while the hub is
+  down — and forwards the rest of the zone to the hub over the fabric (source =
+  fabric address, no NAT). Other queries go to `upstream_servers` or, without
+  them, to the host's resolvers.
+- Bundle values are validated as plain lower-case host names and IP addresses
+  before they reach a dnsmasq line.
 
 ## Exit via another node
 

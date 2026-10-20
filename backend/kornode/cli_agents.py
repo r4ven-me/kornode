@@ -17,6 +17,7 @@ from kornode.config.models import AppConfig
 from kornode.services.agent_models import AgentCreate, AgentPatch, ManagementError, PrefixInput
 from kornode.services.agents import AgentService, parse
 from kornode.services.control_management import ControlManagement
+from kornode.services.fabric_dns import DnsRecordInput, FabricDnsService
 
 Json = Annotated[bool, typer.Option("--json", help="Machine-readable output")]
 
@@ -432,3 +433,44 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
         agent.add_typer(group, name=name)
     app.add_typer(agent, name="agent")
     app.add_typer(control, name="control")
+    register_dns(app, config)
+
+
+def register_dns(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
+    dns = typer.Typer(help="Fabric DNS zone (fabric.domain)")
+    record = typer.Typer(help="Zone records; --node scopes a name to node<id>.<domain>")
+
+    def service() -> FabricDnsService:
+        return FabricDnsService(config())
+
+    def entry(name: str, type_: str, value: str, node: str | None) -> DnsRecordInput:
+        return parse(
+            DnsRecordInput, {"name": name, "type": type_.upper(), "value": value, "node": node}
+        )
+
+    @record.command("list")
+    def record_list(json: Json = False) -> None:
+        invoke(lambda: service().list(), json)
+
+    @record.command("add")
+    def record_add(
+        name: str,
+        type_: Annotated[str, typer.Argument(metavar="TYPE", help="A, AAAA or CNAME")],
+        value: str,
+        node: Annotated[str | None, typer.Option(help="Agent name; default hub-wide")] = None,
+        json: Json = False,
+    ) -> None:
+        invoke(lambda: service().add(entry(name, type_, value, node)), json)
+
+    @record.command("del")
+    def record_del(
+        name: str,
+        type_: Annotated[str, typer.Argument(metavar="TYPE", help="A, AAAA or CNAME")],
+        value: str,
+        node: Annotated[str | None, typer.Option(help="Agent name; default hub-wide")] = None,
+        json: Json = False,
+    ) -> None:
+        invoke(lambda: service().delete(entry(name, type_, value, node)), json)
+
+    dns.add_typer(record, name="record")
+    app.add_typer(dns, name="dns")

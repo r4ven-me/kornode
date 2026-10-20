@@ -5,6 +5,7 @@ import { AgentActivity } from "./AgentActivity";
 import { AgentPolicy } from "./AgentPolicy";
 import { AccessUserEditor, PrefixEditor, SourceEditor, UpstreamEditor } from "./AgentResources";
 import { AgentSettings } from "./AgentSettings";
+import { FabricDns } from "./FabricDns";
 
 type Section = "settings" | "networks" | "policy" | "upstreams" | "users" | "activity";
 
@@ -124,6 +125,7 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
       <div className="panel-footer"><button className="action-button" type="button" disabled={busy} data-capability="agent.list" onClick={() => void refreshList().catch(reason => setError(String(reason)))}>Refresh agents</button><button className="action-button" type="button" disabled={busy || !control?.fabric_enabled} data-capability="control.rotate_key" onClick={() => void rotate()}>Rotate signing key{dryRun ? " (preview)" : ""}</button></div>
     </section>
     {error && <section className="panel" role="alert">{error}</section>}{message && <p role="status">{message}</p>}
+    {control?.fabric_enabled && <FabricDns token={token} agents={agents} />}
     <section className="panel"><h2>Registered agents</h2>{loading ? <p>Loading agents…</p> : agents.length === 0 ? <p>No agents registered yet.</p> : <ul className="agent-list">{agents.map(a => <li key={a.id}><button className={selected === a.name ? "agent-summary active" : "agent-summary"} type="button" disabled={busy} aria-pressed={selected === a.name} onClick={() => { setSelected(a.name); setSection("settings"); }}><strong>{a.name} · node {a.id}</strong><span>{a.state} · {a.online ? "online" : "offline"}</span><span>desired {a.desired_version} / reported {a.applied_version}</span></button></li>)}</ul>}</section>
     <details className="panel"><summary>Add agent</summary><form onSubmit={e => {
       e.preventDefault();

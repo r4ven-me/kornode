@@ -1045,6 +1045,21 @@ capabilities:
     cli: "agent user del"
     api: "DELETE /api/agents/{name}/users/{username}"
     ui: agent.user.delete
+  - id: dns.record.list
+    service: kornode.services.fabric_dns.FabricDnsService.list
+    cli: "dns record list"
+    api: "GET /api/dns/records"
+    ui: dns.record.list
+  - id: dns.record.add
+    service: kornode.services.fabric_dns.FabricDnsService.add
+    cli: "dns record add"
+    api: "POST /api/dns/records"
+    ui: dns.record.add
+  - id: dns.record.delete
+    service: kornode.services.fabric_dns.FabricDnsService.delete
+    cli: "dns record del"
+    api: "DELETE /api/dns/records"
+    ui: dns.record.delete
   - id: agent.bundle.list
     service: kornode.services.agents.AgentService.bundles_list
     cli: "agent bundle list"

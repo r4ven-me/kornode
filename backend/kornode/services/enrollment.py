@@ -364,6 +364,7 @@ class EnrollmentService:
         """Periodic housekeeping: expired tokens and a CRL ocserv would reject as stale."""
         purged = self.purge_expired()
         self._attempt(self.groups.sync)  # heals a sync that failed after an enroll
+        self._attempt(self._sync_dns)  # heals a hub dnsmasq restart that failed (D-66)
         refreshed = 0
         created = self.certificates.ensure_crl()
         age = self.certificates.crl_age_seconds()
@@ -421,6 +422,11 @@ class EnrollmentService:
         result = self.users.create_enroll_user(username, password)
         if not result.ok:
             raise EnrollmentError(500, "internal", "failed to create the enrollment user")
+
+    def _sync_dns(self) -> None:
+        from kornode.services.fabric_dns import FabricDnsService
+
+        FabricDnsService(self.config).sync()
 
     @staticmethod
     def _attempt(action: Callable[[], object]) -> bool:

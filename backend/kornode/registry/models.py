@@ -38,6 +38,20 @@ class NodePrefix:
     export: bool
 
 
+DnsRecordType = Literal["A", "AAAA", "CNAME"]
+
+
+@dataclass(frozen=True)
+class DnsRecord:
+    """A fabric zone record. `name` and a CNAME `value` are relative to
+    `fabric.domain`; `node_id` is None for hub-wide records (D-66)."""
+
+    name: str
+    type: DnsRecordType
+    value: str
+    node_id: int | None
+
+
 @dataclass(frozen=True)
 class EnrollToken:
     id: str
