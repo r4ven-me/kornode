@@ -27,6 +27,7 @@ from kornode.net.explain import explain
 from kornode.net.kernel import Kernel
 from kornode.net.reconciler import Reconciler, watch_netlink
 from kornode_agent import __version__
+from kornode_agent.access import AccessServer
 from kornode_agent.apply import Applier, Convergence, Outcome
 from kornode_agent.config import AgentConfig, load_config
 from kornode_agent.control import Command, ControlClient, ControlError, HubUnreachable
@@ -64,6 +65,7 @@ class AgentRuntime:
         config: AgentConfig,
         root: Path,
         resolver: NodeResolver | None = None,
+        access: AccessServer | None = None,
     ) -> None:
         self.inputs = inputs
         self.tunnels = tunnels
@@ -71,6 +73,7 @@ class AgentRuntime:
         self.config = config
         self.root = root
         self.resolver = resolver or NodeResolver(root)
+        self.access = access or AccessServer(root)
 
     def activate(self, validated: Any) -> None:
         # Kill-switches of the exits in use are part of every desired state, so
@@ -81,6 +84,10 @@ class AgentRuntime:
         # Asynchronous: the switch never waits for supervisorctl. dnsmasq uses
         # bind-dynamic, so it may start before the reconciler binds its address.
         self.resolver.submit(validated.bundle if validated is not None else None)
+        self.access.submit(
+            validated.bundle if validated is not None else None,
+            validated.secrets if validated is not None else {},
+        )
 
     def converge(self) -> Convergence:
         plan = self.reconciler.run_once()
@@ -501,6 +508,11 @@ class Agent:
         if error:
             findings.append(
                 finding("resolver_failed", error, "Check the dnsmasq program in supervisorctl.")
+            )
+        error = self.runtime.access.error
+        if error:
+            findings.append(
+                finding("access_failed", error, "Check the ocserv program in supervisorctl.")
             )
         return findings
 

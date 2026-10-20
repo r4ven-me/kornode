@@ -234,9 +234,7 @@ class FabricDnsService:
             agents.audit.record(actor="operator", action=action, outcome="success", details={})
         return self.list()
 
-    def _record(
-        self, r: Registry, payload: DnsRecordInput, *, deleting: bool = False
-    ) -> DnsRecord:
+    def _record(self, r: Registry, payload: DnsRecordInput, *, deleting: bool = False) -> DnsRecord:
         domain = self.config.fabric.domain
         name = payload.name
         node_id: int | None = None

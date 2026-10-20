@@ -89,6 +89,9 @@ class NodeFacts:
     service_address: ipaddress.IPv4Address | None = None
     # Further addresses bound to `lo`, e.g. an agent's resolver address (D-66).
     local_addresses: tuple[ipaddress.IPv4Address, ...] = ()
+    # Globs of the agent's own ocserv session devices ("vpns*", role access):
+    # the same strict reverse-path check as the hub's enroll guard (D-47, D-67).
+    access_ifaces: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

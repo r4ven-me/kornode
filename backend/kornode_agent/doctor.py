@@ -98,6 +98,8 @@ def inspect_state(
             if network.version == local.version and network.overlaps(local):
                 if network == local == facts.client_pool:
                     continue  # this node's own access pool is connected by design
+                if network == facts.client_pool and local.prefixlen == local.max_prefixlen:
+                    continue  # per-session host routes of connected access clients (vpns*)
                 # A configured source's own connected subnet is expected.
                 if any(ipaddress.ip_network(s.cidr) == network == local for s in policy.sources):
                     continue

@@ -10,38 +10,11 @@ is part of the desired state of `kornode.net`, never added here.
 
 from __future__ import annotations
 
-import logging
-import subprocess
-import threading
-from collections.abc import Callable
 from pathlib import Path
 
 from kornode.bundle.models import Bundle
+from kornode_agent.programs import UNSET, ControlFn, Converger, supervisorctl
 from kornode_agent.store import atomic_write
-
-log = logging.getLogger("kornode_agent.dns")
-
-SUPERVISORCTL = ("supervisorctl", "-c", "/etc/supervisor/conf.d/kornode-agent.conf")
-
-
-def _supervisorctl(action: str) -> bool:
-    try:
-        result = subprocess.run(
-            [*SUPERVISORCTL, action, "dnsmasq"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        log.warning("supervisorctl %s dnsmasq: %s", action, type(exc).__name__)
-        return False
-    output = result.stdout + result.stderr
-    # `stop` of a stopped program reports "not running" with a non-zero code.
-    if result.returncode == 0 or (action == "stop" and "not running" in output):
-        return True
-    log.warning("supervisorctl %s dnsmasq: %s", action, output.strip()[:200])
-    return False
 
 
 def render(bundle: Bundle) -> str | None:
@@ -93,86 +66,46 @@ def render(bundle: Bundle) -> str | None:
     return "\n".join(lines) + "\n"
 
 
-_UNSET = object()
-
-
-class NodeResolver:
-    """Converges dnsmasq to the active bundle off the activation path.
-
-    `submit` only records the desired configuration; a worker thread applies
-    it and retries failed supervisor calls, so a slow or broken supervisor
-    never delays a bundle switch and a failure is not final.
-    """
+class NodeResolver(Converger[str]):
+    """Converges dnsmasq to the active bundle off the activation path."""
 
     def __init__(
         self,
         root: Path,
         *,
-        control: Callable[[str], bool] = _supervisorctl,
+        control: ControlFn = lambda action: supervisorctl("dnsmasq", action),
         retry_seconds: float = 15.0,
     ) -> None:
+        super().__init__(retry_seconds)
         self.path = root / "run" / "dnsmasq.conf"
         self.control = control
-        self.retry_seconds = retry_seconds
-        self._lock = threading.Lock()
-        self._wake = threading.Event()
-        self._desired: str | None = None
         # Nothing is applied in a new process: the first configuration always
         # (re)starts or stops dnsmasq, whatever the file on disk says.
-        self._applied: object = _UNSET
-        self._worker: threading.Thread | None = None
-        self.error: str | None = None
+        self._applied: object = UNSET
 
     def submit(self, bundle: Bundle | None) -> None:
-        content = render(bundle) if bundle is not None else None
-        with self._lock:
-            self._desired = content
-            if self._worker is None:
-                self._worker = threading.Thread(
-                    target=self._run, name="node-resolver", daemon=True
-                )
-                self._worker.start()
-        self._wake.set()
-
-    def _run(self) -> None:
-        while True:
-            self._wake.clear()
-            with self._lock:
-                desired = self._desired
-            if not self.apply_content(desired):
-                self._wake.wait(self.retry_seconds)
-                continue
-            with self._lock:
-                if self._desired == desired:
-                    self._worker = None
-                    return
+        self.submit_content(render(bundle) if bundle is not None else None)
 
     def apply(self, bundle: Bundle | None) -> bool:
         return self.apply_content(render(bundle) if bundle is not None else None)
 
-    def apply_content(self, content: str | None) -> bool:
-        """One synchronous attempt; True when dnsmasq matches `content`.
-        Failures are kept in `error` (a doctor finding), never raised: the
-        resolver must not roll back the data plane."""
-        if content == self._applied:
+    def apply_content(self, desired: str | None) -> bool:
+        """One synchronous attempt; True when dnsmasq matches `desired`."""
+        if desired == self._applied:
             self.error = None
             return True
         try:
-            if content is None:
+            if desired is None:
                 ok, action = self.control("stop"), "stop"
                 if ok:
                     self.path.unlink(missing_ok=True)
             else:
-                atomic_write(self.path, content.encode())
+                atomic_write(self.path, desired.encode())
                 ok, action = self.control("restart"), "restart"
         except OSError as exc:
-            self.error = f"cannot write resolver configuration: {exc.strerror}"
-            log.warning("node resolver: %s", self.error)
-            return False
+            return self.failed(f"cannot write resolver configuration: {exc.strerror}")
         if not ok:
-            self.error = f"supervisorctl {action} dnsmasq failed"
-            log.warning("node resolver: %s", self.error)
-            return False
-        self._applied = content
+            return self.failed(f"supervisorctl {action} dnsmasq failed")
+        self._applied = desired
         self.error = None
         return True

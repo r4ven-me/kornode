@@ -20,6 +20,7 @@ from kornode.bundle.validator import Validated
 from kornode.net.compile import NodeFacts, SourceFact, TunnelFact, compile_policy
 from kornode.net.model import EgressPolicy, Rule
 from kornode.net.state import DesiredState
+from kornode_agent.access import DEVICE as ACCESS_DEVICE
 from kornode_agent.config import AgentConfig
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -161,6 +162,7 @@ class AgentNetInputs:
                 node_prefixes[HUB_NODE_ID] = (ipaddress.ip_network(f"{hub_address}/32"),)
         client_pool: ipaddress.IPv4Network | None = None
         local_addresses: tuple[ipaddress.IPv4Address, ...] = ()
+        access_ifaces: tuple[str, ...] = ()
         node_id = self.config.node_id
         if active:
             bundle = active.bundle
@@ -169,6 +171,8 @@ class AgentNetInputs:
             if bundle.dns is not None and bundle.dns.enabled:
                 # The node resolver listens on the service address (D-66).
                 local_addresses = (ipaddress.IPv4Address(bundle.node.service_address),)
+            if bundle.access is not None and "access" in bundle.node.roles:
+                access_ifaces = (f"{ACCESS_DEVICE}*",)
             for upstream in bundle.tunnels.upstreams:
                 if not upstream.enabled:
                     continue
@@ -200,6 +204,7 @@ class AgentNetInputs:
             uplink=self.probes.uplink(tunnel_ifaces),
             all_rp_filter=self.probes.rp_filter(),
             local_addresses=local_addresses,
+            access_ifaces=access_ifaces,
         )
 
     def desired(self) -> DesiredState:

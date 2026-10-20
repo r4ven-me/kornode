@@ -111,6 +111,24 @@ def _ifname_glob(value: str) -> str:
     return value
 
 
+def _session_rpf(facts: NodeFacts) -> list[str]:
+    """Strict reverse path for ocserv sessions: a session may only use a
+    source address routed back through its own device (D-47)."""
+    globs = [facts.enroll.session_iface] if facts.enroll is not None else []
+    globs += [item for item in facts.access_ifaces if item not in globs]
+    if not globs:
+        return []
+    lines = [
+        "    # strict reverse path for ocserv sessions: a session may only use a "
+        "source address routed back through its own device (D-47)"
+    ]
+    lines += [
+        f'    iifname "{_ifname_glob(item)}" meta nfproto ipv4 fib saddr . iif oif missing drop'
+        for item in globs
+    ]
+    return lines
+
+
 def render_script(
     *,
     exits: tuple[Exit, ...],
@@ -135,16 +153,7 @@ def render_script(
     lines += [
         "  chain prerouting {",
         "    type filter hook prerouting priority mangle; policy accept;",
-        *(
-            [
-                "    # strict reverse path for ocserv sessions: a session may only use a "
-                "source address routed back through its own device (D-47)",
-                f'    iifname "{_ifname_glob(facts.enroll.session_iface)}" meta nfproto ipv4 '
-                "fib saddr . iif oif missing drop",
-            ]
-            if facts.enroll is not None
-            else []
-        ),
+        *_session_rpf(facts),
         f"    {OWN_MARKS} meta mark set ct mark return",
         "    jump egress_classify",
         "  }",

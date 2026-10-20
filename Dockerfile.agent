@@ -9,11 +9,11 @@ ENV PYTHONUNBUFFERED=1 \
 # openconnect/nftables/iproute2 are the data plane; vpnc-scripts is used by the
 # short-lived enroll session; iputils-ping backs the upstream check_host probe;
 # dnsmasq-base is the node resolver (P4-03, no Debian service/unit files).
-# ocserv (role access) arrives with P4-04.
+# ocserv is the access server of role access (P4-04).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates dnsmasq-base iproute2 iputils-ping nftables openconnect supervisor \
-        vpnc-scripts \
+        ca-certificates dnsmasq-base iproute2 iputils-ping nftables ocserv openconnect \
+        supervisor vpnc-scripts \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/kornode

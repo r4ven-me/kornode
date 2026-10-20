@@ -571,9 +571,7 @@ class Registry:
                 value=str(row["value"]),
                 node_id=None if row["node_id"] is None else int(row["node_id"]),
             )
-            for row in self.conn.execute(
-                "SELECT * FROM dns_records ORDER BY name, type, value"
-            )
+            for row in self.conn.execute("SELECT * FROM dns_records ORDER BY name, type, value")
         ]
 
     def add_dns_record(self, record: DnsRecord) -> None:
