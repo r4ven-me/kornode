@@ -318,14 +318,19 @@ class Cluster:
         source: str | None = None,
         seconds: int = 120,
         client: bool = False,
+        listener_client: bool = False,
     ) -> str:
         """Open a TCP connection `connector` -> host:9100 where `listener` accepts it;
-        return the peer address the listener saw (NAT would change it)."""
+        return the peer address the listener saw (NAT would change it). `client` /
+        `listener_client` run the connecting / listening side in the throwaway client
+        container of agent-b instead of its node container."""
         result: dict[str, Any] = {}
 
         def listen() -> None:
             try:
-                result["peer"] = self.call(listener, "fabric_listen", seconds=seconds)["peer"]
+                result["peer"] = self.call(
+                    listener, "fabric_listen", seconds=seconds, client=listener_client
+                )["peer"]
             except E2EError as exc:
                 result["error"] = exc
 

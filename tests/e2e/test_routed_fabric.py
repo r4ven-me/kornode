@@ -14,8 +14,8 @@ pytestmark = pytest.mark.e2e
 
 BLOCKED = {
     "E2E-07": "P4 access/exit, source routing and domain resolution are not implemented",
-    "NL-05": "P4 attached wg-easy source and fail-closed packet capture",
-    "NL-06": "P4 source-prefix export to hub monitoring",
+    "NL-05": "source client through upstream:office needs a source client and the ext upstream "
+    "in one case (kill switch itself: client netlab suite); wg-easy image/kernel module absent",
     "NL-07": "P4 local delivery with the new egress model",
     "NL-08": "VM client leak capture requires the P4 client data path",
     "NL-09": "VM client loss/MTU transfer requires the P4 client data path",
@@ -187,3 +187,43 @@ def test_nl_03_access_client_of_an_agent_reaches_the_fabric_and_leaves_through_t
         )
     finally:
         cluster.call("agent-b", "access_client_stop")
+
+
+SOURCE_CLIENT = "10.8.3.20"
+
+
+@pytest.mark.e2e_case("routed")
+def test_nl_06_source_prefix_is_exported_and_reachable_in_both_directions_without_nat(
+    cluster: Cluster,
+) -> None:
+    """A client behind a source of agent-b (a docker network standing in for the wg-easy
+    interface): its subnet is exported into the fabric, it reaches the hub, and the hub
+    and agent-a reach it, all with real addresses (no NAT inside the fabric)."""
+    # The source network of agent-b is 10.8.<node id>.0/24 with node id 3 (second enrolled agent).
+    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), (
+        "agent-b is not node 3"
+    )
+    interface = cluster.call("agent-b", "source_iface")["interface"]
+    before = {role: cluster.status(role)["applied_version"] for role in ("agent-a", "agent-b")}
+    cluster.call("hub", "source_add", interface=interface)
+    for role in ("agent-a", "agent-b"):
+
+        def applied(role: str = role) -> bool:
+            return bool(cluster.status(role)["applied_version"] > before[role])
+
+        wait_for(applied, 60, f"{role} did not apply the bundle with the source")
+    cluster.call("agent-b", "client_route", routes=["10.99.0.0/24"])
+    agent_a = cluster.call("agent-a", "fabric_address")["address"]
+
+    # Source client -> hub: forwarded by agent-b as class `source`, no NAT.
+    assert cluster.tcp_peer("hub", "agent-b", HUB_FABRIC_ADDRESS, client=True) == SOURCE_CLIENT
+    # Hub -> source client: the exported prefix is routed through agent-b's session.
+    assert (
+        cluster.tcp_peer("agent-b", "hub", SOURCE_CLIENT, listener_client=True)
+        == HUB_FABRIC_ADDRESS
+    )
+    # agent-a -> source client: the prefix reached its bundle (host traffic, fabric address).
+    assert (
+        cluster.tcp_peer("agent-b", "agent-a", SOURCE_CLIENT, source=agent_a, listener_client=True)
+        == agent_a
+    )

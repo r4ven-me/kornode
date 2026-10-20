@@ -1,14 +1,19 @@
 # Prompt for the next session — слияние PR #1, P4-04…P4-07, E2E через GitHub Actions
 
-> **Состояние на 2026-10-20 (конец третьей сессии).** В `main` влиты PR #1 (P2…P4-02) и PR #2 (P4-03, DNS фабрики,
-> D-66). **P4-04** (роль `access`, D-67) сделан на ветке `redesign/p4-04-access-role` (от `main`), PR — см. `gh pr list`.
-> Локально: `make check` 1182 passed / 74 skipped, `make parity` 4 passed, frontend 33 passed. netlab на hub-VM:
-> 52 passed. E2E case `routed` на четырёх VM: NL-01, NL-02, NL-03, NL-04 — 4 passed (один раз NL-04 упал в полном
-> прогоне — «no connection agent-a → LAN agent-b», дамп маршрутов хаба и агентов был полным; в одиночку и в повторном
-> полном прогоне проходит, причина не найдена: если повторится, смотреть `net_dump` и `audit.jsonl` хаба); E2E-06 (обновление) —
-> passed (образы P4-02 из локального реестра на hub-VM); E2E-04 в цикле из 5 прогонов — 5 passed (плавающий сбой
-> не воспроизведён, расследование остановлено). **Не сделано:** P4-05…P4-07, прогон `e2e.yml` на GitHub Actions
-> (раннер и окружение настроены, см. ниже, сам workflow ещё не запускался).
+> **Состояние на 2026-10-20 (конец третьей сессии).** В `main` влиты PR #1 (P2…P4-02), PR #2 (P4-03, D-66), PR #3
+> (P4-04, D-67, влит локальным merge-коммитом: `gh` не работает, см. память `gh-keyring-blocks-cli`) и **P4-05**
+> (источники агентов, D-68; тоже локальным слиянием, PR-объекта нет). Локально: `make check` 1195 passed / 74 skipped,
+> `make parity` 4 passed, frontend 33 passed. netlab на hub-VM: 52 passed. E2E case `routed` на четырёх VM:
+> NL-01, NL-02, NL-03, NL-04, NL-06 — passed (NL-04 один раз упал в полном прогоне, дамп маршрутов был полным; в
+> одиночку и в повторном прогоне проходит, причина не найдена); E2E-06 — passed; E2E-04 — 5 из 5. **Не сделано:**
+> P4-06 (выход через узел + источники/egress хаба), P4-07 (панель/CLI/API фабрики), NL-05, прогон `e2e.yml`.
+>
+> **Важно для продолжения:** (1) хост перезагружался — VM `debian13-kornode1..4` были выключены, запущены
+> `virsh -c qemu:///system start`; hub-VM `192.168.122.123`, registry-контейнер и раннер поднялись сами; (2) токен `gh`
+> в gnome-keyring и недоступен, пока keyring заблокирован: PR и `gh workflow run` невозможны, пока владелец не
+> разблокирует (`gh auth status` должен снова печатать); (3) на hub-VM нужно ≥8 ГиБ свободного места
+> (`docker builder prune -af`), а сборку образов лучше прогреть вручную (`docker build --builder default ...`),
+> иначе harness падает «local image command failed».
 >
 > **GitHub (настроено в третьей сессии по разрешению владельца):** окружение `kornode-e2e` (required reviewer —
 > владелец, только protected-ветки), секреты окружения `E2E_SSH_KEY`/`E2E_SSH_KNOWN_HOSTS` (отдельный ключ из
@@ -64,7 +69,8 @@
   на `vpns*` (`NodeFacts.access_ifaces`). E2E-ловушки: контейнеры агентов E2E **не в host-сети** (порт 8443
   публикуется у agent-a, 9100 — у хаба в кейсе `routed`); VPN-клиент agent-b живёт в отдельном compose-сервисе
   `client`, иначе его внешний TLS попадает под политику `kornode.net` агента-b.
-- Остаётся 8 skip в `tests/e2e/test_routed_fabric.py`: E2E-07, NL-05…NL-09, NL-13-forwarding,
+- **P4-05** (D-68, источники агентов): doctor `foreign_nat_on_source` (nft + legacy iptables, читается только при уже загруженной таблице `nat`), один `missing_source`, `docs/sources.md`, E2E NL-06 (docker-сеть `source` 10.8.3.0/24 между контейнерами `node` и `client` agent-b: клиент ↔ хаб ↔ agent-a без NAT). Источники хаба и NL-05 не сделаны.
+- Остаётся 7 skip в `tests/e2e/test_routed_fabric.py`: E2E-07, NL-05, NL-07…NL-09, NL-13-forwarding,
   E2E-06-clients (причины — в самом файле).
 
 ## Окружение
@@ -93,7 +99,7 @@
 ## Что делать дальше (по порядку)
 1. **PR #1** ждёт ревью владельца. Он большой (≈90 коммитов; промежуточные коммиты по отдельности не
    проверялись зелёными — зелёный только HEAD). Без слияния новые PR строить не на чем.
-2. **P4-05 … P4-07** (`ROADMAP.md`, `docs/spec/07-fabric.md`; P4-03 и P4-04 сделаны): источники
+2. **P4-06 … P4-07** (`ROADMAP.md`, `docs/spec/07-fabric.md`; P4-03…P4-05 сделаны): источники хаба (их отложили сюда в D-68: у хаба нет модели egress),
    (wg-easy/Amnezia), `via: exit:<node>`, панель/CLI/API фабрики. Каждая задача: spec → тесты → код →
    docs → `make check` → netlab → (E2E там, где задача трогает data plane); `parity.yaml` обновляется в той же
    задаче. Каждому E2E-кейсу из списка skip нужен реальный сценарий, не заглушка.
