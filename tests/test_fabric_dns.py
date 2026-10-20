@@ -347,3 +347,17 @@ def test_supervised_restart_failure_is_reported(
     with pytest.raises(ManagementError) as raised:
         service.add(record(name="web", type="A", value="10.100.1.40"))
     assert raised.value.error == "dns_sync_failed"
+
+
+def test_bundle_node_addresses_must_be_ipv4() -> None:
+    from kornode.bundle.models import NodeInfo
+
+    base = {"name": "n", "roles": [], "client_pool": "10.100.3.0/24"}
+    with pytest.raises(ValidationError):
+        NodeInfo.model_validate(
+            {**base, "fabric_address": "10.99.0.3\nserver=1.1.1.1", "service_address": "10.100.3.1"}
+        )
+    with pytest.raises(ValidationError):
+        NodeInfo.model_validate(
+            {**base, "fabric_address": "10.99.0.3", "service_address": "fd00::1"}
+        )

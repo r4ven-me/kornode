@@ -86,8 +86,10 @@ Zone `<fabric.domain>` (default `kornode.internal`), D-66.
   servers: [<hub internal_dns.listen>]}]`. The agent's dnsmasq listens on the
   node service address `10.100.<id>.1` (bound to `lo` by `kornode.net`,
   `bind-dynamic`), answers `node<id>.<domain>` locally — also while the hub is
-  down — and forwards the rest of the zone to the hub over the fabric (source =
-  fabric address, no NAT). Other queries go to `upstream_servers` or, without
+  down — and forwards the rest of the zone to the hub over the fabric
+  (`server=/<zone>/<hub>@<fabric_address>`: the source is the fabric address,
+  otherwise the unmarked route lookup picks the uplink address and the hub
+  drops the query by strict RPF; no NAT). Other queries go to `upstream_servers` or, without
   them, to the host's resolvers.
 - Bundle values are validated as plain lower-case host names and IP addresses
   before they reach a dnsmasq line.

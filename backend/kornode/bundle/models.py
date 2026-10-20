@@ -55,6 +55,12 @@ class NodeInfo(_Model):
     source_range: StrictStr | None = None
     uplink_hint: StrictStr | None = None
 
+    # Both end up in the node resolver's configuration (D-66).
+    @field_validator("fabric_address", "service_address")
+    @classmethod
+    def _ipv4(cls, value: str) -> str:
+        return str(ipaddress.IPv4Address(value))
+
     @field_validator("roles")
     @classmethod
     def _unique_roles(cls, value: tuple[str, ...]) -> tuple[str, ...]:

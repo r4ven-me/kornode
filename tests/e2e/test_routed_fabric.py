@@ -6,6 +6,7 @@ throughput, no-NAT routed prefixes or wg-easy access/exit runtime.
 
 import pytest
 from tests.e2e.fleet import Cluster, wait_for
+from tests.e2e.inventory import E2EError
 
 pytestmark = pytest.mark.e2e
 
@@ -28,6 +29,7 @@ def test_pending_runtime_contract(scenario: str, reason: str) -> None:
 
 
 HUB_FABRIC_ADDRESS = "10.99.0.1"
+HUB_RESOLVER = "10.100.1.1"
 AGENT_B_LAN = "192.168.30.0/24"
 AGENT_B_LAN_HOST = "192.168.30.1"
 
@@ -82,11 +84,21 @@ def test_nl_02_agent_reaches_hub_monitoring_by_fabric_name(cluster: Cluster) -> 
         return bool(answer["address"] == expected)
 
     wait_for(lambda: resolves(node, resolver), 60, f"agent-a resolver does not answer {node}")
-    wait_for(
-        lambda: resolves("monitoring.kornode.internal", HUB_FABRIC_ADDRESS),
-        60,
-        "monitoring.kornode.internal is not resolved through the hub",
-    )
+    try:
+        wait_for(
+            lambda: resolves("monitoring.kornode.internal", HUB_FABRIC_ADDRESS),
+            60,
+            "monitoring.kornode.internal is not resolved through the hub",
+        )
+    except E2EError as exc:
+        name = "monitoring.kornode.internal"
+        probes = {
+            "agent->agent": cluster.call("agent-a", "dns_resolve", name=name, server=resolver),
+            "agent->hub": cluster.call("agent-a", "dns_resolve", name=name, server=HUB_RESOLVER),
+            "hub->hub": cluster.call("hub", "dns_resolve", name=name, server=HUB_RESOLVER),
+            "hub-node": cluster.call("hub", "dns_resolve", name=node, server=HUB_RESOLVER),
+        }
+        raise E2EError(f"{exc}: {probes}; agent-a {cluster.call('agent-a', 'net_dump')}") from None
 
     peer = cluster.tcp_peer("hub", "agent-a", HUB_FABRIC_ADDRESS, source=source)
 

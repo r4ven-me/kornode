@@ -36,8 +36,9 @@ def test_render_answers_own_zone_and_forwards_the_fabric_zone(tmp_path: Path) ->
     assert "local=/node3.kornode.internal/" in lines
     assert "host-record=node3.kornode.internal,10.100.3.1" in lines
     assert "host-record=nas.node3.kornode.internal,192.168.3.10" in lines
-    assert "server=/kornode.internal/10.100.1.1" in lines
-    assert "server=/corp.example.com/10.60.0.53" in lines
+    # Over the fabric with the fabric address as source (strict RPF on the hub).
+    assert "server=/kornode.internal/10.100.1.1@10.99.0.3" in lines
+    assert "server=/corp.example.com/10.60.0.53@10.99.0.3" in lines
     plain = [
         line
         for line in lines

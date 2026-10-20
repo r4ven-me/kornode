@@ -6,6 +6,7 @@
 
 - Fabric DNS: the hub answers the whole `<fabric.domain>` zone (`hub`, `node<N>` and registry records) from local data; each agent runs dnsmasq on its service address, answers its own `node<id>.<domain>` zone (also with the hub down) and forwards the rest of the zone to the hub over the fabric.
 - `korctl dns record add/del/list`, `GET/POST/DELETE /api/dns/records`, panel Agents → Fabric DNS (parity).
+- Agent dnsmasq forwards the fabric zone with the node's fabric address as source (strict RPF on the hub); netlab `test_p4_dns` and E2E NL-02 (four VMs) cover it.
 - Bundle `dns` section (own zone records, forward zone); strict validation of DNS names and addresses in bundles; agent image ships `dnsmasq-base` and a supervisor control socket.
 
 ### Fixed (review LOW findings, D-64)

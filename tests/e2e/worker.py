@@ -637,8 +637,8 @@ class Worker:
         return self.cli("dns", "record", "add", name, kind, value)
 
     def dns_resolve(self) -> Any:
-        if not self.role.startswith("agent-") or self.case != "routed":
-            raise ValueError("routed case, agent only")
+        if not (self.role == "hub" or self.role.startswith("agent-")) or self.case != "routed":
+            raise ValueError("routed case only")
         name = self.payload["name"]
         if not re.fullmatch(r"[a-z0-9.-]{1,253}", name):
             raise ValueError("invalid name")

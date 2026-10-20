@@ -70,8 +70,13 @@ def render(bundle: Bundle) -> str | None:
     if upstreams:
         lines.append("no-resolv")
         lines.extend(f"server={server}" for server in upstreams)
+    # Forwarded zones are reached over the fabric: the query must leave with
+    # the node's fabric address, as host traffic of an agent always does (the
+    # hub drops anything else by strict RPF, D-47). An unmarked route lookup
+    # would otherwise pick the uplink address.
+    source = bundle.node.fabric_address
     for forward in dns.forward_zones or ():
-        lines.extend(f"server=/{forward.zone}/{server}" for server in forward.servers)
+        lines.extend(f"server=/{forward.zone}/{server}@{source}" for server in forward.servers)
     # More specific than the forwarded fabric zone: the node's own names are
     # answered locally and never leave the node.
     lines.append(f"local=/{zone}/")

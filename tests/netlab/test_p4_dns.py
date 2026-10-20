@@ -36,6 +36,11 @@ class DnsLab:
     hub_conf: Path
     agent_conf: Path
     processes: dict[str, subprocess.Popen[bytes]]
+    agent_link: str
+
+    def fabric_up(self) -> None:
+        self.agent.run(["ip", "addr", "add", "10.99.0.3/24", "dev", self.agent_link])
+        self.agent.run(["ip", "route", "add", "10.100.1.0/24", "via", "10.99.0.1"])
 
     def start(self, which: str) -> None:
         ns, conf = (self.hub, self.hub_conf) if which == "hub" else (self.agent, self.agent_conf)
@@ -96,11 +101,12 @@ def dns_lab(lab: Lab, tmp_path: Path) -> Iterator[DnsLab]:
 
     hub = lab.add_namespace("hub")
     agent = lab.add_namespace("agent")
-    lab.add_veth(hub, agent, addr_a="10.99.0.1/24", addr_b="10.99.0.3/24")
+    # The agent side of the "fabric" gets its address in the test: the
+    # resolver must cope with a source address that appears later.
+    lab.add_veth(hub, agent, addr_a="10.99.0.1/24")
     hub.run(["ip", "addr", "add", f"{HUB_RESOLVER}/32", "dev", "lo"])
     hub.run(["ip", "route", "add", "10.100.3.0/24", "via", "10.99.0.3"])
-    agent.run(["ip", "route", "add", "10.100.1.0/24", "via", "10.99.0.1"])
-    handle = DnsLab(hub, agent, hub_conf, agent_conf, {})
+    handle = DnsLab(hub, agent, hub_conf, agent_conf, {}, lab.veths[-1][1])
     try:
         yield handle
     finally:
@@ -111,11 +117,13 @@ def dns_lab(lab: Lab, tmp_path: Path) -> Iterator[DnsLab]:
 
 def test_agent_resolves_own_zone_locally_and_the_rest_through_the_hub(dns_lab: DnsLab) -> None:
     dns_lab.start("hub")
-    # bind-dynamic: the agent's resolver starts before its address exists, as
-    # when the agent starts dnsmasq before the reconciler binds it to lo.
+    # The agent's resolver starts before its listen address (bind-dynamic) and
+    # its forwarding source, the fabric address, exist: as at boot, before the
+    # reconciler binds lo and before the fabric session is up.
     dns_lab.start("agent")
     time.sleep(0.5)
     dns_lab.agent.run(["ip", "addr", "add", f"{AGENT_RESOLVER}/32", "dev", "lo"])
+    dns_lab.fabric_up()
 
     agent = dns_lab.agent
     assert _resolve(agent, "node3.kornode.internal", AGENT_RESOLVER) == AGENT_RESOLVER
@@ -129,6 +137,7 @@ def test_agent_resolves_own_zone_locally_and_the_rest_through_the_hub(dns_lab: D
 
 def test_agent_zone_keeps_resolving_with_the_hub_resolver_down(dns_lab: DnsLab) -> None:
     dns_lab.agent.run(["ip", "addr", "add", f"{AGENT_RESOLVER}/32", "dev", "lo"])
+    dns_lab.fabric_up()
     dns_lab.start("agent")
     agent = dns_lab.agent
     assert _resolve(agent, "nas.node3.kornode.internal", AGENT_RESOLVER) == "192.168.3.10"

@@ -44,10 +44,13 @@ contracts (P3-07+) and forward-only DB schema. This does not attempt a downgrade
 already-current data: the upgrade scenario starts fresh on previous images.
 
 **P4 blockers stay skipped**, with reasons in `test_routed_fabric.py`, the offline
-plan and summary: E2E-07; NL-02…03, NL-05…09; access-client traffic during upgrade and hub
+plan and summary: E2E-07; NL-03, NL-05…09; access-client traffic during upgrade and hub
 outage. An existing upstream tunnel is not proof of access-client forwarding,
 wg-easy integration, no fabric NAT, domain-based exit selection or no traffic leak.
 No production P4 feature or GUI/AppConfig field is added by test tooling.
+Running (case `routed`): NL-01, NL-04 and NL-02 (fabric DNS: the agent resolves its
+own zone locally and `monitoring.<domain>` through the hub, then connects with its
+fabric address).
 
 ## Safety gates
 
