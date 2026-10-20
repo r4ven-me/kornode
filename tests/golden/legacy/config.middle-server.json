@@ -1,0 +1,33 @@
+{
+  "egress": [
+    {
+      "from": [
+        "clients"
+      ],
+      "id": "clients-split",
+      "to": {
+        "set": "split"
+      },
+      "via": "upstream:private_main"
+    },
+    {
+      "from": [
+        "clients"
+      ],
+      "id": "clients-local",
+      "to": "any",
+      "via": "local"
+    }
+  ],
+  "sets": {
+    "split": {
+      "domains": [
+        "corp.example.com"
+      ],
+      "routes": [
+        "192.168.25.0/24",
+        "10.20.0.0/16"
+      ]
+    }
+  }
+}

@@ -29,6 +29,7 @@ export const emptyState: AppState = {
   configSource: null,
   renderedConfig: {},
   diagnostics: null,
+  doctor: null,
   logFiles: [],
   certificateStatus: null,
   softwareVersions: []
@@ -143,8 +144,10 @@ export const tabs: Array<{ id: Tab; label: string; icon: LucideIcon }> = [
   { id: "dashboard", label: "Dashboard", icon: Activity },
   { id: "config", label: "Config", icon: FileSliders },
   { id: "users", label: "Users", icon: Users },
+  { id: "agents", label: "Agents", icon: Server },
   { id: "groups", label: "Groups", icon: ShieldCheck },
   { id: "sessions", label: "Sessions", icon: Server },
+  { id: "network", label: "Network", icon: Network },
   { id: "diagnostics", label: "Diagnostics", icon: Network },
   { id: "logs", label: "Logs", icon: ScrollText },
   { id: "terminal", label: "Terminal", icon: Terminal }

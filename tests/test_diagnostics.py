@@ -14,4 +14,4 @@ def test_missing_nft_table_warns_when_routing_needs_nftables() -> None:
 
     assert normalized.returncode == 0
     assert "not installed yet" in normalized.stdout
-    assert "run korctl nft apply" in normalized.stdout
+    assert "run korctl net apply" in normalized.stdout

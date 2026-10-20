@@ -18,7 +18,7 @@ export function DashboardView({
   onReloadServer,
   onRestartServer,
   onWriteConfig,
-  onApplyNft,
+  onApplyNet,
   commandOutput,
   onClearCommand
 }: {
@@ -32,7 +32,7 @@ export function DashboardView({
   onReloadServer: () => void;
   onRestartServer: () => void;
   onWriteConfig: () => void;
-  onApplyNft: () => void;
+  onApplyNet: () => void;
   commandOutput: CommandResult | CommandResult[] | null;
   onClearCommand: () => void;
 }) {
@@ -63,8 +63,10 @@ export function DashboardView({
         <Metric label="Config" value={state.configSource?.exists ? "Persistent" : "Default"} />
       </section>
       <ConfigurationPrecedencePanel />
-      <InterfaceLoadPanel name={interfaceName} history={interfaceHistory} />
-      <section className="panel server-control-panel">
+      <div data-capability="diagnostics.interface_stats">
+        <InterfaceLoadPanel name={interfaceName} history={interfaceHistory} />
+      </div>
+      <section className="panel server-control-panel" data-capability="server.status">
         <div className="panel-header">
           <div>
             <h2>Korvus Node</h2>
@@ -85,6 +87,7 @@ export function DashboardView({
                 disabled={serverRunning}
                 busy={busy === "start-server"}
                 onClick={onStartServer}
+                data-capability="server.start"
               />
               <ActionButton
                 label="Stop"
@@ -93,6 +96,7 @@ export function DashboardView({
                 disabled={!serverRunning}
                 busy={busy === "stop-server"}
                 onClick={onStopServer}
+                data-capability="server.stop"
               />
               <ActionButton
                 label="Reload"
@@ -100,6 +104,7 @@ export function DashboardView({
                 disabled={!serverRunning}
                 busy={busy === "reload-server"}
                 onClick={onReloadServer}
+                data-capability="server.reload"
               />
               <ActionButton
                 label="Restart ocserv"
@@ -108,6 +113,7 @@ export function DashboardView({
                 disabled={!serverRunning}
                 busy={busy === "restart-server"}
                 onClick={onRestartServer}
+                data-capability="server.restart"
               />
             </div>
           </section>
@@ -120,13 +126,15 @@ export function DashboardView({
                 title="Write generated Korvus Node, supervisor, dnsmasq and nftables files from YAML"
                 busy={busy === "write-config"}
                 onClick={onWriteConfig}
+                data-capability="config.render"
               />
               <ActionButton
                 label="Apply firewall/NAT"
                 icon={Terminal}
-                title="Apply generated nftables firewall, split-routing and VPN masquerade rules"
-                busy={busy === "apply-nft"}
-                onClick={onApplyNft}
+                title="Apply generated network policy, split-routing and VPN masquerade rules"
+                busy={busy === "apply-net"}
+                onClick={onApplyNet}
+                data-capability="net.apply"
               />
             </div>
           </section>
@@ -136,7 +144,7 @@ export function DashboardView({
       {commandOutput && (
         <LastCommandPanel title="Last command" result={commandOutput} onClose={onClearCommand} />
       )}
-      <section className="panel software-panel">
+      <section className="panel software-panel" data-capability="diagnostics.software">
         <div className="panel-header">
           <h2>Software versions</h2>
           <Pill kind={state.softwareVersions.length > 0 ? "ok" : "muted"}>

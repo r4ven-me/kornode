@@ -16,17 +16,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kornode.config.models import AppConfig, UpstreamProfileConfig
-from kornode.services.cert_pin import fetch_server_pin
 from kornode.services.command import CommandError, CommandResult, CommandRunner
 from kornode.services.files import FileManager
-from kornode.services.nftables import NftablesService
-from kornode.services.policy_routing import PolicyRoutingService
+from kornode.services.net import NetApplyError, NetService
+from kornode.services.netinputs import active_profile_file, carrier_state_dir, selected_profile
 from kornode.services.upstream_pushed import (
     PushedRouting,
     PushedRoutingStore,
     parse_sync_payload,
     parse_vpnc_environment,
 )
+from kornode.tunnels import vpnc_script_source
+from kornode.tunnels.argv import DialSpec
+from kornode.tunnels.argv import config_lines as tunnel_config_lines
+from kornode.tunnels.argv import openconnect_argv as build_openconnect_argv
+from kornode.tunnels.carrier import resolve_carrier_addresses
+from kornode.tunnels.pin import fetch_server_pin
 
 RESOLV_CONF = Path("/etc/resolv.conf")
 VPNC_MARKER = "#@VPNC_GENERATED@"
@@ -41,6 +46,9 @@ SYNC_TIMEOUT_SECONDS = 20
 SYNC_MAX_BYTES = 1024 * 1024
 SYNC_USER_AGENT = "kornode-client-sync/1.0"
 VPNC_CONNECT_REASONS = {"connect", "reconnect"}
+# What a watchdog tick survives: a failed dial, an unknown profile, or a
+# reconciler pass that did not converge (retried on the next tick).
+_RECOVERABLE = (ValueError, CommandError, NetApplyError)
 
 
 @dataclass(frozen=True)
@@ -60,16 +68,14 @@ class UpstreamService:
         config: AppConfig,
         runner: CommandRunner | None = None,
         files: FileManager | None = None,
-        nftables: NftablesService | None = None,
-        policy_routing: PolicyRoutingService | None = None,
+        net: NetService | None = None,
     ) -> None:
         self.config = config
         self.runner = runner or CommandRunner()
         self.files = files or FileManager()
-        self.nftables = nftables or NftablesService(config, runner=self.runner)
-        self.policy_routing = policy_routing or PolicyRoutingService(config, runner=self.runner)
+        self.net = net or NetService(config, runner=self.runner)
         self.pushed = PushedRoutingStore(config, self.files)
-        self.active_profile_file = config.system.generated_dir / "active-upstream"
+        self.active_profile_file = active_profile_file(config)
         self.log_file = config.system.log_dir / "upstream.log"
         self._lock_path = config.system.generated_dir / ".upstream.lock"
         self._lock_fd: int | None = None
@@ -77,18 +83,17 @@ class UpstreamService:
 
     @contextlib.contextmanager
     def _locked(self) -> Iterator[None]:
-        """Serialize every operation that mutates nftables/policy-routing/
-        active-profile state, across processes.
+        """Serialize every operation that mutates the reconciler's inputs
+        (active profile, carrier addresses, tunnels), across processes.
 
         `korctl upstream watch` (the watchdog) runs as its own long-lived
-        process calling ensure_policy_routing()/enforce_profile_enablement()/
+        process calling enforce_profile_enablement()/
         recover() on a timer, fully independent of the FastAPI worker
         process handling switch_profile()/connect()/disconnect() via the
-        admin API or CLI. Without a lock, a manual switch_profile() (a full
-        nftables reload + policy-route apply) can interleave with a
-        concurrent watchdog tick reading a now-stale selected_profile() and
-        re-asserting a route to the OLD interface right after the switch --
-        misrouting marked traffic until the next tick.
+        admin API or CLI. Without a lock, a manual switch_profile() (marker
+        write + reconciler pass) can interleave with a concurrent watchdog
+        tick reading a now-stale selected_profile() and acting on the OLD
+        profile right after the switch.
 
         fcntl.flock on a fixed file serializes this across processes.
         Reentrant *within one instance* via a depth counter and one fd for
@@ -119,60 +124,10 @@ class UpstreamService:
     def list_profiles(self) -> list[UpstreamProfileConfig]:
         return self.config.upstream.profiles
 
-    def _named_target_routing(
-        self,
-    ) -> list[tuple[UpstreamProfileConfig, PolicyRoutingService]]:
-        """Every profile with its own routes/domains assigned, paired with a
-        PolicyRoutingService for its auto-derived fwmark/table (see
-        RoutingService.list_targets()). Independent of which profile is
-        active/selected -- a named target's traffic always follows its own
-        assigned profile. Empty when upstream is disabled: named targets
-        don't exist at all then, same as the rendered nftables rules."""
-        if not self.config.upstream.enabled:
-            return []
-        from kornode.services.routing import RoutingService
-
-        targets_by_name = {
-            target.name: target
-            for target in RoutingService(self.config).list_targets(
-                default_interface=self.config.routing.main_interface
-            )
-            if target.name != "default"
-        }
-        result: list[tuple[UpstreamProfileConfig, PolicyRoutingService]] = []
-        for profile in self.config.upstream.profiles:
-            target = targets_by_name.get(profile.name)
-            if target is None:
-                continue
-            result.append(
-                (
-                    profile,
-                    PolicyRoutingService(
-                        self.config,
-                        runner=self.runner,
-                        fwmark=target.fwmark,
-                        table_id=target.table_id,
-                    ),
-                )
-            )
-        return result
-
     def selected_profile(self) -> UpstreamProfileConfig | None:
         """The runtime-switched active profile (active_profile_file), or
-        the config's default if nothing was switched at runtime.
-
-        A disabled profile is never returned, even if it's still the
-        on-disk marker (e.g. it was switched to, then disabled later) --
-        see UpstreamConfig.selected_profile for why falling through
-        doesn't auto-promote a replacement.
-        """
-        profiles = {profile.name: profile for profile in self.config.upstream.profiles}
-        for line in self.files.read_lines(self.active_profile_file):
-            name = line.strip()
-            if name and name in profiles:
-                profile = profiles[name]
-                return profile if profile.enabled else None
-        return self.config.upstream.selected_profile()
+        the config's default if nothing was switched at runtime."""
+        return selected_profile(self.config, self.files)
 
     def _profile_by_name(self, name: str) -> UpstreamProfileConfig:
         for profile in self.config.upstream.profiles:
@@ -182,6 +137,49 @@ class UpstreamService:
 
     def profile_interface(self, profile: UpstreamProfileConfig) -> str:
         return self.config.upstream.profile_interface(profile)
+
+    def _carrier_exclusion_state_path(self, profile: UpstreamProfileConfig) -> Path:
+        return carrier_state_dir(self.config) / f"{profile.name}.addrs"
+
+    def _resolve_carrier_addresses(self, profile: UpstreamProfileConfig) -> list[str]:
+        """The literal IPv4 address(es) this profile's carrier connection
+        actually dials, so they can be excluded from policy routing (see
+        install_carrier_exclusion). A literal IP in `server` is returned
+        as-is; a hostname is resolved via DNS on every call, since it may
+        change between connects. Resolution failure yields an empty list
+        rather than raising -- callers must tolerate "nothing to exclude
+        yet", not block a connection attempt on a DNS hiccup.
+        """
+        return resolve_carrier_addresses(profile.server)
+
+    def install_carrier_exclusion(
+        self, profile: UpstreamProfileConfig, *, dry_run: bool = False
+    ) -> list[str]:
+        """Record the addresses this profile's own carrier connection dials,
+        so the reconciler keeps them out of its policy table: without this,
+        host_policy: full can route openconnect's (or the cert-pin probe's)
+        TCP session to the server back into a tunnel, looping or
+        mis-routing the carrier connection (root cause 7).
+
+        Resolves `profile.server` fresh every call; a no-longer-current
+        address disappears from the file and so from the kernel on the next
+        pass. Must be followed by a reconciler pass before dialing, not
+        after -- the rule has to exist before the carrier's own handshake.
+        """
+        current = self._resolve_carrier_addresses(profile)
+        if not dry_run:
+            state_path = self._carrier_exclusion_state_path(profile)
+            if current:
+                self.files.write_unique_lines(state_path, current)
+            else:
+                state_path.unlink(missing_ok=True)
+        return current
+
+    def remove_carrier_exclusion(
+        self, profile: UpstreamProfileConfig, *, dry_run: bool = False
+    ) -> None:
+        if not dry_run:
+            self._carrier_exclusion_state_path(profile).unlink(missing_ok=True)
 
     def active_interface(self) -> str:
         selected = self.selected_profile()
@@ -368,20 +366,17 @@ class UpstreamService:
         return None
 
     def switch_profile(self, name: str) -> None:
-        """Make `name` the active profile and re-point the redirection
-        rules (nftables oifname + policy-route device) at its tunnel.
+        """Make `name` the active profile and let the reconciler re-point
+        the redirection (nft + policy routes) at its tunnel.
 
         The connection itself is untouched -- with several profiles
         connected simultaneously this is what makes failover a rule flip
         rather than a reconnect.
         """
-        profile = self._profile_by_name(name)
+        self._profile_by_name(name)  # reject unknown names before writing the marker
         with self._locked():
             self.files.atomic_write_text(self.active_profile_file, f"{name}\n", mode=0o600)
-            interface = self.profile_interface(profile)
-            self.nftables.apply(outbound_interface=interface)
-            if self._profile_connected(profile):
-                self.policy_routing.apply(interface)
+            self.net.converge()
 
     def _profile_secrets_dir(self, profile: UpstreamProfileConfig) -> Path:
         return self.config.system.secrets_dir / "upstream" / profile.name
@@ -416,59 +411,29 @@ class UpstreamService:
         presented, used for trusted_cert profiles without an explicit
         server_cert_pin (see _accepted_server_pin()).
         """
-        server = f"{profile.server}:{profile.port}"
-        # Everything secret goes through the 0600 --config file, never argv:
-        # /proc/<pid>/cmdline is readable by every local user for the tunnel's
-        # whole lifetime. The camouflage secret is part of the server URL
-        # (its query), so it moves into --server= in that file.
-        config_lines: list[str] = []
-        if profile.camouflage_secret:
-            config_lines.append(f"server={server}/?{profile.camouflage_secret}")
-        argv = [
-            "openconnect",
-            "--interface",
-            self.profile_interface(profile),
-            "--protocol=anyconnect",
-            "--non-inter",
-            "--background",
-            f"--pid-file={self._pid_file(profile)}",
-        ]
-        # The fwmark policy routing always owns tunnel egress now (no more
-        # hands-off "direct" mode); the distribution vpnc-script would
-        # additionally apply whatever the upstream pushes (default route,
-        # split routes, resolv.conf) to this namespace -- on
-        # network_mode: host that hijacks the host itself. Use the minimal
-        # interface-only script instead.
-        argv.append(f"--script={self._ensure_vpnc_script()}")
-        # openconnect dropped --no-cert-check; a certificate that isn't
-        # CA-trusted can only be accepted by pinning it.
-        pin = profile.server_cert_pin or accepted_pin
-        if pin:
-            argv.extend(["--servercert", pin])
-        # Username/password also apply to certificate profiles: an upstream
-        # ocserv with several `auth =` lines (e.g. certificate + plain)
-        # requires all of them, so it asks for a password after accepting
-        # the client certificate.
-        if profile.auth_type == "password" or profile.password:
-            argv.append("--passwd-on-stdin")
-        if profile.username:
-            argv.extend(["--user", profile.username])
+        cert_path: Path | None = None
+        key_path: Path | None = None
         if profile.auth_type in {"cert", "p12"}:
             cert_path, key_path = self._materialize_cert(profile)
-            if cert_path:
-                argv.extend(["--certificate", str(cert_path)])
-                if key_path:
-                    argv.extend(["--sslkey", str(key_path)])
-                if profile.cert_pass:
-                    # Never --key-password= on the command line.
-                    config_lines.append(f"key-password={profile.cert_pass}")
-        if config_lines:
-            argv.append(f"--config={self._materialize_openconnect_conf(profile, config_lines)}")
-        if not profile.camouflage_secret:
-            # With a camouflage secret the server comes from --server= in the
-            # config file instead of a positional argument.
-            argv.append(server)
-        return argv
+        assert profile.server is not None  # validator-required for kind="openconnect"
+        spec = DialSpec(
+            server=profile.server,
+            port=profile.port,
+            interface=self.profile_interface(profile),
+            pid_file=self._pid_file(profile),
+            script=self._ensure_vpnc_script(),
+            auth_type=profile.auth_type,
+            username=profile.username,
+            password=profile.password,
+            server_cert_pin=profile.server_cert_pin,
+            cert_path=cert_path,
+            key_path=key_path,
+            cert_pass=profile.cert_pass,
+            camouflage_secret=profile.camouflage_secret,
+        )
+        lines = tunnel_config_lines(spec)
+        config_path = self._materialize_openconnect_conf(profile, lines) if lines else None
+        return build_openconnect_argv(spec, accepted_pin=accepted_pin, config_path=config_path)
 
     def _materialize_openconnect_conf(
         self, profile: UpstreamProfileConfig, lines: list[str]
@@ -543,9 +508,7 @@ class UpstreamService:
         update propagates without manual steps; must be executable for
         openconnect to run it.
         """
-        from kornode.renderers.base import default_template_dir
-
-        source = default_template_dir() / "vpnc-script-kornode"
+        source = vpnc_script_source()
         target = self.config.system.generated_dir / "vpnc-script-kornode"
         self.files.ensure_dir(target.parent)
         self.files.atomic_write_text(target, source.read_text(encoding="utf-8"), mode=0o755)
@@ -593,19 +556,6 @@ class UpstreamService:
         except OSError:
             pass
 
-    @staticmethod
-    def _require_policy_routing(results: list[CommandResult]) -> None:
-        """Fail a connect when its required rule or route was not installed.
-
-        A missing rule during cleanup is expected and harmless; every other
-        result from ``PolicyRoutingService.apply()`` is required for the
-        connection to carry marked traffic safely.
-        """
-        for result in results:
-            if result.ok or tuple(result.argv[:3]) == ("ip", "rule", "del"):
-                continue
-            raise CommandError(result)
-
     def connect(self, name: str | None = None, *, dry_run: bool = False) -> CommandResult:
         """Dial one profile's connection (the active one when name is None).
 
@@ -630,8 +580,6 @@ class UpstreamService:
                     stdout=f"profile '{profile.name}' is already connected",
                     stderr="",
                 )
-            selected = self.selected_profile()
-            is_active = selected is not None and selected.name == profile.name
             # The applied marker is persisted, unlike kernel/NFT runtime
             # state.  Remember whether it could suppress the post-connect
             # restore after a service/container restart.
@@ -639,14 +587,18 @@ class UpstreamService:
             pushed_was_marked_applied = bool(pushed_fingerprint) and (
                 pushed_fingerprint == self.pushed.applied_fingerprint()
             )
+            # Must happen before any TCP to the server -- including the
+            # cert-pin probe below -- and before the reconciler pass right
+            # after, which reads the recorded carrier addresses to exempt
+            # them from marking (D-20: the carrier is never marked).
+            self.install_carrier_exclusion(profile, dry_run=dry_run)
             if not dry_run:
                 self._repair_stale_resolv_conf()
-                # Load the split/full-mode kill-switch rules before dialing,
-                # so marked traffic is blocked from the very first moment
-                # rather than briefly leaking out unencrypted while
-                # connecting. Rules always point at the ACTIVE profile's
-                # interface, even when dialing a standby.
-                self.nftables.apply(outbound_interface=self.active_interface())
+                # Converge before dialing, so the kill-switch is in place and
+                # marked traffic is blocked from the very first moment rather
+                # than briefly leaking out unencrypted while connecting. A
+                # failed pass aborts the connect (fail closed).
+                self.net.converge()
             accepted_pin = self._accepted_server_pin(profile, dry_run=dry_run)
             result = self.runner.run(
                 self.openconnect_argv(profile, accepted_pin=accepted_pin),
@@ -664,22 +616,12 @@ class UpstreamService:
             )
             if not dry_run:
                 self._verify_backgrounded(profile, result)
-            if not dry_run and is_active:
-                # A failed connect already raised CommandError above, so
-                # reaching here means the tunnel is up and the interface
-                # actually exists -- only now can a route via it be
-                # installed.
-                self._require_policy_routing(
-                    self.policy_routing.apply(self.profile_interface(profile))
-                )
             if not dry_run:
-                # A connected profile that's also a named target gets its
-                # own table pointed at its own interface, regardless of
-                # whether it's the active one -- its assigned traffic
-                # doesn't care which profile is "active".
-                for target_profile, routing in self._named_target_routing():
-                    if target_profile.name == profile.name:
-                        self._require_policy_routing(routing.apply(self.profile_interface(profile)))
+                # A failed connect already raised CommandError above, so the
+                # tunnel is up and its interface exists: one more pass
+                # installs the routes via it (active exit and named targets
+                # alike -- the reconciler derives them all).
+                self.net.converge()
                 # The vpnc-script hook has already stored whatever routes/
                 # split-DNS domains the server pushed in this handshake
                 # (openconnect runs it before backgrounding); apply them now
@@ -691,10 +633,10 @@ class UpstreamService:
         """Wait until both the daemon and its tunnel interface are ready.
 
         OpenConnect's ``--background`` parent exits before the daemon has
-        finished creating the TUN device. Applying policy routes as soon as
-        only the PID appears races that setup: ``ip route replace ... dev``
-        fails, and the watchdog can then enter a reconnect loop because its
-        health probe runs without the route it is meant to restore.
+        finished creating the TUN device. Converging as soon as only the PID
+        appears races that setup: the reconciler cannot install a route via
+        a device that does not exist yet, and the watchdog can then enter a
+        reconnect loop because its health probe runs without that route.
         """
         interface = self.profile_interface(profile)
         deadline = time.monotonic() + BACKGROUND_GRACE_SECONDS
@@ -727,24 +669,16 @@ class UpstreamService:
         self, profile: UpstreamProfileConfig, *, dry_run: bool
     ) -> CommandResult:
         """'Connect' for an externally-managed interface (kind=
-        'external_interface'): apply the same nftables/policy-routing
-        kornode applies to a dialed profile, without ever touching the
-        interface itself -- there's nothing to dial, kornode doesn't own
-        its lifecycle.
+        'external_interface'): converge the same routing a dialed profile
+        gets, without ever touching the interface itself -- there's nothing
+        to dial, kornode doesn't own its lifecycle.
         """
         interface = self.profile_interface(profile)
         argv = ("ip", "link", "show", "dev", interface)
         if dry_run:
             return CommandResult(argv=argv, returncode=0, stdout="", stderr="", dry_run=True)
         with self._locked():
-            selected = self.selected_profile()
-            is_active = selected is not None and selected.name == profile.name
-            self.nftables.apply(outbound_interface=self.active_interface())
-            if is_active and self._interface_link_up(interface):
-                self.policy_routing.apply(interface)
-            for target_profile, routing in self._named_target_routing():
-                if target_profile.name == profile.name and self._interface_link_up(interface):
-                    routing.apply(interface)
+            self.net.converge()
             return CommandResult(
                 argv=argv,
                 returncode=0,
@@ -761,21 +695,16 @@ class UpstreamService:
     def _deactivate_external_interface(
         self, profile: UpstreamProfileConfig, *, dry_run: bool
     ) -> CommandResult:
-        """'Disconnect' for an externally-managed interface: undo whatever
-        routing was applied, without any process signaling -- kornode never
-        owns this interface's lifecycle.
+        """'Disconnect' for an externally-managed interface: converge the
+        routing (the profile is disabled or being dropped), without any
+        process signaling -- kornode never owns this interface's lifecycle.
         """
         interface = self.profile_interface(profile)
         argv = ("ip", "link", "show", "dev", interface)
         if dry_run:
             return CommandResult(argv=argv, returncode=0, stdout="", stderr="", dry_run=True)
         with self._locked():
-            selected = self.selected_profile()
-            if selected is not None and selected.name == profile.name:
-                self.policy_routing.cleanup()
-            for target_profile, routing in self._named_target_routing():
-                if target_profile.name == profile.name:
-                    routing.cleanup()
+            self.net.converge()
             return CommandResult(
                 argv=argv,
                 returncode=0,
@@ -801,6 +730,13 @@ class UpstreamService:
         with self._locked():
             pid = self._read_pid(profile) if profile is not None else None
             if profile is None or pid is None or not self._is_running(pid):
+                if profile is not None and not dry_run:
+                    # The process died on its own: its carrier exemption must
+                    # not outlive it.
+                    state_path = self._carrier_exclusion_state_path(profile)
+                    if state_path.exists():
+                        self.remove_carrier_exclusion(profile)
+                        self.net.converge()
                 return CommandResult(
                     argv=("kill", "-TERM", "<upstream-pid>"),
                     returncode=0,
@@ -821,14 +757,10 @@ class UpstreamService:
                     f"pid {pid} did not exit within {DISCONNECT_GRACE_SECONDS}s, sending SIGKILL"
                 )
                 os.kill(pid, signal.SIGKILL)
-            selected = self.selected_profile()
-            if selected is not None and selected.name == profile.name:
-                # Only the active profile's tunnel carries the policy route;
-                # dropping a standby connection must not touch routing.
-                self.policy_routing.cleanup()
-            for target_profile, routing in self._named_target_routing():
-                if target_profile.name == profile.name:
-                    routing.cleanup()
+            self.remove_carrier_exclusion(profile)
+            # The tunnel is gone: the reconciler drops its routes and keeps
+            # the kill-switch for whatever was assigned to it.
+            self.net.converge()
             self._append_log(f"'{profile.name}' disconnected")
             return CommandResult(argv=argv, returncode=0, stdout="disconnected", stderr="")
 
@@ -899,26 +831,6 @@ class UpstreamService:
         healthy, _reason = self.health_status()
         return healthy
 
-    def ensure_policy_routing(self) -> list[CommandResult]:
-        """Re-assert the fwmark rule/route for the active connected profile,
-        and for every connected named-target profile.
-
-        Run by the watchdog on every healthy tick: the kernel purges every
-        route referencing the tunnel device whenever it bounces (openconnect
-        reconnects internally without going through this service), leaving a
-        'connected' upstream whose fwmark table is empty -- marked traffic
-        then dies in the kill-switch until something re-installs the route.
-        """
-        with self._locked():
-            results: list[CommandResult] = []
-            profile = self.selected_profile()
-            if profile is not None and self._profile_connected(profile):
-                results.extend(self.policy_routing.ensure(self.profile_interface(profile)))
-            for target_profile, routing in self._named_target_routing():
-                if self._profile_connected(target_profile):
-                    results.extend(routing.ensure(self.profile_interface(target_profile)))
-            return results
-
     def enforce_profile_enablement(self) -> list[CommandResult]:
         """Bring every profile's connection up to date with its own
         `enabled` flag, besides the active one (which the watchdog's
@@ -951,7 +863,10 @@ class UpstreamService:
                     # mean routing was already torn down, so disconnect()
                     # (idempotent) always runs for this kind regardless.
                     if connected or profile.kind == "external_interface":
-                        results.append(self.disconnect(profile.name))
+                        try:
+                            results.append(self.disconnect(profile.name))
+                        except NetApplyError as exc:
+                            self._append_log(f"disconnect of '{profile.name}': {exc}")
                     continue
                 if profile.name == active_name:
                     continue
@@ -965,7 +880,7 @@ class UpstreamService:
                 # was already up before kornode started observing it.
                 try:
                     results.append(self.connect(profile.name))
-                except (ValueError, CommandError):
+                except _RECOVERABLE:
                     self._append_log(f"standby connect to '{profile.name}' failed")
             return results
 
@@ -1026,23 +941,27 @@ class UpstreamService:
                     # checks: a live-but-unhealthy process must be torn down
                     # before redialing, and a dead one leaves nothing to
                     # keep.
-                    if self._profile_connected(profile):
-                        self.disconnect(name)
                     try:
+                        if self._profile_connected(profile):
+                            self.disconnect(name)
                         self.connect(name)
-                    except (ValueError, CommandError):
+                    except _RECOVERABLE:
                         self._append_log(f"reconnect attempt to '{name}' failed")
                         continue
                 elif not self._profile_connected(profile):
                     try:
                         self.connect(name)
-                    except (ValueError, CommandError):
+                    except _RECOVERABLE:
                         self._append_log(f"failover connect to '{name}' failed")
                         continue
                 if is_current_and_active:
                     self._append_log(f"reconnected to '{name}'")
                 else:
-                    self.switch_profile(name)
+                    try:
+                        self.switch_profile(name)
+                    except NetApplyError as exc:
+                        self._append_log(f"failover switch to '{name}' failed: {exc}")
+                        continue
                     self._append_log(f"failed over to '{name}' (redirection rules switched)")
                 return True
             self._append_log("all reconnect attempts failed")
@@ -1120,7 +1039,7 @@ class UpstreamService:
         return warnings
 
     def apply_server_routing_if_changed(self, *, force: bool = False) -> list[CommandResult]:
-        """Re-render/re-apply nftables and dnsmasq when any profile's
+        """Converge the reconciler and re-render dnsmasq when any profile's
         effective server-pushed lists changed since the last apply.
 
         Cheap when nothing changed (one fingerprint comparison), so the
@@ -1134,13 +1053,15 @@ class UpstreamService:
         from kornode.services.server import ServerService
 
         with self._locked():
-            # nftables.apply() renders its own file; only dnsmasq.conf needs
-            # an explicit re-render here (the rest of the generated config
-            # doesn't depend on pushed lists).
-            results = self.nftables.apply(outbound_interface=self.active_interface())
-            if results and not results[0].ok:
-                self._append_log("applying server-pushed routes failed: nftables reload error")
-                return results
+            # The pushed lists are a reconciler input; only dnsmasq.conf
+            # needs an explicit re-render here (the rest of the generated
+            # config doesn't depend on pushed lists).
+            results: list[CommandResult] = []
+            try:
+                self.net.converge()
+            except NetApplyError as exc:
+                self._append_log(f"applying server-pushed routes failed: {exc}")
+                raise
             if self.config.dns_tunnel_active():
                 renderer = DnsmasqConfigRenderer()
                 self.files.atomic_write_text(

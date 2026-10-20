@@ -22,13 +22,17 @@ import { IconButton, RavenMark } from "./components/ui";
 import { readBoolean, readRecord } from "./lib/read";
 import { DashboardView } from "./views/DashboardView";
 import { DiagnosticsView } from "./views/DiagnosticsView";
+import { DoctorView } from "./views/DoctorView";
 import { IdentityView } from "./views/IdentityView";
 import { InternalDnsView } from "./views/InternalDnsView";
 import { LoginScreen } from "./views/LoginScreen";
 import { LogsView } from "./views/LogsView";
+import { NetworkView } from "./views/NetworkView";
+import { AgentsView } from "./views/agents/AgentsView";
 import { SessionsView } from "./views/SessionsView";
 import { CertificatesView } from "./views/certificates/CertificatesView";
 import { ConfigSubnav } from "./views/config/ConfigSubnav";
+import { BackupPanel } from "./views/config/BackupPanel";
 import { ConfigView } from "./views/config/ConfigView";
 import { GroupMembersDialog } from "./views/groups/GroupMembersDialog";
 import { GroupsView } from "./views/groups/GroupsView";
@@ -234,7 +238,7 @@ export function App() {
             onReloadServer={dashboard.reloadServer}
             onRestartServer={dashboard.restartServer}
             onWriteConfig={dashboard.writeConfig}
-            onApplyNft={dashboard.applyNft}
+            onApplyNet={dashboard.applyNet}
           />
         )}
 
@@ -296,6 +300,9 @@ export function App() {
             onKick={sessions.kick}
           />
         )}
+
+        {tab === "network" && <NetworkView token={authToken} />}
+        {tab === "agents" && <AgentsView token={authToken} dryRun={dryRun} />}
 
         {tab === "config" && (
           <ConfigSubnav active={configSection} onSelect={setConfigSection} />
@@ -488,6 +495,8 @@ export function App() {
           />
         )}
 
+        {tab === "config" && configSection === "backup" && <BackupPanel dryRun={dryRun} />}
+
         {tab === "config" && (
           <ConfigView
             section={configSection}
@@ -502,16 +511,19 @@ export function App() {
             authMethodsDraft={settings.authMethodsDraft}
             webSettingsDraft={settings.webSettingsDraft}
             generalSettingsDraft={settings.generalSettingsDraft}
+            fabricSettingsDraft={settings.fabricSettingsDraft}
             onServerSettingsDraftChange={settings.setServerSettingsDraft}
             onAuthMethodsDraftChange={settings.setAuthMethodsDraft}
             onWebSettingsDraftChange={settings.setWebSettingsDraft}
             onGeneralSettingsDraftChange={settings.setGeneralSettingsDraft}
+            onFabricSettingsDraftChange={settings.setFabricSettingsDraft}
             onSaveServerSettings={() => void settings.saveServer()}
             onSaveAuthMethodsSettings={() => void settings.saveAuthMethods()}
             onTestOtpEmail={settings.testEmail}
             onTestOtpTelegram={settings.testTelegram}
             onSaveWebSettings={() => void settings.saveWeb()}
             onSaveGeneralSettings={() => void settings.saveGeneral()}
+            onSaveFabricSettings={() => void settings.saveFabric()}
             busy={busy}
             onDraftChange={configEditor.editDraft}
             onReloadSource={configEditor.reloadSource}
@@ -524,7 +536,12 @@ export function App() {
           />
         )}
 
-        {tab === "diagnostics" && <DiagnosticsView diagnostics={state.diagnostics} />}
+        {tab === "diagnostics" && (
+          <>
+            <DiagnosticsView diagnostics={state.diagnostics} />
+            <DoctorView doctor={state.doctor} />
+          </>
+        )}
 
         {tab === "logs" && (
           <LogsView

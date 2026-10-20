@@ -287,7 +287,7 @@ test("core management buttons call expected API endpoints with CSRF", async ({ p
       { method: "POST", path: "/api/server/start", csrf: "csrf" },
       { method: "POST", path: "/api/server/stop", csrf: "csrf" },
       { method: "POST", path: "/api/config/render", csrf: "csrf" },
-      { method: "POST", path: "/api/routing/nft/apply", csrf: "csrf" },
+      { method: "POST", path: "/api/net/apply", csrf: "csrf" },
       { method: "POST", path: "/api/users", csrf: "csrf" },
       { method: "DELETE", path: "/api/users/alice", csrf: "csrf" },
       { method: "POST", path: "/api/sessions/alice/kick", csrf: "csrf" },

@@ -4,12 +4,15 @@ import base64
 import json
 import os
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import typer
 import yaml
 
+from kornode.cli_agents import register as register_agent_commands
+from kornode.cli_hub import register as register_hub_commands
 from kornode.config.defaults import DEFAULT_CONFIG
 from kornode.config.env import combined_environment, env_overrides_from_mapping
 from kornode.config.loader import (
@@ -20,18 +23,20 @@ from kornode.config.loader import (
     resolve_secret_refs,
 )
 from kornode.config.models import AppConfig, GroupPolicyConfig, OidcProviderConfig
-from kornode.services.cert_pin import fetch_server_pin
+from kornode.registry.snapshot import due as registry_snapshot_due
+from kornode.registry.snapshot import snapshot as registry_snapshot
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
 from kornode.services.diagnostics import DiagnosticsService
+from kornode.services.doctor import DoctorService
 from kornode.services.domain_resolver import DomainResolverService
 from kornode.services.files import FileManager
 from kornode.services.groups import GroupConfigService
 from kornode.services.host_dns import HostDnsService
 from kornode.services.internal_dns import InternalDnsService
 from kornode.services.logs import LogRotationService, LogService
-from kornode.services.nftables import NftablesService
+from kornode.services.net import NetApplyError, NetService, run_reconciler
 from kornode.services.otp import OtpService
 from kornode.services.password_hash import hash_password
 from kornode.services.routing import RoutingService
@@ -41,6 +46,7 @@ from kornode.services.server_certificates import ServerCertificateService
 from kornode.services.sessions import SessionService
 from kornode.services.upstream import UpstreamService
 from kornode.services.users import UserConfig, UserService
+from kornode.tunnels.pin import fetch_server_pin
 
 app = typer.Typer(no_args_is_help=True, help="Korvus Node management")
 config_app = typer.Typer(help="Validate and render configuration")
@@ -61,9 +67,10 @@ identity_app = typer.Typer(help="Manage identity providers and group policies")
 identity_oidc_app = typer.Typer(help="Manage OIDC connector settings")
 identity_group_app = typer.Typer(help="Manage VPN group policies")
 identity_group_config_app = typer.Typer(help="Manage ocserv config-per-group files")
-nft_app = typer.Typer(help="Manage project-owned nftables state")
+net_app = typer.Typer(help="Routing core: plan, apply, explain, run the reconciler")
 host_dns_app = typer.Typer(help="Point the host's resolver at the built-in dnsmasq")
 web_app = typer.Typer(help="Manage Web GUI security")
+registry_app = typer.Typer(help="Manage the hub registry")
 
 STATE: dict[str, Path | None] = {"config_path": None, "env_file": None}
 
@@ -191,6 +198,27 @@ def server_restart(
 @server_app.command("status")
 def server_status() -> None:
     echo_result(ServerService(get_config()).status())
+
+
+@server_app.command("hook")
+def server_hook() -> None:
+    """Internal: called by ocserv-connect-script-kornode on client connect.
+
+    ocserv does not pass positional arguments to connect-script; it only sets
+    environment variables (DEVICE, USERNAME, ...), per its documented
+    connect-script interface.
+    """
+    device = os.environ.get("DEVICE", "")
+    if not device:
+        typer.echo("server hook failed: DEVICE is not set", err=True)
+        raise typer.Exit(1)
+    # The reconciler sets the device's sysctls. Wait for that pass: the client
+    # must not send traffic through a device with default sysctls. The connect
+    # script's wrapper swallows failures (ocserv needs exit 0), so only report.
+    try:
+        NetService(get_config()).converge()
+    except NetApplyError as exc:
+        typer.echo(f"server hook: {exc}", err=True)
 
 
 @server_process_app.command("list")
@@ -596,7 +624,10 @@ def upstream_hook(
     openconnect's own connect sequence.
     """
     try:
-        profile = UpstreamService(get_config()).record_vpnc_event(reason)
+        config = get_config()
+        profile = UpstreamService(config).record_vpnc_event(reason)
+        if profile is not None:
+            NetService(config).wake()
     except Exception as exc:  # noqa: BLE001 - must never break the tunnel
         typer.echo(f"upstream hook failed: {exc}", err=True)
         return
@@ -680,12 +711,6 @@ def upstream_watch(
         if config.upstream.enabled:
             selected = service.selected_profile()
             if selected is not None:
-                # Restore fwmark tables before probing. The kernel removes a
-                # route as soon as its tunnel device disappears; probing
-                # first can therefore create a bootstrap deadlock where the
-                # failed probe triggers another reconnect before the route
-                # gets a chance to be restored.
-                service.ensure_policy_routing()
                 healthy, failure_reason = service.health_status()
                 if healthy:
                     consecutive_failures = 0
@@ -827,8 +852,8 @@ def routes_delete(route: str) -> None:
 def routes_reload(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    for result in NftablesService(get_config()).apply(dry_run=dry_run):
-        echo_result(result)
+    """Converge the kernel with the route lists (same as `net apply`)."""
+    _echo_net_apply(NetService(get_config()).apply(dry_run=dry_run), dry_run=dry_run)
 
 
 @domains_app.command("list")
@@ -853,10 +878,10 @@ def domains_delete(domain: str) -> None:
 def domains_reload(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
+    """Re-resolve the domain lists and converge the kernel."""
     config = get_config()
-    ConfigService().write_rendered_files(config)
-    for result in NftablesService(config).apply(dry_run=dry_run):
-        echo_result(result)
+    DomainResolverService(config).refresh(dry_run=dry_run)
+    _echo_net_apply(NetService(config).apply(dry_run=dry_run), dry_run=dry_run)
 
 
 @domains_app.command("resolve")
@@ -864,18 +889,18 @@ def domains_resolve(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """One-shot: resolve every configured split/profile/host domain and
-    refresh their nftables *_dynamic sets. See DomainResolverService."""
+    record the addresses for the reconciler. See DomainResolverService."""
     outcome = DomainResolverService(get_config()).refresh(dry_run=dry_run)
-    if outcome.result is not None:
-        echo_result(outcome.result)
-    else:
+    if not outcome.resolved:
         typer.echo("no domains configured; nothing to resolve")
+    for item in outcome.resolved:
+        typer.echo(f"{item.name}: {len(item.ips)} addresses")
 
 
 @domains_app.command("watch")
 def domains_watch() -> None:
     """Supervisor entrypoint: periodically resolve configured split/profile/
-    host domains into their nftables *_dynamic sets, independent of which
+    host domains for the reconciler's dynamic sets, independent of which
     resolver VPN clients or the host actually use for their own lookups
     (see services/domain_resolver.py). Reloads config every cycle, like
     host-dns guard / upstream watch. The interval follows the lowest TTL
@@ -899,8 +924,6 @@ def domains_watch() -> None:
         try:
             outcome = DomainResolverService(get_config()).refresh()
             interval = outcome.next_interval_seconds
-            if outcome.result is not None and not outcome.result.ok:
-                typer.echo(f"domain resolve: nft apply failed: {outcome.result.stderr}", err=True)
         except Exception as exc:  # noqa: BLE001 - keep watching
             typer.echo(f"domain resolve failed: {exc}", err=True)
         deadline = time.monotonic() + interval
@@ -1168,30 +1191,74 @@ def identity_group_config_delete(name: str) -> None:
     typer.echo("deleted" if deleted else "not found")
 
 
-@nft_app.command("apply")
-def nft_apply(
+@net_app.command("plan")
+def net_plan(as_json: bool = typer.Option(False, "--json")) -> None:
+    """What the reconciler would change in the kernel right now."""
+    plan = NetService(get_config()).plan()
+    if as_json:
+        typer.echo(json.dumps(plan, indent=2))
+        return
+    for exit_ in plan["exits"]:
+        state = "up" if exit_["up"] else "down"
+        table = exit_["table"] if exit_["table"] is not None else "-"
+        typer.echo(f"exit {exit_['name']}: mark {exit_['mark']} table {table} ({state})")
+    for warning in plan["warnings"]:
+        typer.echo(f"warning: {warning}", err=True)
+    if not plan["ops"]:
+        typer.echo("kernel matches the compiled policy")
+    for op in plan["ops"]:
+        typer.echo(f"  {op['text']}")
+
+
+def _echo_net_apply(result: dict[str, Any], *, dry_run: bool) -> None:
+    if dry_run:
+        for op in result["ops"]:
+            typer.echo(f"dry-run: {op['text']}")
+        return
+    status = result.get("status", {})
+    typer.echo(f"applied via {result['via']}")
+    if status.get("last_error"):
+        typer.echo(f"error: {status['last_error']}", err=True)
+        raise typer.Exit(1)
+
+
+@net_app.command("apply")
+def net_apply(
     dry_run: bool = typer.Option(False, "--dry-run"),
+    as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    config = get_config()
-    secrets = collect_config_secrets(config)
-    for result in NftablesService(config).apply(dry_run=dry_run):
-        if result.stdout:
-            typer.echo(mask_text(result.stdout.rstrip(), secrets))
-        else:
-            echo_result(result)
+    """Converge the kernel now (one reconciler pass, awaited)."""
+    try:
+        result = NetService(get_config()).apply(dry_run=dry_run)
+    except NetApplyError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if as_json:
+        typer.echo(json.dumps(result, indent=2))
+        return
+    _echo_net_apply(result, dry_run=dry_run)
 
 
-@nft_app.command("show")
-def nft_show() -> None:
-    echo_result(NftablesService(get_config()).show())
-
-
-@nft_app.command("cleanup")
-def nft_cleanup(
-    dry_run: bool = typer.Option(False, "--dry-run"),
+@net_app.command("explain")
+def net_explain(
+    src: str = typer.Argument(..., help="Source address, or 'host'"),
+    dst: str = typer.Argument(..., help="Destination address"),
+    as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    for result in NftablesService(get_config()).cleanup(dry_run=dry_run):
-        echo_result(result)
+    """Why traffic from SRC to DST goes where it goes."""
+    decision = NetService(get_config()).explain(src, dst)
+    if as_json:
+        typer.echo(json.dumps(decision, indent=2))
+        return
+    for key, value in decision.items():
+        if value not in (None, [], ""):
+            typer.echo(f"{key}: {value}")
+
+
+@net_app.command("run")
+def net_run() -> None:
+    """Run the reconciler (supervisor program; not a management action)."""
+    run_reconciler(STATE.get("config_path") or DEFAULT_CONFIG_PATH, STATE.get("env_file"))
 
 
 @app.command("diagnose")
@@ -1201,6 +1268,25 @@ def diagnose(
     for name, result in DiagnosticsService(get_config()).run(dry_run=dry_run).items():
         typer.echo(f"## {name}")
         echo_result(result)
+
+
+@app.command("doctor")
+def doctor() -> None:
+    """Network-sanity checks: sysctls, overlapping subnets, policy-table
+    health, nft/kernel versions, carrier exclusions. Unlike `diagnose`,
+    prints every check before exiting, so one failing check doesn't hide
+    the rest."""
+    results = DoctorService(get_config()).run()
+    failed = False
+    for name, result in results.items():
+        typer.echo(f"## {name}")
+        if result.stdout:
+            typer.echo(result.stdout.rstrip())
+        if result.stderr:
+            typer.echo(result.stderr.rstrip(), err=True)
+        failed = failed or not result.ok
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command("logs")
@@ -1223,6 +1309,46 @@ def logs_rotate(
     rotated = LogRotationService(get_config()).rotate(force=force)
     if rotated:
         typer.echo("rotated: " + ", ".join(rotated))
+
+
+@registry_app.command("snapshot")
+def registry_snapshot_command(
+    force: bool = typer.Option(False, "--force", help="Write a snapshot even if one is not due."),
+) -> None:
+    config = get_config()
+    db_path = config.system.data_dir / "registry.db"
+    dest_dir = config.system.data_dir / "backups" / "registry"
+    now = datetime.now(UTC)
+    if not db_path.exists():
+        typer.echo("no registry")
+        return
+    if not force and not registry_snapshot_due(dest_dir, now=now):
+        typer.echo("not due")
+        return
+    written = registry_snapshot(db_path, dest_dir, now=now)
+    if written is None:
+        typer.echo("no registry")
+        return
+    typer.echo(str(written))
+
+
+@registry_app.command("maintain")
+def registry_maintain_command() -> None:
+    """Purge expired enrollment tokens and refresh a stale CRL (supervisor loop)."""
+    from kornode.services.enrollment import EnrollmentService
+    from kornode.services.server import ServerService
+
+    config = get_config()
+    if not config.fabric.enabled:
+        typer.echo("fabric disabled")
+        return
+    server = ServerService(config)
+
+    def reload_ocserv() -> None:
+        server.reload()
+
+    result = EnrollmentService(config, reload_ocserv=reload_ocserv).maintain()
+    typer.echo(json.dumps(result, sort_keys=True))
 
 
 @web_app.command("hash-password")
@@ -1250,9 +1376,13 @@ app.add_typer(upstream_app, name="upstream")
 app.add_typer(routes_app, name="routes")
 app.add_typer(domains_app, name="domains")
 app.add_typer(internal_dns_app, name="internal-dns")
-app.add_typer(nft_app, name="nft")
+app.add_typer(net_app, name="net")
 app.add_typer(host_dns_app, name="host-dns")
 app.add_typer(web_app, name="web")
+app.add_typer(registry_app, name="registry")
+
+register_agent_commands(app, get_config)
+register_hub_commands(app, get_config)
 
 
 if __name__ == "__main__":

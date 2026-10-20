@@ -1,10 +1,34 @@
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Any
 
 from kornode.config.models import AppConfig, GroupPolicyConfig
-from kornode.renderers.base import TemplateRenderer
+from kornode.renderers.base import TemplateRenderer, default_template_dir
+
+_FABRIC_GUARD = """# Fabric guard (D-43): enable-auth = certificate lets any certificate of the
+# hub CA in without a password. Agent certificates carry OU=agents; refuse
+# sessions without a group (OU-less client certificates), agents sessions whose
+# user is not agent-<id>, and enroll sessions whose user is not enroll-*.
+case "$GROUPNAME" in
+  "") exit 1 ;;
+  agents)
+    case "$USERNAME" in
+      agent-[1-9] | agent-[1-9][0-9] | agent-[1-9][0-9][0-9]) ;;
+      *) exit 1 ;;
+    esac
+    # Second line behind the CRL: only agents the registry knows about (their
+    # config-per-user file exists while the node is active) get in.
+    [ -f __USER_DIR__/"$USERNAME" ] || exit 1 ;;
+  enroll)
+    case "$USERNAME" in
+      enroll-?*) ;;
+      *) exit 1 ;;
+    esac ;;
+esac
+
+"""
 
 
 class OcservConfigRenderer(TemplateRenderer):
@@ -43,10 +67,28 @@ class OcservConfigRenderer(TemplateRenderer):
             "server_cert": server_cert,
             "server_key": server_key,
             "ca_cert": ca_cert,
+            "crl": config.cert_path("crl.pem"),
             "occtl_socket_file": config.generated_path("occtl.sock"),
             "socket_file": config.system.generated_dir / "ocserv.sock",
         }
         return self.render_template("ocserv.conf.j2", context)
+
+    def render_connect_script(self, config: AppConfig) -> str:
+        content = (default_template_dir() / "ocserv-connect-script-kornode").read_text(
+            encoding="utf-8"
+        )
+        if not config.fabric.enabled:
+            return content
+        content = content.replace(
+            "# connection, so failures here are deliberately swallowed.",
+            "# connection, so hook failures here are deliberately swallowed.",
+        )
+        marker = "\nkorctl_bin="
+        user_dir = config.identity.config_per_user_dir or (
+            config.system.generated_dir / "config-per-user"
+        )
+        guard = _FABRIC_GUARD.replace("__USER_DIR__", shlex.quote(str(user_dir)))
+        return content.replace(marker, "\n" + guard + "korctl_bin=", 1)
 
     def target_path(self, config: AppConfig) -> Path:
         return config.generated_path("ocserv.conf")
@@ -104,9 +146,7 @@ def _oidc_auth_line(config: AppConfig) -> str:
 
 def _select_group_lines(config: AppConfig) -> list[str]:
     return [
-        f"{group.name}[{group.display_name}]"
-        if group.display_name
-        else group.name
+        f"{group.name}[{group.display_name}]" if group.display_name else group.name
         for group in config.identity.group_policies
     ]
 

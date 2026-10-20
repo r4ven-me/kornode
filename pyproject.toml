@@ -11,12 +11,15 @@ requires-python = ">=3.12"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "Ivan Cherniy" }]
 dependencies = [
+  "cryptography>=44,<46",
   "dnspython>=2.6,<3",
   "fastapi>=0.111,<1",
   "jinja2>=3.1,<4",
   "pydantic>=2.7,<3",
+  "pyroute2>=0.7,<1",
   "python-multipart>=0.0.9,<1",
   "python-dotenv>=1.0,<2",
+  "httpx>=0.27,<1",
   "pyyaml>=6,<7",
   "typer>=0.12,<1",
   "uvicorn[standard]>=0.30,<1",
@@ -25,6 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "httpx2>=2,<3",
+  "jsonschema>=4.18,<5",
   "mypy>=1.10,<2",
   "pytest>=8.2,<9",
   "ruff>=0.5,<1",
@@ -38,6 +42,7 @@ Repository = "https://github.com/r4ven-me/kornode"
 [project.scripts]
 korctl = "kornode.cli:app"
 kornode = "kornode.main:run"
+kornode-agent = "kornode_agent.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "backend"}
@@ -46,11 +51,17 @@ package-dir = {"" = "backend"}
 where = ["backend"]
 
 [tool.setuptools.package-data]
-kornode = ["py.typed"]
+kornode = ["py.typed", "registry/migrations/*.sql", "tunnels/vpnc-script-kornode"]
+kornode_agent = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["backend"]
+markers = [
+  "netlab: real-kernel namespace integration tests, needs root",
+  "e2e: opt-in destructive four-VM tests; never enabled by ordinary pytest",
+  "e2e_case(name): isolated per-scenario deployment on leased disposable VMs",
+]
 filterwarnings = [
   # starlette's own TestClient still references this alias internally as of
   # 1.6.0 (the latest release) -- not kornode code, nothing to fix on our

@@ -24,9 +24,7 @@ class NetworkStatsService:
         configured = self.config.routing.main_interface
         if configured and configured != "auto":
             return configured
-        result = self.runner.run(
-            ["ip", "route", "show", "default"], timeout=5, check=False
-        )
+        result = self.runner.run(["ip", "route", "show", "default"], timeout=5, check=False)
         if not result.ok:
             return None
         match = _DEFAULT_ROUTE_DEVICE_RE.search(result.stdout)

@@ -1,3 +1,28 @@
+node:
+  id: 1
+
+fabric:
+  enabled: false
+  cidr: 10.99.0.0/24
+  client_pool: 10.100.{id}.0/24
+  source_pool: 10.8.{id}.0/24
+  enroll_pool: 10.99.255.240/28
+  domain: kornode.internal
+  reserved: []
+
+# Hub control plane (agent API on the fabric address, mTLS). Requires fabric.enabled.
+control:
+  enabled: false
+  port: 8444
+  long_poll_seconds: 60
+  report_interval_seconds: 30
+  offline_after_seconds: 90
+  cert_lifetime_days: 90
+  enroll_token_ttl_minutes: 60
+  bundle_history: 20
+  min_agent_version: 2.0.0
+  # signing_key: /var/lib/kornode/control/signing.ed25519  # default, created on first use
+
 system:
   timezone: Europe/Moscow
   data_dir: /var/lib/kornode

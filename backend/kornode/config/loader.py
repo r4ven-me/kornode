@@ -65,14 +65,28 @@ def load_config(
     yaml_config = load_yaml_file(resolved_config_path)
     environment = combined_environment(resolved_config_path, resolved_env_file, environ)
     env_overrides = env_overrides_from_mapping(environment)
+    explicit_paths = _leaf_paths(env_overrides) | _leaf_paths(yaml_config)
+    if cli_overrides:
+        explicit_paths |= _leaf_paths(cli_overrides)
 
     merged = deep_merge(DEFAULT_CONFIG, env_overrides)
     merged = deep_merge(merged, yaml_config)
     if cli_overrides:
         merged = deep_merge(merged, cli_overrides)
     merged = resolve_secret_refs(merged, environment)
-    return AppConfig.model_validate(merged)
+    return AppConfig.model_validate(merged, context={"explicit_paths": explicit_paths})
 
 
 def load_default_config() -> AppConfig:
     return AppConfig.model_validate(copy.deepcopy(DEFAULT_CONFIG))
+
+
+def _leaf_paths(value: Mapping[str, Any], prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    paths: set[tuple[str, ...]] = set()
+    for key, item in value.items():
+        path = (*prefix, str(key))
+        if isinstance(item, Mapping):
+            paths.update(_leaf_paths(item, path))
+        else:
+            paths.add(path)
+    return paths

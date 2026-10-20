@@ -43,9 +43,7 @@ def test_prepare_startup_letsencrypt_keeps_local_ca_for_client_verification(
 
     # Pre-seed the certbot "live" files so issuance is skipped and we can
     # observe the config patch that activates the certificate.
-    paths = ServerCertificateService(config, files=files).letsencrypt_paths(
-        "vpn.example.com"
-    )
+    paths = ServerCertificateService(config, files=files).letsencrypt_paths("vpn.example.com")
     files.ensure_dir(paths.server_cert.parent, mode=0o700)
     files.atomic_write_text(paths.server_cert, "fullchain\n", mode=0o600)
     files.atomic_write_text(paths.server_key, "privkey\n", mode=0o600)

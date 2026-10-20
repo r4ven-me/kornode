@@ -12,7 +12,7 @@ from kornode.services.apply import apply_dns_configuration, client_dns_signature
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
 from kornode.services.host_dns import HostDnsService
-from kornode.services.nftables import NftablesService
+from kornode.services.net import NetApplyError, NetService
 from kornode.services.routing import RoutingService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -157,9 +157,7 @@ def host_routes_status(request: Request) -> dict[str, object]:
 
 
 @router.post("/host-routes/refresh")
-def refresh_host_routes_url(
-    request: Request, payload: ListUrlRefreshRequest
-) -> dict[str, object]:
+def refresh_host_routes_url(request: Request, payload: ListUrlRefreshRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     if payload.url not in config.routing.host_split.routes_urls:
         raise HTTPException(
@@ -206,9 +204,7 @@ def host_domains_status(request: Request) -> dict[str, object]:
 
 
 @router.post("/host-domains/refresh")
-def refresh_host_domains_url(
-    request: Request, payload: ListUrlRefreshRequest
-) -> dict[str, object]:
+def refresh_host_domains_url(request: Request, payload: ListUrlRefreshRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     if payload.url not in config.routing.host_split.domains_urls:
         raise HTTPException(
@@ -272,8 +268,11 @@ def save_routing_settings(
         background_tasks,
         reconnect_clients=reconnect_required,
     )
-    # RUNTIME: rewrites live nftables state, same as the Upstream Apply button.
-    nft_results = NftablesService(loaded_config).apply()
+    # RUNTIME: one reconciler pass over the live kernel state.
+    try:
+        net_result: dict[str, object] = NetService(loaded_config).apply()
+    except NetApplyError as exc:
+        net_result = {"applied": False, "error": str(exc)}
     # Apply right away instead of waiting for host-dns-guard's next cycle.
     # RUNTIME: touches the mounted host resolver files, if any.
     host_dns = HostDnsService(loaded_config).apply()
@@ -283,7 +282,7 @@ def save_routing_settings(
         "reconnect_required": reconnect_required,
         "routing": loaded_config.routing.model_dump(mode="json"),
         "dns": command_results(dns_commands),
-        "nft": command_results(nft_results),
+        "net": net_result,
         "host_dns": host_dns.as_dict(),
     }
 
@@ -364,47 +363,9 @@ def set_domains(
 def reload_routing(
     request: Request,
     payload: DryRunRequest | None = None,
-) -> list[dict[str, object]]:
+) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    if not (payload and payload.dry_run):
-        ConfigService().write_rendered_files(config)
-    return command_results(
-        NftablesService(config).apply(dry_run=payload.dry_run if payload else False),
-        ("korctl", "routes", "reload"),
-    )
-
-
-@router.get("/nft")
-def show_nft(request: Request) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    result = NftablesService(config).show()
-    return {
-        "argv": ["korctl", "nft", "show"],
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "dry_run": result.dry_run,
-    }
-
-
-@router.post("/nft/apply")
-def apply_nft(
-    request: Request,
-    payload: DryRunRequest | None = None,
-) -> list[dict[str, object]]:
-    config: AppConfig = request.app.state.config
-    return command_results(
-        NftablesService(config).apply(dry_run=payload.dry_run if payload else False)
-    )
-
-
-@router.post("/nft/cleanup")
-def cleanup_nft(
-    request: Request,
-    payload: DryRunRequest | None = None,
-) -> list[dict[str, object]]:
-    config: AppConfig = request.app.state.config
-    return command_results(
-        NftablesService(config).cleanup(dry_run=payload.dry_run if payload else False),
-        ("korctl", "nft", "cleanup"),
-    )
+    try:
+        return NetService(config).apply(dry_run=payload.dry_run if payload else False)
+    except NetApplyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

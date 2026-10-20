@@ -139,7 +139,7 @@ export function TerminalView({
 
   return (
     <div className="view-stack">
-      <section className="panel">
+      <section className="panel" data-capability="terminal.run">
         <div className="panel-header">
           <div>
             <h2>Runtime shell</h2>
@@ -156,6 +156,7 @@ export function TerminalView({
               disabled={connected || connecting}
               onClick={() => void connect()}
               type="button"
+              data-capability="terminal.session.create"
             >
               <Terminal size={17} aria-hidden="true" />
               <span>Connect</span>
@@ -198,7 +199,7 @@ export function TerminalView({
           />
         </label>
       </section>
-      <section className="panel terminal-panel">
+      <section className="panel terminal-panel" data-capability="terminal.ws">
         <div className="xterm-host" ref={hostRef} />
       </section>
     </div>

@@ -1,25 +1,22 @@
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass
+import logging
+import sqlite3
+from contextlib import nullcontext
 from pathlib import Path
 
 from kornode.config.models import AppConfig
 from kornode.renderers import (
     DnsmasqConfigRenderer,
-    NftablesConfigRenderer,
     OcservConfigRenderer,
     SupervisorConfigRenderer,
 )
 from kornode.services.files import FileManager
+from kornode.services.rendered import RenderedFile
 from kornode.services.secrets import collect_config_secrets, mask_text
 
-
-@dataclass(frozen=True)
-class RenderedFile:
-    path: Path
-    content: str
-    mode: int = 0o644
+LOGGER = logging.getLogger(__name__)
 
 
 class ConfigService:
@@ -27,18 +24,18 @@ class ConfigService:
         self.file_manager = file_manager or FileManager()
         self.ocserv_renderer = OcservConfigRenderer()
         self.dnsmasq_renderer = DnsmasqConfigRenderer()
-        self.nftables_renderer = NftablesConfigRenderer()
         self.supervisor_renderer = SupervisorConfigRenderer()
 
     def render_files(self, config: AppConfig) -> list[RenderedFile]:
         files = [
             RenderedFile(
-                self.ocserv_renderer.target_path(config),
-                self.ocserv_renderer.render(config),
+                config.generated_path("ocserv-connect-script-kornode"),
+                self.ocserv_renderer.render_connect_script(config),
+                mode=0o755,
             ),
             RenderedFile(
-                self.nftables_renderer.target_path(config),
-                self.nftables_renderer.render(config),
+                self.ocserv_renderer.target_path(config),
+                self.ocserv_renderer.render(config),
             ),
             RenderedFile(
                 self.supervisor_renderer.target_path(config),
@@ -69,6 +66,13 @@ class ConfigService:
                     self.ocserv_renderer.render_group_policy(group),
                 )
             )
+        if config.fabric.enabled:
+            from kornode.services.fabric_groups import FabricGroupsService
+
+            fabric_groups = FabricGroupsService(config, self.file_manager)
+            files.extend(
+                fabric_groups.render_files(fabric_groups.nodes(), fabric_groups.prefixes())
+            )
         return files
 
     def write_rendered_files(self, config: AppConfig) -> list[Path]:
@@ -79,11 +83,60 @@ class ConfigService:
             config.identity.config_per_group_dir
             or (config.system.generated_dir / "config-per-group")
         )
+        if config.fabric.enabled:
+            self.file_manager.ensure_dir(
+                config.identity.config_per_user_dir
+                or (config.system.generated_dir / "config-per-user")
+            )
+            from kornode.services.users import UserService
+
+            UserService(config, files=self.file_manager).ensure_default_group()
+            self._ensure_fabric_crl(config)
         written: list[Path] = []
-        for rendered in self.render_files(config):
-            self.file_manager.atomic_write_text(rendered.path, rendered.content, rendered.mode)
-            written.append(rendered.path)
+        from kornode.services.fabric_groups import FabricGroupsService
+
+        groups = FabricGroupsService(config, self.file_manager)
+        with groups.locked() if config.fabric.enabled else nullcontext():
+            rendered_files = self.render_files(config)
+            for rendered in rendered_files:
+                self.file_manager.atomic_write_text(rendered.path, rendered.content, rendered.mode)
+                written.append(rendered.path)
+            if config.fabric.enabled:
+                for path in groups.stale_files(rendered_files):
+                    path.unlink()
+                    written.append(path)
+        self._recompile_bundles(config)
         return written
+
+    def _recompile_bundles(self, config: AppConfig) -> None:
+        """Hub host/port/pin and fabric settings live in the bundles: every
+        saved configuration recompiles them. The control API repeats this at
+        start, so a failure here is logged, not fatal to the save."""
+        if not config.control.enabled:
+            return
+        from kornode.bundle.errors import BundleError
+        from kornode.registry.db import RegistryError, migrate, open_registry, transaction
+        from kornode.registry.repository import Registry
+        from kornode.services.bundle import BundleService
+
+        try:
+            conn = open_registry(config.system.data_dir / "registry.db")
+            try:
+                migrate(conn)
+                with transaction(conn):
+                    BundleService(config).compile_all(Registry(conn), "hub configuration saved")
+            finally:
+                conn.close()
+        except (BundleError, RegistryError, OSError, sqlite3.Error) as exc:
+            LOGGER.warning("bundle recompilation after config save failed: %s", exc)
+
+    def _ensure_fabric_crl(self, config: AppConfig) -> None:
+        # ocserv refuses to start with `crl =` pointing at a missing file.
+        if not config.cert_path("ca.key").exists():
+            return
+        from kornode.services.certificates import CertificateService
+
+        CertificateService(config, files=self.file_manager).ensure_crl()
 
     def diff_rendered_files(self, config: AppConfig) -> str:
         secrets = collect_config_secrets(config)

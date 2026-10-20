@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from kornode.config.models import AppConfig
-from kornode.services.command import CommandResult, CommandRunner
+from kornode.services.command import CommandError, CommandResult, CommandRunner
 
 # occtl's print_time_ival7 switches format with age: "  32s", " 2m:36s",
 # "36h:00m", then " 3days" once the session is 2+ days old — the unit may be
@@ -61,6 +61,25 @@ class SessionService:
     def occtl_json_argv(self, *args: str) -> list[str]:
         return ["occtl", "--json", "-s", self.control_socket(), *args]
 
+    def disconnect_if_present(self, username: str) -> None:
+        result = self.runner.run(
+            self.occtl_argv("disconnect", "user", username), timeout=15, check=False
+        )
+        if result.ok:
+            return
+        # occtl also fails when there was no session. Only a valid, empty
+        # response from the server proves absence; parser errors are not absence.
+        probe = self.runner.run(
+            self.occtl_json_argv("show", "user", username), timeout=15, check=False
+        )
+        if probe.returncode in (0, 2):
+            try:
+                if json.loads(probe.stdout) == []:
+                    return
+            except ValueError:
+                pass
+        raise CommandError(result)
+
     def parse_sessions(self, output: str) -> list[SessionRecord]:
         table_records = self._parse_table_sessions(output, generic_ip_is="real_ip")
         if table_records:
@@ -101,13 +120,16 @@ class SessionService:
             for key, value in item.items()
             if value is not None
         }
-        username = self._first_json_value(
-            normalized,
-            "username",
-            "user",
-            "name",
-            "login",
-        ) or default_username
+        username = (
+            self._first_json_value(
+                normalized,
+                "username",
+                "user",
+                "name",
+                "login",
+            )
+            or default_username
+        )
         if not username:
             return None
         # device (e.g. "oc-client0") and the connection timestamp are
@@ -430,9 +452,7 @@ class SessionService:
         matches = _DURATION_TOKEN_RE.findall(text)
         if not matches:
             return None
-        return sum(
-            int(value) * _DURATION_UNIT_SECONDS[unit[0].lower()] for value, unit in matches
-        )
+        return sum(int(value) * _DURATION_UNIT_SECONDS[unit[0].lower()] for value, unit in matches)
 
     # ocserv reports conn_time/session_start_time of 0 when unknown; anything
     # before this cutoff (2000-01-01) is such a placeholder, not a real start.

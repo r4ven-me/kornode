@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from kornode.config.loader import load_config
+from kornode.config.models import AddressOverlapError, AppConfig
 
 
 def test_internal_dns_listen_follows_a_customized_ipv4_network(tmp_path: Path) -> None:
@@ -50,12 +52,168 @@ def test_malformed_ipv4_network_still_raises_its_own_error(tmp_path: Path) -> No
 def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     config = load_config(tmp_path / "missing.yaml", environ={})
 
+    assert config.node.id == 1
+    assert config.fabric.enabled is False
+    assert config.fabric.enroll_pool == "10.99.255.240/28"
     assert config.server.port == 443
     assert config.web.enabled is False
     assert config.routing.client_policy == "full"
     assert config.system.log_rotation.enabled is False
     assert config.certificates.letsencrypt.auto_renew_interval == 7
     assert config.certificates.letsencrypt.auto_renew_interval_unit == "days"
+
+
+def test_fabric_enabled_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"fabric": {"enabled": True}},
+        environ={},
+    )
+
+    assert config.node.id == 1
+    assert config.server.ipv4_network == "10.100.1.0/24"
+    assert config.internal_dns.listen == "10.100.1.1"
+
+
+def test_fabric_uses_node_id_for_derived_addresses(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"node": {"id": 7}, "fabric": {"enabled": True}},
+        environ={},
+    )
+
+    assert config.server.ipv4_network == "10.100.7.0/24"
+    assert config.internal_dns.listen == "10.100.7.1"
+
+
+def test_fabric_env_overrides_work(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        environ={
+            "KORNODE_NODE__ID": "9",
+            "KORNODE_FABRIC__ENABLED": "true",
+            "KORNODE_FABRIC__CLIENT_POOL": '"10.110.{id}.0/24"',
+        },
+    )
+
+    assert config.node.id == 9
+    assert config.fabric.client_pool == "10.110.{id}.0/24"
+    assert config.server.ipv4_network == "10.110.9.0/24"
+    assert config.internal_dns.listen == "10.110.9.1"
+
+
+def test_explicit_server_network_overrides_fabric_derived_default(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "fabric": {"enabled": True},
+            "server": {"ipv4_network": "10.120.1.0/24"},
+            "internal_dns": {"listen": "10.120.1.1"},
+        },
+        environ={},
+    )
+
+    assert config.server.ipv4_network == "10.120.1.0/24"
+    assert config.internal_dns.listen == "10.120.1.1"
+
+
+def test_explicit_server_network_rejects_fabric_overlap(tmp_path: Path) -> None:
+    with pytest.raises(AddressOverlapError) as exc_info:
+        load_config(
+            tmp_path / "missing.yaml",
+            cli_overrides={
+                "fabric": {"enabled": True, "reserved": ["10.120.0.0/16"]},
+                "server": {"ipv4_network": "10.120.1.0/24"},
+                "internal_dns": {"listen": "10.120.1.1"},
+            },
+            environ={},
+        )
+
+    assert exc_info.value.conflicts[0].to_dict() == {
+        "prefix": "10.120.1.0/24",
+        "node": 1,
+        "with": "10.120.0.0/16",
+        "owner": "fabric.reserved",
+    }
+
+
+def test_explicit_server_network_rejects_enroll_pool_overlap(tmp_path: Path) -> None:
+    with pytest.raises(AddressOverlapError) as exc_info:
+        load_config(
+            tmp_path / "missing.yaml",
+            cli_overrides={
+                "fabric": {"enabled": True, "enroll_pool": "10.120.1.0/24"},
+                "server": {"ipv4_network": "10.120.1.0/24"},
+                "internal_dns": {"listen": "10.120.1.1"},
+            },
+            environ={},
+        )
+
+    assert exc_info.value.conflicts[0].to_dict() == {
+        "prefix": "10.120.1.0/24",
+        "node": 1,
+        "with": "10.120.1.0/24",
+        "owner": "fabric.enroll_pool",
+    }
+
+
+@pytest.mark.parametrize(
+    ("auth", "message"),
+    [
+        (
+            {"password": {"enabled": False}, "oidc": {"enabled": True}},
+            "fabric.enabled requires auth.password.enabled",
+        ),
+        (
+            {"password": {"enabled": True}, "certificate": {"enabled": True}},
+            "auth.certificate.enabled cannot be combined with fabric.enabled",
+        ),
+        (
+            {"password": {"enabled": True}, "oidc": {"enabled": True}},
+            "auth.oidc.enabled cannot be combined with fabric.enabled",
+        ),
+        (
+            {
+                "password": {"enabled": True},
+                "otp": {"enabled": True, "ocserv_oath_auth": True},
+            },
+            "auth.otp.ocserv_oath_auth cannot be combined with fabric.enabled",
+        ),
+    ],
+)
+def test_fabric_auth_rejects_forbidden_combinations(
+    auth: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        AppConfig.model_validate({"fabric": {"enabled": True}, "auth": auth})
+
+
+def test_fabric_auth_accepts_password_only() -> None:
+    config = AppConfig.model_validate(
+        {
+            "fabric": {"enabled": True},
+            "auth": {"password": {"enabled": True}},
+        }
+    )
+
+    assert config.fabric.enabled is True
+
+
+def test_fabric_disabled_does_not_apply_d43_auth_restrictions() -> None:
+    config = AppConfig.model_validate(
+        {
+            "fabric": {"enabled": False},
+            "auth": {
+                "password": {"enabled": False},
+                "certificate": {"enabled": True},
+                "oidc": {"enabled": True},
+                "otp": {"enabled": True, "ocserv_oath_auth": True},
+            },
+        }
+    )
+
+    assert config.fabric.enabled is False
 
 
 def test_load_config_defaults_for_new_server_tuning_fields(tmp_path: Path) -> None:
@@ -135,3 +293,52 @@ web:
     config = load_config(config_path, env_file=env_path, environ={})
 
     assert config.web.admin_password == "from-dotenv"
+
+
+@pytest.mark.parametrize("value", ['eth0" accept', "a" * 16, "eth 0"])
+def test_routing_main_interface_must_be_auto_or_an_ifname(tmp_path: Path, value: str) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.safe_dump({"routing": {"main_interface": value}}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid network interface name"):
+        load_config(config)
+
+
+def test_routing_main_interface_accepts_auto_and_an_ifname(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("routing:\n  main_interface: ens3\n", encoding="utf-8")
+
+    assert load_config(config).routing.main_interface == "ens3"
+    assert load_config(tmp_path / "missing.yaml").routing.main_interface == "auto"
+
+
+def test_control_defaults_and_signing_key_follows_data_dir(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"system": {"data_dir": str(tmp_path / "data")}},
+        environ={},
+    )
+
+    assert config.control.enabled is False
+    assert config.control.port == 8444
+    assert config.control.signing_key == tmp_path / "data" / "control" / "signing.ed25519"
+
+
+def test_control_requires_fabric(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="control.enabled requires fabric.enabled"):
+        load_config(
+            tmp_path / "missing.yaml",
+            cli_overrides={"control": {"enabled": True}},
+            environ={},
+        )
+
+
+def test_control_enabled_with_fabric(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={"fabric": {"enabled": True}, "control": {"enabled": True, "port": 9444}},
+        environ={},
+    )
+
+    assert config.control.enabled is True
+    assert config.control.port == 9444

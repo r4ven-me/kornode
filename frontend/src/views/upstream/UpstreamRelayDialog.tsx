@@ -42,7 +42,7 @@ export function UpstreamRelayDialog({
           <h2>{`Relay through ${draft.name}`}</h2>
           <IconButton label="Close" icon={X} onClick={onClose} />
         </div>
-        <form className="settings-grid" onSubmit={onSave}>
+        <form className="settings-grid" onSubmit={onSave} data-capability="upstream.profile.save">
           <label
             className="switch field-full-width"
             title="Route these specific CIDRs/domains of VPN users through this profile, regardless of which profile is the default."
@@ -77,6 +77,8 @@ export function UpstreamRelayDialog({
                 />
               </label>
               <div className="field-full-width">
+                <div data-capability="upstream.profile.routes_sources">
+                <div data-capability="upstream.profile.routes_sources.refresh">
                 <RoutingListSourcesPanel
                   title="Relay route sources"
                   urlsLabel="Route URLs"
@@ -91,8 +93,12 @@ export function UpstreamRelayDialog({
                   onPreviewUrl={onPreviewRoutesUrl}
                   onRefreshUrl={onRefreshRoutesUrl}
                 />
+                </div>
+                </div>
               </div>
               <div className="field-full-width">
+                <div data-capability="upstream.profile.domains_sources">
+                <div data-capability="upstream.profile.domains_sources.refresh">
                 <RoutingListSourcesPanel
                   title="Relay domain sources"
                   urlsLabel="Domain URLs"
@@ -107,11 +113,13 @@ export function UpstreamRelayDialog({
                   onPreviewUrl={onPreviewDomainsUrl}
                   onRefreshUrl={onRefreshDomainsUrl}
                 />
+                </div>
+                </div>
               </div>
             </div>
           )}
           <div className="modal-actions">
-            <button className="primary-button" disabled={busy === "upstream-relay"} type="submit">
+            <button className="primary-button" disabled={busy === "upstream-relay"} type="submit" data-capability="upstream.profile.save">
               <Save size={18} aria-hidden="true" />
               <span>Save relay lists</span>
             </button>

@@ -180,9 +180,25 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         written: []
       },
       "/api/routing/reload": [commandResult],
-      "/api/routing/nft": commandResult,
-      "/api/routing/nft/apply": [commandResult],
-      "/api/routing/nft/cleanup": [commandResult],
+      "/api/net/plan": {
+        exits: [],
+        warnings: [],
+        ops: [],
+        schema_hash: null
+      },
+      "/api/net/status": {
+        available: true,
+        exits: [],
+        warnings: []
+      },
+      "/api/net/apply": {
+        exits: [],
+        warnings: [],
+        ops: [],
+        schema_hash: null,
+        applied: true,
+        dry_run: false
+      },
       "/api/internal-dns/status": {
         enabled: false,
         blocklist_enabled: false,
@@ -190,6 +206,7 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         listen: "10.10.10.1",
         port: 53,
         client_dns: ["1.1.1.1", "8.8.8.8"],
+        upstreams: [],
         default_upstreams: [],
         forward_upstreams: [],
         forward_domains: [],

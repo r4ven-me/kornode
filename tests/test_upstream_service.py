@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from kornode.config.models import AppConfig, UpstreamProfileConfig
 from kornode.services import upstream as upstream_module
 from kornode.services.command import CommandError, CommandResult
+from kornode.services.net import NetApplyError
 from kornode.services.upstream import UpstreamService
 from kornode.services.upstream_pushed import PushedRouting
 
@@ -36,14 +37,6 @@ class FakeRunner:
         self.calls.append({"argv": argv, **kwargs})
         if argv[0] == "openconnect" and self.tmp_path is not None:
             _write_fake_openconnect_pid(argv, self.processes, self.tmp_path)
-        # Simulate a plain (non-Docker-managed) host for
-        # NftablesService._ensure_docker_forward_compat()'s existence check,
-        # so it's a no-op and doesn't add extra "nft" calls these tests
-        # don't otherwise expect.
-        if tuple(argv[:5]) == ("nft", "list", "chain", "ip", "filter"):
-            return CommandResult(
-                argv=tuple(argv), returncode=1, stdout="", stderr="No such file or directory"
-            )
         return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
 
     def call_for(self, program: str) -> dict[str, Any]:
@@ -54,6 +47,28 @@ class FakeRunner:
             process.terminate()
         for process in self.processes:
             process.wait(timeout=5)
+
+
+class FakeNet:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls: list[str] = []
+        self.fail = fail
+
+    def converge(self) -> dict[str, object]:
+        self.calls.append("converge")
+        if self.fail:
+            raise NetApplyError("kernel did not converge: simulated failure")
+        return {"applied": True, "status": {"last_error": None}}
+
+    def wake(self) -> bool:
+        self.calls.append("wake")
+        return True
+
+    def plan(self) -> dict[str, object]:
+        return {"ops": [], "warnings": [], "exits": []}
+
+    def status(self) -> dict[str, object]:
+        return {"running": False}
 
 
 def _write_pid(service: UpstreamService, pid: int | str) -> None:
@@ -268,9 +283,8 @@ def test_upstream_profile_relay_source_fields_are_validated_and_deduplicated(
 
 
 def test_upstream_profiles_with_colliding_safe_names_are_rejected(tmp_path: Path) -> None:
-    # "My-VPN" and "my_vpn" both normalize to the same nftables set name
-    # (RoutingService.list_targets()'s profile_safe_name()), which would
-    # break the whole ruleset load.
+    # "My-VPN" and "my_vpn" both normalize to the same generated target
+    # name, which would collide in the reconciler's policy inputs.
     with pytest.raises(ValidationError, match="normalized"):
         AppConfig.model_validate(
             _upstream_config(
@@ -669,7 +683,7 @@ def test_connect_active_repairs_stale_resolv_conf_and_uses_graceful_timeout(
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
     try:
         service.connect_active()
     finally:
@@ -692,7 +706,7 @@ def test_connect_active_leaves_healthy_resolv_conf_untouched(
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
     try:
         service.connect_active()
     finally:
@@ -713,7 +727,7 @@ def test_connect_active_does_not_repair_resolv_conf_on_dry_run(
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
     runner = FakeRunner()
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     service.connect_active(dry_run=True)
 
@@ -795,7 +809,8 @@ def test_connect_waits_for_tunnel_interface_before_applying_routes(
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     expected_interface = service.profile_interface(config.upstream.profiles[0])
     interface_checks = iter([False, False, True])
     monkeypatch.setattr(service, "_interface_exists", lambda _interface: next(interface_checks))
@@ -805,36 +820,20 @@ def test_connect_waits_for_tunnel_interface_before_applying_routes(
     finally:
         runner.close()
 
-    route_calls = [
-        call["argv"] for call in runner.calls if call["argv"][:3] == ["ip", "route", "replace"]
-    ]
-    assert route_calls
-    assert route_calls[-1][4:6] == ["dev", expected_interface]
+    assert expected_interface == "oc-middle0"
+    assert net.calls == ["converge", "converge"]
 
 
-def test_connect_fails_when_required_policy_route_cannot_be_installed(tmp_path: Path) -> None:
-    class RouteFailRunner(FakeRunner):
-        def run(self, argv: list[str], **kwargs: Any) -> CommandResult:
-            result = super().run(argv, **kwargs)
-            if argv[:3] == ["ip", "route", "replace"]:
-                return CommandResult(
-                    argv=tuple(argv),
-                    returncode=2,
-                    stdout="",
-                    stderr="simulated route failure",
-                )
-            return result
-
+def test_connect_fails_when_reconciler_cannot_converge(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
-    runner = RouteFailRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    runner = FakeRunner(tmp_path)
+    service = UpstreamService(config, runner=runner, net=FakeNet(fail=True))
 
     try:
-        with pytest.raises(CommandError) as exc_info:
+        with pytest.raises(NetApplyError, match="simulated failure"):
             service.connect_active()
-        assert exc_info.value.result.stderr == "simulated route failure"
     finally:
         runner.close()
 
@@ -854,7 +853,7 @@ def test_connect_raises_when_backgrounded_process_dies_immediately(tmp_path: Pat
     # No tmp_path passed -- FakeRunner reports the openconnect call as a
     # plain success without leaving a live process behind, exactly like a
     # daemon that backgrounded and then immediately died.
-    service = UpstreamService(config, runner=FakeRunner())
+    service = UpstreamService(config, runner=FakeRunner(), net=FakeNet())
 
     with pytest.raises(CommandError) as exc_info:
         service.connect_active()
@@ -874,7 +873,7 @@ def test_recover_reports_failure_instead_of_a_false_success_when_background_dies
     config.upstream.failover = False
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
-    service = UpstreamService(config, runner=FakeRunner())
+    service = UpstreamService(config, runner=FakeRunner(), net=FakeNet())
 
     assert service.recover() is False
 
@@ -887,7 +886,7 @@ def test_connect_active_is_a_noop_when_already_connected(tmp_path: Path) -> None
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
     runner = FakeRunner()
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
     process = _spawn_fake_openconnect(tmp_path)
     try:
         _write_pid(service, process.pid)
@@ -903,7 +902,7 @@ def test_connect_active_is_a_noop_when_already_connected(tmp_path: Path) -> None
 
 
 def test_disconnect_noop_when_not_connected(tmp_path: Path) -> None:
-    result = UpstreamService(_config(tmp_path)).disconnect()
+    result = UpstreamService(_config(tmp_path), net=FakeNet()).disconnect()
 
     assert result.returncode == 0
     assert result.stdout == "not connected"
@@ -914,7 +913,7 @@ def test_disconnect_terminates_process_gracefully(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
-    service = UpstreamService(config, runner=FakeRunner())
+    service = UpstreamService(config, runner=FakeRunner(), net=FakeNet())
     _write_pid(service, process.pid)
 
     result = service.disconnect()
@@ -929,7 +928,7 @@ def test_disconnect_dry_run_does_not_kill_process(tmp_path: Path) -> None:
         config = _config(tmp_path)
         config.upstream.profiles.append(_profile())
         config.upstream.active_profile = "primary"
-        service = UpstreamService(config)
+        service = UpstreamService(config, net=FakeNet())
         _write_pid(service, process.pid)
 
         result = service.disconnect(dry_run=True)
@@ -941,7 +940,7 @@ def test_disconnect_dry_run_does_not_kill_process(tmp_path: Path) -> None:
         process.wait(timeout=5)
 
 
-def test_connect_active_applies_nftables_before_dialing_when_mode_not_direct(
+def test_connect_active_converges_before_dialing_when_mode_not_direct(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
@@ -949,39 +948,32 @@ def test_connect_active_applies_nftables_before_dialing_when_mode_not_direct(
     config.upstream.active_profile = "primary"
     assert config.routing.client_policy == "full"
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     try:
         service.connect_active()
     finally:
         runner.close()
 
-    programs = [call["argv"][0] for call in runner.calls]
-    # One `nft -j list table ...` readiness probe (the live table's schema
-    # doesn't match yet on this first apply, see NftablesService._apply_ruleset)
-    # that decides a full recreate is needed, one atomic `nft -f` load
-    # (folding the old table delete/redefine sequence into one transaction,
-    # see templates/nftables.nft.j2), plus one `nft list chain ...` existence
-    # check for the Docker DOCKER-USER compat shim (a no-op here since
-    # FakeRunner reports it absent).
-    assert programs.count("nft") == 3
-    assert programs.index("nft") < programs.index("openconnect")
+    assert net.calls[0] == "converge"
+    assert runner.call_for("openconnect")["argv"][0] == "openconnect"
 
 
-def test_connect_active_applies_policy_routing_after_successful_connect(
+def test_connect_active_converges_after_successful_connect(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     try:
         service.connect_active()
     finally:
         runner.close()
 
-    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
-    assert ["ip", "route", "replace", "default", "dev", "oc-middle0", "table", "1201"] in ip_calls
+    assert net.calls == ["converge", "converge"]
 
 
 def test_connect_restores_persisted_pushed_host_routes_after_restart(tmp_path: Path) -> None:
@@ -998,7 +990,8 @@ def test_connect_restores_persisted_pushed_host_routes_after_restart(tmp_path: P
     config.upstream.enabled = True
     config.upstream.active_profile = profile.name
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     service.pushed.save(profile, PushedRouting(routes=["10.90.0.0/16"]))
     service.pushed.mark_applied(service.pushed.fingerprint())
 
@@ -1007,46 +1000,27 @@ def test_connect_restores_persisted_pushed_host_routes_after_restart(tmp_path: P
     finally:
         runner.close()
 
-    openconnect_index = next(
-        index for index, call in enumerate(runner.calls) if call["argv"][0] == "openconnect"
-    )
-    post_connect_nft_loads = [
-        call
-        for call in runner.calls[openconnect_index + 1 :]
-        if call["argv"][:2] == ["nft", "-f"]
-    ]
-    assert len(post_connect_nft_loads) == 1
-    rendered = config.generated_path("nftables.nft").read_text(encoding="utf-8")
-    assert "10.90.0.0/16" in rendered
-    assert [
-        "ip",
-        "route",
-        "replace",
-        "default",
-        "dev",
-        "oc-middle0",
-        "table",
-        "1202",
-    ] in [call["argv"] for call in runner.calls]
+    assert net.calls == ["converge", "converge", "converge"]
+    assert service.pushed.applied_fingerprint() == service.pushed.fingerprint()
 
 
-def test_disconnect_cleans_up_policy_routing(tmp_path: Path) -> None:
+def test_disconnect_converges_after_tunnel_is_gone(tmp_path: Path) -> None:
     process = _spawn_fake_openconnect(tmp_path)
     runner = FakeRunner()
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     _write_pid(service, process.pid)
 
     service.disconnect()
     process.wait(timeout=2)
 
-    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
-    assert ["ip", "route", "flush", "table", "1201"] in ip_calls
+    assert net.calls == ["converge"]
 
 
-def test_connect_applies_policy_routing_for_a_named_target_even_when_not_active(
+def test_connect_converges_for_a_named_target_even_when_not_active(
     tmp_path: Path,
 ) -> None:
     # A profile with its own routes/domains gets its own table pointed at
@@ -1067,20 +1041,19 @@ def test_connect_applies_policy_routing_for_a_named_target_even_when_not_active(
     config.upstream.enabled = True
     config.upstream.active_profile = "primary"
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     try:
         service.connect("finance")
     finally:
         runner.close()
 
-    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
-    # finance is the 2nd configured profile (primary is 1st) -- its routing
-    # offset is derived from that fixed position (2), not from a count of
-    # profiles with routes, so table_id = 1201 + 2 = 1203.
-    assert ["ip", "route", "replace", "default", "dev", "oc-finance", "table", "1203"] in ip_calls
+    openconnect_call = runner.call_for("openconnect")["argv"]
+    assert openconnect_call[openconnect_call.index("--interface") + 1] == "oc-finance"
+    assert net.calls == ["converge", "converge"]
 
 
-def test_disconnect_cleans_up_named_target_policy_routing(tmp_path: Path) -> None:
+def test_disconnect_converges_for_a_named_target(tmp_path: Path) -> None:
     process = _spawn_fake_openconnect(tmp_path)
     runner = FakeRunner()
     config = _config(tmp_path)
@@ -1097,7 +1070,8 @@ def test_disconnect_cleans_up_named_target_policy_routing(tmp_path: Path) -> Non
     )
     config.upstream.enabled = True
     config.upstream.active_profile = "primary"
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     finance_profile = config.upstream.profiles[1]
     path = service._pid_file(finance_profile)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1106,45 +1080,111 @@ def test_disconnect_cleans_up_named_target_policy_routing(tmp_path: Path) -> Non
     service.disconnect("finance")
     process.wait(timeout=2)
 
-    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
-    # See the analogous comment in the connect() test above re: offset 2.
-    assert ["ip", "route", "flush", "table", "1203"] in ip_calls
+    assert net.calls == ["converge"]
 
 
-def test_ensure_policy_routing_covers_connected_named_targets(tmp_path: Path) -> None:
+def test_install_carrier_exclusion_adds_rule_for_literal_ip(tmp_path: Path) -> None:
+    # A literal IP in `server` must not trigger a DNS lookup -- these are
+    # unit tests, no real network resolution.
+    profile = _profile(server="203.0.113.10")
+    service = UpstreamService(_config(tmp_path), net=FakeNet())
+
+    addresses = service.install_carrier_exclusion(profile)
+
+    assert addresses == ["203.0.113.10"]
+    state_path = service._carrier_exclusion_state_path(profile)
+    assert state_path.read_text(encoding="utf-8") == "203.0.113.10\n"
+
+
+def test_install_carrier_exclusion_is_idempotent(tmp_path: Path) -> None:
+    profile = _profile(server="203.0.113.10")
+    service = UpstreamService(_config(tmp_path), net=FakeNet())
+
+    service.install_carrier_exclusion(profile)
+    service.install_carrier_exclusion(profile)
+
+    assert service._carrier_exclusion_state_path(profile).read_text(encoding="utf-8") == (
+        "203.0.113.10\n"
+    )
+
+
+def test_install_carrier_exclusion_refreshes_on_address_change(tmp_path: Path) -> None:
+    service = UpstreamService(_config(tmp_path), net=FakeNet())
+
+    service.install_carrier_exclusion(_profile(server="203.0.113.10"))
+    service.install_carrier_exclusion(_profile(server="203.0.113.20"))
+
+    assert service._carrier_exclusion_state_path(_profile()).read_text(encoding="utf-8") == (
+        "203.0.113.20\n"
+    )
+
+
+def test_remove_carrier_exclusion_deletes_installed_rule_and_state(tmp_path: Path) -> None:
+    profile = _profile(server="203.0.113.10")
+    service = UpstreamService(_config(tmp_path), net=FakeNet())
+    service.install_carrier_exclusion(profile)
+    state_path = service._carrier_exclusion_state_path(profile)
+    assert state_path.exists()
+
+    service.remove_carrier_exclusion(profile)
+
+    assert not state_path.exists()
+
+
+def test_connect_installs_carrier_exclusion_before_dialing(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    config.upstream.profiles.append(_profile("primary"))
-    config.upstream.profiles.append(
-        UpstreamProfileConfig(
-            name="finance",
-            server="finance.example.com",
-            auth_type="password",
-            username="user",
-            interface="oc-finance",
-            routes=["10.50.0.0/16"],
-        )
-    )
-    config.upstream.enabled = True
-    # No active_profile at all -- the default target is inactive, but the
-    # named target must still be maintained on its own.
-    runner = FakeRunner()
-    service = UpstreamService(config, runner=runner)
-    finance_profile = config.upstream.profiles[1]
-    process = _spawn_fake_openconnect(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    events: list[str] = []
+
+    class EventRunner(FakeRunner):
+        def run(self, argv: list[str], **kwargs: Any) -> CommandResult:
+            if argv[0] == "openconnect":
+                events.append("dial")
+            return super().run(argv, **kwargs)
+
+    carrier_file: list[Path] = []
+    carrier_at_converge: list[bool] = []
+
+    class EventNet(FakeNet):
+        def converge(self) -> dict[str, object]:
+            events.append("converge")
+            carrier_at_converge.append(carrier_file[0].exists())
+            return super().converge()
+
+    runner = EventRunner(tmp_path)
+    net = EventNet()
+    service = UpstreamService(config, runner=runner, net=net)
+    state_path = service._carrier_exclusion_state_path(config.upstream.profiles[0])
+    carrier_file.append(state_path)
     try:
-        path = service._pid_file(finance_profile)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(process.pid))
-
-        service.ensure_policy_routing()
+        service.connect()
     finally:
-        process.terminate()
-        process.wait(timeout=5)
+        runner.close()
 
-    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
-    assert any(
-        call[:6] == ["ip", "route", "replace", "default", "dev", "oc-finance"] for call in ip_calls
-    )
+    assert state_path.read_text(encoding="utf-8") == "203.0.113.10\n"
+    # carrier recorded -> converge (kill-switch) -> dial -> converge again
+    assert events[:3] == ["converge", "dial", "converge"]
+    assert carrier_at_converge[0] is True
+
+
+def test_disconnect_removes_carrier_exclusion(tmp_path: Path) -> None:
+    process = _spawn_fake_openconnect(tmp_path)
+    runner = FakeRunner()
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
+    profile = config.upstream.profiles[0]
+    service.install_carrier_exclusion(profile)
+    _write_pid(service, process.pid)
+
+    service.disconnect()
+    process.wait(timeout=2)
+
+    assert not service._carrier_exclusion_state_path(profile).exists()
+    assert net.calls == ["converge"]
 
 
 def test_is_healthy_false_when_not_connected(tmp_path: Path) -> None:
@@ -1195,7 +1235,7 @@ def test_healthcheck_pings_through_the_tunnel_interface(tmp_path: Path) -> None:
     )
     config.upstream.active_profile = "primary"
     runner = FakeRunner()
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     service.healthcheck()
 
@@ -1253,9 +1293,8 @@ def test_is_healthy_false_when_check_host_ping_fails(tmp_path: Path) -> None:
 class ScriptedConnectRunner:
     """Fakes connect_active()'s underlying runner: openconnect calls whose
     server host is in fail_servers raise CommandError (as a real failed
-    connect attempt would under check=True); everything else -- including
-    the nftables/ip plumbing connect_active()/disconnect() also trigger --
-    succeeds, and (for openconnect specifically) leaves a genuinely live
+    connect attempt would under check=True); everything else succeeds, and
+    (for openconnect specifically) leaves a genuinely live
     fake process behind so _verify_backgrounded's post-connect liveness
     poll (see upstream.py) finds the connection still up, same as a real
     successful dial. Call close() in a finally block to clean these up."""
@@ -1293,7 +1332,7 @@ def test_recover_retries_same_profile_when_failover_disabled(tmp_path: Path) -> 
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
     try:
         assert service.recover() is True
     finally:
@@ -1309,7 +1348,7 @@ def test_recover_fails_over_to_next_profile_when_enabled(tmp_path: Path) -> None
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers={"vpn.example.com"}, tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         assert service.recover() is True
@@ -1326,7 +1365,7 @@ def test_recover_does_not_fail_over_when_disabled(tmp_path: Path) -> None:
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers={"vpn.example.com"}, tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         assert service.recover() is False
@@ -1346,7 +1385,7 @@ def test_recover_wraps_around_the_profile_cycle(tmp_path: Path) -> None:
     runner = ScriptedConnectRunner(
         fail_servers={"c.example.com", "a.example.com"}, tmp_path=tmp_path
     )
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         assert service.recover() is True
@@ -1378,7 +1417,7 @@ def test_recover_never_dials_a_disabled_fallback_profile(tmp_path: Path) -> None
     assert UpstreamService(config).selected_profile() is None
 
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
     try:
         assert service.recover() is True
     finally:
@@ -1408,7 +1447,7 @@ def test_enforce_profile_enablement_dials_disconnected_standbys(
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         results = service.enforce_profile_enablement()
@@ -1433,7 +1472,7 @@ def test_enforce_profile_enablement_skips_already_connected_standby(
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         service.connect("backup")
@@ -1452,7 +1491,7 @@ def test_enforce_profile_enablement_logs_and_continues_on_failure(
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers={"backup.example.com"}, tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         results = service.enforce_profile_enablement()
@@ -1474,7 +1513,7 @@ def test_enforce_profile_enablement_never_dials_a_disabled_standby(
     config.upstream.profiles.append(backup)
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         results = service.enforce_profile_enablement()
@@ -1492,7 +1531,7 @@ def test_enforce_profile_enablement_disconnects_a_standby_that_became_disabled(
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         service.connect("backup")
@@ -1516,7 +1555,7 @@ def test_enforce_profile_enablement_disconnects_the_active_profile_once_disabled
     config.upstream.profiles.append(_profile("primary"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         service.connect_active()
@@ -1599,13 +1638,14 @@ def test_duplicate_effective_interfaces_are_rejected() -> None:
         )
 
 
-def test_connect_standby_profile_does_not_touch_policy_routing(tmp_path: Path) -> None:
+def test_connect_standby_profile_dials_its_own_interface(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile("primary"))
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = FakeRunner(tmp_path)
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     try:
         service.connect("backup")
     finally:
@@ -1613,7 +1653,7 @@ def test_connect_standby_profile_does_not_touch_policy_routing(tmp_path: Path) -
 
     openconnect_call = runner.call_for("openconnect")
     assert "oc-up1" in openconnect_call["argv"]
-    assert not any(call["argv"][:3] == ["ip", "route", "replace"] for call in runner.calls)
+    assert net.calls == ["converge", "converge"]
 
 
 def test_switch_profile_repoints_rules_without_reconnecting(tmp_path: Path) -> None:
@@ -1630,7 +1670,8 @@ def test_switch_profile_repoints_rules_without_reconnecting(tmp_path: Path) -> N
     )
     config.upstream.active_profile = "primary"
     runner = FakeRunner()
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
     process = _spawn_fake_openconnect(tmp_path)
     backup_pid = service._pid_file(config.upstream.profiles[1])
     backup_pid.parent.mkdir(parents=True, exist_ok=True)
@@ -1640,18 +1681,7 @@ def test_switch_profile_repoints_rules_without_reconnecting(tmp_path: Path) -> N
     process.terminate()
 
     assert not any(call["argv"][0] == "openconnect" for call in runner.calls)
-    assert any(call["argv"][0] == "nft" for call in runner.calls)
-    ip_calls = [call["argv"] for call in runner.calls if call["argv"][0] == "ip"]
-    assert [
-        "ip",
-        "route",
-        "replace",
-        "default",
-        "dev",
-        "oc-backup0",
-        "table",
-        "1201",
-    ] in ip_calls
+    assert net.calls == ["converge"]
     assert service.selected_profile() is not None
     assert service.selected_profile().name == "backup"
 
@@ -1663,7 +1693,7 @@ def test_recover_adopts_already_connected_standby_without_dialing(tmp_path: Path
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "primary"
     runner = ScriptedConnectRunner(fail_servers={"vpn.example.com"}, tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
     process = _spawn_fake_openconnect(tmp_path)
     backup_pid = service._pid_file(config.upstream.profiles[1])
     backup_pid.parent.mkdir(parents=True, exist_ok=True)
@@ -1765,45 +1795,6 @@ def test_upstream_lock_is_reentrant_within_one_instance(tmp_path: Path) -> None:
     assert service._lock_fd is None
     with pytest.raises(OSError):
         os.fstat(outer_fd)
-
-
-def test_watchdog_restores_policy_routing_before_healthcheck(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from kornode import cli
-
-    config = AppConfig.model_validate(
-        _upstream_config(
-            tmp_path,
-            active_profile="primary",
-            profiles=[
-                {
-                    "name": "primary",
-                    "server": "vpn.example.com",
-                    "auth_type": "password",
-                    "username": "user",
-                }
-            ],
-        )
-    )
-    monkeypatch.setattr(cli, "get_config", lambda: config)
-    events: list[str] = []
-    monkeypatch.setattr(
-        UpstreamService,
-        "ensure_policy_routing",
-        lambda self: events.append("ensure") or [],
-    )
-    monkeypatch.setattr(
-        UpstreamService,
-        "health_status",
-        lambda self: (events.append("health") or True, "healthy"),
-    )
-    monkeypatch.setattr(UpstreamService, "enforce_profile_enablement", lambda self: [])
-    monkeypatch.setattr(UpstreamService, "refresh_server_routes", lambda self: None)
-
-    cli.upstream_watch(once=True)
-
-    assert events == ["ensure", "health"]
 
 
 def test_upstream_log_entries_include_utc_timestamps(tmp_path: Path) -> None:
@@ -1935,8 +1926,8 @@ def test_watchdog_respects_connect_on_boot_until_first_connection(
         "recover",
         lambda self: recover_calls.append(None) or True,
     )
-    monkeypatch.setattr(UpstreamService, "ensure_policy_routing", lambda self: [])
     monkeypatch.setattr(UpstreamService, "enforce_profile_enablement", lambda self: [])
+    monkeypatch.setattr(UpstreamService, "refresh_server_routes", lambda self: None)
 
     class _StopLoop(Exception):
         pass
@@ -1985,7 +1976,7 @@ def test_explicit_server_cert_pin_wins_over_accepted_pin(tmp_path: Path) -> None
 def test_trusted_cert_accepts_the_certificate_the_server_presents(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kornode.services.cert_pin import CertificatePin
+    from kornode.tunnels.pin import CertificatePin
 
     fetched: list[tuple[str, int]] = []
 
@@ -2036,7 +2027,7 @@ def test_unreachable_server_certificate_is_a_command_error(
 def test_trusted_cert_follows_a_changed_server_key_and_logs_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kornode.services.cert_pin import CertificatePin
+    from kornode.tunnels.pin import CertificatePin
 
     presented = ["pin-sha256:FIRST"]
     monkeypatch.setattr(
@@ -2186,9 +2177,9 @@ def test_openconnect_profile_still_requires_server(tmp_path: Path) -> None:
 
 class LinkStateRunner:
     """Fakes `ip -j link show dev <interface>`'s report of an externally-
-    managed interface's link state. Everything else (nftables/ip rule/ip
-    route calls) succeeds like FakeRunner, and no openconnect process is
-    ever spawned -- kornode never dials one for this kind."""
+    managed interface's link state. Everything else succeeds like
+    FakeRunner, and no openconnect process is ever spawned -- kornode never
+    dials one for this kind."""
 
     def __init__(self, link_up: dict[str, bool]) -> None:
         self.link_up = link_up
@@ -2202,10 +2193,6 @@ class LinkStateRunner:
             up = self.link_up.get(interface, False)
             payload = f'[{{"operstate": "{"UP" if up else "DOWN"}", "flags": []}}]'
             return CommandResult(argv=tuple(argv), returncode=0, stdout=payload, stderr="")
-        if tuple(argv[:5]) == ("nft", "list", "chain", "ip", "filter"):
-            return CommandResult(
-                argv=tuple(argv), returncode=1, stdout="", stderr="No such file or directory"
-            )
         return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
 
 
@@ -2257,30 +2244,30 @@ def test_connect_on_external_interface_applies_routing_without_dialing(
     config.upstream.profiles.append(_external_profile())
     config.upstream.active_profile = "wg"
     runner = LinkStateRunner({"wg0": True})
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
 
     result = service.connect_active()
 
     assert result.returncode == 0
     assert "no connection dialed" in result.stdout
     assert all(call[0] != "openconnect" for call in runner.calls)
-    ip_calls = [call for call in runner.calls if call[0] == "ip" and call[1] != "-j"]
-    assert ["ip", "route", "replace", "default", "dev", "wg0", "table", "1201"] in ip_calls
+    assert net.calls == ["converge"]
 
 
-def test_connect_on_external_interface_skips_routing_when_link_down(
+def test_connect_on_external_interface_converges_even_when_link_down(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
     config.upstream.profiles.append(_external_profile())
     config.upstream.active_profile = "wg"
     runner = LinkStateRunner({"wg0": False})
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
 
     service.connect_active()
 
-    ip_calls = [call for call in runner.calls if call[0] == "ip" and call[1] != "-j"]
-    assert not any(call[:3] == ["ip", "route", "replace"] for call in ip_calls)
+    assert net.calls == ["converge"]
 
 
 def test_disconnect_on_external_interface_does_not_signal_any_process(
@@ -2290,7 +2277,8 @@ def test_disconnect_on_external_interface_does_not_signal_any_process(
     config.upstream.profiles.append(_external_profile())
     config.upstream.active_profile = "wg"
     runner = LinkStateRunner({"wg0": True})
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
 
     killed = []
     monkeypatch.setattr(os, "kill", lambda pid, sig: killed.append((pid, sig)))
@@ -2299,8 +2287,7 @@ def test_disconnect_on_external_interface_does_not_signal_any_process(
 
     assert result.returncode == 0
     assert killed == []
-    ip_calls = [call for call in runner.calls if call[0] == "ip" and call[1] != "-j"]
-    assert ["ip", "route", "flush", "table", "1201"] in ip_calls
+    assert net.calls == ["converge"]
 
 
 def test_enforce_profile_enablement_reapplies_routing_for_enabled_external_interface(
@@ -2316,35 +2303,35 @@ def test_enforce_profile_enablement_reapplies_routing_for_enabled_external_inter
     config.upstream.profiles.append(_external_profile("wg", interface="wg0"))
     config.upstream.active_profile = "primary"
     runner = LinkStateRunner({"wg0": True})
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
 
     results = service.enforce_profile_enablement()
 
     assert len(results) == 1
     assert all(call[0] != "openconnect" for call in runner.calls)
+    assert net.calls == ["converge"]
 
 
 def test_enforce_profile_enablement_tears_down_disabled_external_interface(
     tmp_path: Path,
 ) -> None:
-    # A standby (never-active) disabled external_interface profile has no
-    # top-level policy route to clean up (same as an openconnect standby,
-    # see disconnect()'s "only the active profile's tunnel carries the
-    # policy route" comment) -- the point here is that disconnect() is
-    # still (idempotently) invoked every tick regardless of link state,
-    # unlike an openconnect standby which is only torn down when its pid
-    # is observed alive.
+    # The point here is that disconnect() is still (idempotently) invoked
+    # every tick regardless of link state, unlike an openconnect standby
+    # which is only torn down when its pid is observed alive.
     config = _config(tmp_path)
     profile = _external_profile()
     profile.enabled = False
     config.upstream.profiles.append(profile)
     runner = LinkStateRunner({"wg0": True})
-    service = UpstreamService(config, runner=runner)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
 
     results = service.enforce_profile_enablement()
 
     assert len(results) == 1
     assert results[0].stdout == "routing deactivated (interface untouched)"
+    assert net.calls == ["converge"]
 
 
 def test_recover_never_selects_external_interface_as_a_failover_target(
@@ -2356,7 +2343,7 @@ def test_recover_never_selects_external_interface_as_a_failover_target(
     config.upstream.profiles.append(_profile("backup", server="backup.example.com"))
     config.upstream.active_profile = "wg"
     runner = ScriptedConnectRunner(fail_servers=set(), tmp_path=tmp_path)
-    service = UpstreamService(config, runner=runner)
+    service = UpstreamService(config, runner=runner, net=FakeNet())
 
     try:
         assert service.recover() is True
@@ -2365,3 +2352,30 @@ def test_recover_never_selects_external_interface_as_a_failover_target(
 
     assert service.selected_profile() is not None
     assert service.selected_profile().name == "backup"
+
+
+def test_watchdog_recover_survives_a_failed_reconciler_pass(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    runner = FakeRunner(tmp_path)
+    service = UpstreamService(config, runner=runner, net=FakeNet(fail=True))
+    try:
+        assert service.recover() is False
+    finally:
+        runner.close()
+
+
+def test_disconnect_of_a_dead_process_drops_its_stale_carrier_exemption(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile(server="203.0.113.10"))
+    config.upstream.active_profile = "primary"
+    net = FakeNet()
+    service = UpstreamService(config, runner=FakeRunner(), net=net)
+    profile = config.upstream.profiles[0]
+    service.install_carrier_exclusion(profile)
+
+    service.disconnect()
+
+    assert not service._carrier_exclusion_state_path(profile).exists()
+    assert net.calls == ["converge"]

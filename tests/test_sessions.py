@@ -370,19 +370,13 @@ lans      77.83.3.157  vpns0
 def test_parse_loose_show_users_row_without_header() -> None:
     sessions = SessionService(AppConfig()).parse_sessions("lans 77.83.3.157 vpns0\n")
 
-    assert sessions == [
-        SessionRecord(username="lans", vpn_ip=None, real_ip="77.83.3.157")
-    ]
+    assert sessions == [SessionRecord(username="lans", vpn_ip=None, real_ip="77.83.3.157")]
 
 
 def test_parse_loose_row_splits_vpn_and_real_ips() -> None:
-    sessions = SessionService(AppConfig()).parse_sessions(
-        "lans 10.10.10.28 77.83.3.157 vpns0\n"
-    )
+    sessions = SessionService(AppConfig()).parse_sessions("lans 10.10.10.28 77.83.3.157 vpns0\n")
 
-    assert sessions == [
-        SessionRecord(username="lans", vpn_ip="10.10.10.28", real_ip="77.83.3.157")
-    ]
+    assert sessions == [SessionRecord(username="lans", vpn_ip="10.10.10.28", real_ip="77.83.3.157")]
 
 
 def test_list_sessions_enriches_summary_with_user_details() -> None:

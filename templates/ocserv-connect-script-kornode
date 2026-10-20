@@ -1,0 +1,11 @@
+#!/bin/sh
+# Installed by kornode. ocserv calls this script when a VPN client/agent
+# session connects, passing no positional arguments — only environment
+# variables (DEVICE, USERNAME, ...), per ocserv's connect-script interface.
+# The DEVICE environment variable is the per-session tunnel interface;
+# kornode wakes the reconciler, which sets interface-local sysctls for it. The connect script must exit 0 or ocserv refuses the
+# connection, so failures here are deliberately swallowed.
+
+korctl_bin="$(command -v korctl || echo /usr/local/bin/korctl)"
+"$korctl_bin" server hook >/dev/null 2>&1 || true
+exit 0

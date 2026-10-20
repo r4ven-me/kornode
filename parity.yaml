@@ -1,0 +1,1113 @@
+capabilities:
+  - id: hub.backup
+    service: kornode.services.backup.BackupService.create
+    cli: "hub backup"
+    api: "POST /api/hub/backup"
+    ui: hub.backup
+  - id: hub.restore
+    service: kornode.services.backup.BackupService.restore
+    cli: "hub restore"
+    api: "POST /api/hub/restore"
+    ui: hub.restore
+  - id: config.validate
+    service: kornode.config.loader.load_config
+    cli: "config validate"
+    api: "GET /api/config/validate"
+    ui: config.validate
+  - id: config.render
+    service: kornode.services.config.ConfigService.write_rendered_files
+    cli: "config render"
+    api: "POST /api/config/render"
+    ui: config.render
+  - id: config.diff
+    service: kornode.services.config.ConfigService.diff_rendered_files
+    cli: "config diff"
+    api: "GET /api/config/diff"
+    ui: config.diff
+  - id: config.show
+    service: null
+    cli: null
+    api: "GET /api/config"
+    ui: config.show
+    exempt: "v1 gap: config overview has API and panel but no dedicated CLI beyond config validate/render/diff."
+  - id: config.render.preview
+    service: kornode.services.config.ConfigService.render_files
+    cli: null
+    api: "GET /api/config/render"
+    ui: config.render.preview
+    exempt: "v1 gap: render preview is exposed in the panel/API but the CLI preview is the dry-run form of config render."
+  - id: config.source.show
+    service: null
+    cli: null
+    api: "GET /api/config/source"
+    ui: config.source.show
+    exempt: "v1 gap: raw YAML source editor has panel/API support but no exact CLI source-read command."
+  - id: config.source.validate
+    service: null
+    cli: null
+    api: "POST /api/config/source/validate"
+    ui: config.source.validate
+    exempt: "v1 gap: edited YAML source validation has panel/API support but no exact CLI command."
+  - id: config.source.save
+    service: null
+    cli: null
+    api: "POST /api/config/source"
+    ui: config.source.save
+    exempt: "v1 gap: edited YAML source save has panel/API support but no exact CLI command."
+  - id: config.patch
+    service: null
+    cli: null
+    api: "PATCH /api/config"
+    ui: null
+    exempt: "API helper used by structured settings endpoints; not a standalone panel or CLI capability."
+  - id: config.general_settings
+    service: null
+    cli: null
+    api: "POST /api/config/general-settings"
+    ui: config.general_settings
+    exempt: "v1 gap: general settings are panel/API-only; no dedicated CLI command yet."
+
+  - id: server.start
+    service: kornode.services.server.ServerService.start
+    cli: "server start"
+    api: "POST /api/server/start"
+    ui: server.start
+  - id: server.stop
+    service: kornode.services.server.ServerService.stop
+    cli: "server stop"
+    api: "POST /api/server/stop"
+    ui: server.stop
+  - id: server.reload
+    service: kornode.services.server.ServerService.reload
+    cli: "server reload"
+    api: "POST /api/server/reload"
+    ui: server.reload
+  - id: server.restart
+    service: kornode.services.server.ServerService.restart
+    cli: "server restart"
+    api: "POST /api/server/restart"
+    ui: server.restart
+  - id: server.status
+    service: kornode.services.server.ServerService.status
+    cli: "server status"
+    api: "GET /api/server/status"
+    ui: server.status
+  - id: server.settings
+    service: null
+    cli: null
+    api: "POST /api/server/settings"
+    ui: server.settings
+    exempt: "v1 gap: server settings form patches YAML through the API; no dedicated CLI settings command yet."
+  - id: server.auth_settings
+    service: null
+    cli: null
+    api: "POST /api/server/auth-settings"
+    ui: server.auth_settings
+    exempt: "v1 gap: auth method settings form is panel/API-only; no dedicated CLI command yet."
+  - id: server.auth_test_email
+    service: null
+    cli: null
+    api: "POST /api/server/auth-settings/test-email"
+    ui: server.auth_test_email
+    exempt: "v1 gap: OTP email test is panel/API-only; no CLI test command yet."
+  - id: server.auth_test_telegram
+    service: null
+    cli: null
+    api: "POST /api/server/auth-settings/test-telegram"
+    ui: server.auth_test_telegram
+    exempt: "v1 gap: OTP Telegram test is panel/API-only; no CLI test command yet."
+  - id: server.process.list
+    service: kornode.services.server.ServerService.processes
+    cli: "server process list"
+    api: "GET /api/server/processes"
+    ui: null
+    exempt: "process supervisor table is not exposed in the current panel; Dashboard shows aggregate process health only."
+  - id: server.process.start
+    service: kornode.services.server.ServerService.process_action
+    cli: "server process start"
+    api: "POST /api/server/process"
+    ui: null
+    exempt: "process-level start action is not exposed in the current panel; admins use server start/reload controls."
+  - id: server.process.stop
+    service: kornode.services.server.ServerService.process_action
+    cli: "server process stop"
+    api: "POST /api/server/process"
+    ui: null
+    exempt: "process-level stop action is not exposed in the current panel; admins use server stop/reload controls."
+  - id: server.process.restart
+    service: kornode.services.server.ServerService.process_action
+    cli: "server process restart"
+    api: "POST /api/server/process"
+    ui: null
+    exempt: "process-level restart action is not exposed in the current panel; admins use server restart/reload controls."
+  - id: server.process.status
+    service: kornode.services.server.ServerService.process_action
+    cli: "server process status"
+    api: "POST /api/server/process"
+    ui: null
+    exempt: "per-process status probe is not exposed in the current panel; Dashboard shows aggregate process health only."
+  - id: server.hook
+    service: kornode.services.net.NetService.wake
+    cli: "server hook"
+    api: null
+    ui: null
+    exempt: "Internal ocserv connect-script entrypoint, not an admin management capability."
+
+  - id: registry.snapshot
+    service: kornode.registry.snapshot.snapshot
+    cli: "registry snapshot"
+    api: null
+    ui: null
+    exempt: "process entrypoint for supervisor; internal DB-only snapshot worker; encrypted admin backup is hub.backup"
+
+  - id: registry.maintain
+    service: kornode.services.enrollment.EnrollmentService.maintain
+    cli: "registry maintain"
+    api: null
+    ui: null
+    exempt: "process entrypoint for supervisor (expired enrollment tokens, CRL refresh); no operator-facing capability."
+
+  - id: certificates.status
+    service: kornode.services.server_certificates.ServerCertificateService.status
+    cli: "certificates status"
+    api: "GET /api/certificates"
+    ui: certificates.status
+  - id: certificates.pin
+    service: kornode.services.server_certificates.ServerCertificateService.server_pin
+    cli: "certificates pin"
+    api: "GET /api/certificates/server-pin"
+    ui: certificates.pin
+  - id: certificates.external
+    service: kornode.services.server_certificates.ServerCertificateService.save_external_material
+    cli: "certificates external"
+    api: "POST /api/certificates/external"
+    ui: certificates.external
+  - id: certificates.settings
+    service: null
+    cli: null
+    api: "POST /api/certificates/settings"
+    ui: certificates.settings
+    exempt: "v1 gap: certificate mode settings are panel/API-only; no exact CLI settings command."
+  - id: certificates.server_info
+    service: kornode.services.certificates.CertificateService.certificate_info_from_path
+    cli: null
+    api: "GET /api/certificates/server/info"
+    ui: certificates.server_info
+    exempt: "v1 gap: certificate inspection is panel/API-only; no CLI info command yet."
+  - id: certificates.ca.info
+    service: kornode.services.certificates.CertificateService.certificate_info_from_path
+    cli: null
+    api: "GET /api/certificates/ca/info"
+    ui: certificates.ca.info
+    exempt: "v1 gap: CA certificate inspection is panel/API-only; no CLI info command yet."
+  - id: certificates.ca.regenerate
+    service: kornode.services.certificates.CertificateService.regenerate_ca
+    cli: "certificates ca regenerate"
+    api: "POST /api/certificates/ca/regenerate"
+    ui: certificates.ca.regenerate
+  - id: certificates.ca.upload
+    service: kornode.services.certificates.CertificateService.save_ca_material
+    cli: "certificates ca upload"
+    api: "POST /api/certificates/ca/upload"
+    ui: certificates.ca.upload
+  - id: certificates.ca.revoke_b64
+    service: kornode.services.certificates.CertificateService.revoke_certificate_pem
+    cli: "certificates ca revoke-b64"
+    api: "POST /api/certificates/ca/revoke"
+    ui: certificates.ca.revoke_b64
+  - id: certificates.ca.revoke_pem
+    service: kornode.services.certificates.CertificateService.revoke_certificate_pem
+    cli: "certificates ca revoke-pem"
+    api: "POST /api/certificates/ca/revoke-file"
+    ui: certificates.ca.revoke_pem
+  - id: certificates.ca.revoked
+    service: kornode.services.certificates.CertificateService.list_revoked_certificates
+    cli: "certificates ca revoked"
+    api: "GET /api/certificates/ca/revoked"
+    ui: certificates.ca.revoked
+  - id: certificates.letsencrypt.issue
+    service: kornode.services.server_certificates.ServerCertificateService.issue_letsencrypt
+    cli: "certificates letsencrypt-issue"
+    api: "POST /api/certificates/letsencrypt/issue"
+    ui: certificates.letsencrypt.issue
+  - id: certificates.letsencrypt.renew
+    service: kornode.services.server_certificates.ServerCertificateService.renew_letsencrypt
+    cli: "certificates letsencrypt-renew"
+    api: "POST /api/certificates/letsencrypt/renew"
+    ui: certificates.letsencrypt.renew
+  - id: certificates.letsencrypt.settings
+    service: null
+    cli: null
+    api: "POST /api/certificates/letsencrypt/settings"
+    ui: certificates.letsencrypt.settings
+    exempt: "v1 gap: Let's Encrypt saved settings have panel/API support but no exact CLI command."
+  - id: certificates.letsencrypt.info
+    service: kornode.services.certificates.CertificateService.certificate_info_from_path
+    cli: null
+    api: "GET /api/certificates/letsencrypt/info"
+    ui: certificates.letsencrypt.info
+    exempt: "v1 gap: Let's Encrypt certificate inspection is panel/API-only; no CLI info command yet."
+
+  - id: user.list
+    service: kornode.services.users.UserService.list_users
+    cli: "user list"
+    api: "GET /api/users"
+    ui: user.list
+  - id: user.create
+    service: kornode.services.users.UserService.create_user
+    cli: "user create"
+    api: "POST /api/users"
+    ui: user.create
+  - id: user.delete
+    service: kornode.services.users.UserService.delete_user
+    cli: "user delete"
+    api: "DELETE /api/users/{username}"
+    ui: user.delete
+  - id: user.enable
+    service: kornode.services.users.UserService.enable_user
+    cli: "user enable"
+    api: "POST /api/users/{username}/enable"
+    ui: user.enable
+  - id: user.disable
+    service: kornode.services.users.UserService.disable_user
+    cli: "user disable"
+    api: "POST /api/users/{username}/disable"
+    ui: user.disable
+  - id: user.passwd
+    service: kornode.services.users.UserService.change_password
+    cli: "user passwd"
+    api: "POST /api/users/{username}/password"
+    ui: user.passwd
+  - id: user.groups
+    service: kornode.services.users.UserService.set_user_groups
+    cli: "user groups"
+    api: "PUT /api/users/{username}/groups"
+    ui: user.groups
+  - id: user.groups.show
+    service: kornode.services.users.UserService.read_user_groups
+    cli: null
+    api: "GET /api/users/{username}/groups"
+    ui: user.groups
+    exempt: "v1 gap: group membership read is panel/API-only; the CLI only writes memberships."
+  - id: user.config.show
+    service: kornode.services.users.UserService.read_user_config
+    cli: null
+    api: "GET /api/users/{username}/config"
+    ui: user.config
+    exempt: "v1 gap: per-user config read is panel/API-only; no CLI show command yet."
+  - id: user.config.save
+    service: kornode.services.users.UserService.save_user_config
+    cli: null
+    api: "PUT /api/users/{username}/config"
+    ui: user.config
+    exempt: "v1 gap: per-user config save is panel/API-only; no CLI save command yet."
+  - id: user.config.delete
+    service: kornode.services.users.UserService.delete_user_config
+    cli: null
+    api: "DELETE /api/users/{username}/config"
+    ui: user.config.delete
+    exempt: "v1 gap: per-user config delete is panel/API-only; no CLI delete command yet."
+  - id: user.otp.list
+    service: kornode.services.otp.OtpService.list_records
+    cli: null
+    api: "GET /api/users/otp"
+    ui: user.otp.list
+    exempt: "v1 gap: OTP record listing is panel/API-only; no CLI list command yet."
+  - id: user.otp.enable
+    service: kornode.services.otp.OtpService.enable
+    cli: "user otp enable"
+    api: "POST /api/users/{username}/otp"
+    ui: user.otp.enable
+  - id: user.otp.disable
+    service: kornode.services.otp.OtpService.disable
+    cli: "user otp disable"
+    api: "DELETE /api/users/{username}/otp"
+    ui: user.otp.disable
+  - id: user.otp.show_qr
+    service: kornode.services.otp.OtpService.qr_ansi
+    cli: "user otp show-qr"
+    api: "GET /api/users/{username}/otp/qr"
+    ui: user.otp.show_qr
+  - id: user.cert.create
+    service: kornode.services.certificates.CertificateService.create_user_certificate
+    cli: "user cert create"
+    api: "POST /api/users/{username}/cert"
+    ui: user.cert.create
+  - id: user.cert.revoke
+    service: kornode.services.certificates.CertificateService.revoke_user_certificate
+    cli: "user cert revoke"
+    api: "DELETE /api/users/{username}/cert"
+    ui: user.cert.revoke
+  - id: user.revoke
+    service: kornode.services.certificates.CertificateService.revoke_user_certificate
+    cli: "user revoke"
+    api: null
+    ui: null
+    exempt: "CLI alias for user cert revoke; API/UI use the certificate revoke capability."
+  - id: user.cert.download
+    service: null
+    cli: null
+    api: "GET /api/users/{username}/cert"
+    ui: user.cert.download
+    exempt: "v1 gap: certificate download is panel/API-only; no CLI download command."
+  - id: user.key.download
+    service: null
+    cli: null
+    api: "GET /api/users/{username}/key"
+    ui: user.key.download
+    exempt: "v1 gap: private key download is panel/API-only; no CLI download command."
+  - id: user.p12.create
+    service: kornode.services.certificates.CertificateService.create_p12
+    cli: "user p12 create"
+    api: "POST /api/users/{username}/p12"
+    ui: user.p12.create
+  - id: user.p12.download
+    service: null
+    cli: null
+    api: "GET /api/users/{username}/p12"
+    ui: user.p12.download
+    exempt: "v1 gap: PKCS#12 download is panel/API-only; no CLI download command."
+
+  - id: groups.list
+    service: kornode.services.groups.GroupConfigService.list_groups
+    cli: "identity group config list"
+    api: "GET /api/groups"
+    ui: groups.list
+  - id: groups.config.show
+    service: kornode.services.groups.GroupConfigService.read_group_config
+    cli: "identity group config show"
+    api: "GET /api/groups/{name}/config"
+    ui: groups.config
+  - id: groups.config.save
+    service: kornode.services.groups.GroupConfigService.save_group_config
+    cli: "identity group config save"
+    api: "PUT /api/groups/{name}/config"
+    ui: groups.config
+  - id: groups.config.delete
+    service: kornode.services.groups.GroupConfigService.delete_group_config
+    cli: "identity group config delete"
+    api: "DELETE /api/groups/{name}/config"
+    ui: groups.config.delete
+  - id: groups.delete
+    service: kornode.services.groups.GroupConfigService.delete_group_config
+    cli: null
+    api: "DELETE /api/groups/{name}"
+    ui: groups.delete
+    exempt: "v1 gap: group delete is panel/API-only; CLI can delete config but not the group shell itself."
+
+  - id: sessions.list
+    service: kornode.services.sessions.SessionService.list_sessions
+    cli: "sessions list"
+    api: "GET /api/sessions"
+    ui: sessions.list
+  - id: sessions.kick
+    service: kornode.services.sessions.SessionService.kick
+    cli: "sessions kick"
+    api: "POST /api/sessions/{username}/kick"
+    ui: sessions.kick
+
+  - id: upstream.status
+    service: kornode.services.upstream.UpstreamService.status
+    cli: "upstream status"
+    api: "GET /api/upstream/status"
+    ui: upstream.status
+  - id: upstream.list
+    service: kornode.services.upstream.UpstreamService.list_profiles
+    cli: "upstream list"
+    api: "GET /api/upstream"
+    ui: upstream.list
+  - id: upstream.switch
+    service: kornode.services.upstream.UpstreamService.switch_profile
+    cli: "upstream switch"
+    api: "POST /api/upstream/switch"
+    ui: upstream.switch
+  - id: upstream.connect
+    service: kornode.services.upstream.UpstreamService.connect
+    cli: "upstream connect"
+    api: "POST /api/upstream/connect"
+    ui: null
+    exempt: "global connect action is not exposed in the current panel; profiles are connected with per-profile controls."
+  - id: upstream.disconnect
+    service: kornode.services.upstream.UpstreamService.disconnect
+    cli: "upstream disconnect"
+    api: "POST /api/upstream/disconnect"
+    ui: null
+    exempt: "global disconnect action is not exposed in the current panel; profiles are disconnected with per-profile controls."
+  - id: upstream.profile.connect
+    service: kornode.services.upstream.UpstreamService.connect
+    cli: null
+    api: "POST /api/upstream/profiles/{name}/connect"
+    ui: upstream.profile.connect
+    exempt: "v1 gap: panel/API can connect a named profile directly; CLI uses upstream connect with an argument."
+  - id: upstream.profile.disconnect
+    service: kornode.services.upstream.UpstreamService.disconnect
+    cli: null
+    api: "POST /api/upstream/profiles/{name}/disconnect"
+    ui: upstream.profile.disconnect
+    exempt: "v1 gap: panel/API can disconnect a named profile directly; CLI uses upstream disconnect with an argument."
+  - id: upstream.fetch_pin
+    service: kornode.tunnels.pin.fetch_server_pin
+    cli: "upstream fetch-pin"
+    api: "POST /api/upstream/fetch-pin"
+    ui: upstream.fetch_pin
+  - id: upstream.settings
+    service: null
+    cli: null
+    api: "POST /api/upstream/settings"
+    ui: upstream.settings
+    exempt: "v1 gap: upstream global settings are panel/API-only; no exact CLI settings command."
+  - id: upstream.profile.save
+    service: null
+    cli: null
+    api: "POST /api/upstream/profiles"
+    ui: upstream.profile.save
+    exempt: "v1 gap: profile create/edit is panel/API-only; CLI does not edit profile definitions yet."
+  - id: upstream.profile.enable
+    service: null
+    cli: "upstream enable"
+    api: "POST /api/upstream/profiles/{name}/enabled"
+    ui: upstream.profile.enable
+    exempt: "v1 mismatch: one API endpoint toggles both enable and disable while CLI has separate commands."
+  - id: upstream.profile.disable
+    service: null
+    cli: "upstream disable"
+    api: null
+    ui: upstream.profile.disable
+    exempt: "v1 mismatch: disable shares POST /api/upstream/profiles/{name}/enabled with enable."
+  - id: upstream.profile.delete
+    service: null
+    cli: null
+    api: "DELETE /api/upstream/profiles/{name}"
+    ui: upstream.profile.delete
+    exempt: "v1 gap: profile deletion is panel/API-only; no CLI delete command yet."
+  - id: upstream.server_routes
+    service: kornode.services.upstream.UpstreamService.server_routing_status
+    cli: "upstream server-routes"
+    api: null
+    ui: upstream.server_routes
+    exempt: "v1 gap: server-pushed routing status is shown in the panel but has no dedicated API endpoint matching the CLI payload."
+  - id: upstream.sync
+    service: kornode.services.upstream.UpstreamService.sync_server_routes
+    cli: "upstream sync"
+    api: "POST /api/upstream/profiles/{name}/sync"
+    ui: upstream.sync
+  - id: upstream.profile.routes_sources.status
+    service: kornode.services.routing.RoutingService.profile_routes_urls_status
+    cli: null
+    api: "GET /api/upstream/profiles/{name}/routes-sources/status"
+    ui: upstream.profile.routes_sources
+    exempt: "v1 gap: profile routes URL source status is panel/API-only; no CLI status command."
+  - id: upstream.profile.routes_sources.refresh
+    service: kornode.services.routing.RoutingService.refresh_profile_route_url
+    cli: null
+    api: "POST /api/upstream/profiles/{name}/routes-sources/refresh"
+    ui: upstream.profile.routes_sources.refresh
+    exempt: "v1 gap: profile routes URL refresh is panel/API-only; no CLI refresh command."
+  - id: upstream.profile.domains_sources.status
+    service: kornode.services.routing.RoutingService.profile_domains_urls_status
+    cli: null
+    api: "GET /api/upstream/profiles/{name}/domains-sources/status"
+    ui: upstream.profile.domains_sources
+    exempt: "v1 gap: profile domains URL source status is panel/API-only; no CLI status command."
+  - id: upstream.profile.domains_sources.refresh
+    service: kornode.services.routing.RoutingService.refresh_profile_domain_url
+    cli: null
+    api: "POST /api/upstream/profiles/{name}/domains-sources/refresh"
+    ui: upstream.profile.domains_sources.refresh
+    exempt: "v1 gap: profile domains URL refresh is panel/API-only; no CLI refresh command."
+  - id: upstream.hook
+    service: kornode.services.upstream.UpstreamService.record_vpnc_event
+    cli: "upstream hook"
+    api: null
+    ui: null
+    exempt: "Internal vpnc-script entrypoint, not an admin management capability."
+  - id: upstream.watch
+    service: kornode.services.upstream.UpstreamService.recover
+    cli: "upstream watch"
+    api: null
+    ui: null
+    exempt: "Supervisor watchdog entrypoint, not an admin management capability."
+
+  - id: routes.list
+    service: kornode.services.routing.RoutingService.list_routes
+    cli: "routes list"
+    api: "GET /api/routing/routes"
+    ui: routes.list
+  - id: routes.add
+    service: kornode.services.routing.RoutingService.add_route
+    cli: "routes add"
+    api: "POST /api/routing/routes"
+    ui: routes.add
+  - id: routes.delete
+    service: kornode.services.routing.RoutingService.delete_route
+    cli: "routes delete"
+    api: "DELETE /api/routing/routes"
+    ui: routes.delete
+  - id: routes.set
+    service: null
+    cli: null
+    api: "PUT /api/routing/routes"
+    ui: routes.set
+    exempt: "v1 gap: bulk route replacement is panel/API-only; CLI has add/delete/list."
+  - id: routes.status
+    service: kornode.services.routing.RoutingService.routes_urls_status
+    cli: null
+    api: "GET /api/routing/routes/status"
+    ui: routes.sources
+    exempt: "v1 gap: route URL source status is panel/API-only; no CLI status command."
+  - id: routes.refresh
+    service: kornode.services.routing.RoutingService.refresh_route_url
+    cli: null
+    api: "POST /api/routing/routes/refresh"
+    ui: routes.sources.refresh
+    exempt: "v1 gap: route URL refresh is panel/API-only; no CLI refresh command."
+  - id: routes.reload
+    service: kornode.services.net.NetService.apply
+    cli: "routes reload"
+    api: "POST /api/routing/reload"
+    ui: null
+    exempt: "route reload is not exposed as a separate panel action; Network apply covers runtime convergence."
+  - id: domains.list
+    service: kornode.services.routing.RoutingService.list_domains
+    cli: "domains list"
+    api: "GET /api/routing/domains"
+    ui: domains.list
+  - id: domains.add
+    service: kornode.services.routing.RoutingService.add_domain
+    cli: "domains add"
+    api: "POST /api/routing/domains"
+    ui: domains.add
+  - id: domains.delete
+    service: kornode.services.routing.RoutingService.delete_domain
+    cli: "domains delete"
+    api: "DELETE /api/routing/domains"
+    ui: domains.delete
+  - id: domains.set
+    service: null
+    cli: null
+    api: "PUT /api/routing/domains"
+    ui: domains.set
+    exempt: "v1 gap: bulk domain replacement is panel/API-only; CLI has add/delete/list."
+  - id: domains.status
+    service: kornode.services.routing.RoutingService.domains_urls_status
+    cli: null
+    api: "GET /api/routing/domains/status"
+    ui: domains.sources
+    exempt: "v1 gap: domain URL source status is panel/API-only; no CLI status command."
+  - id: domains.refresh
+    service: kornode.services.routing.RoutingService.refresh_domain_url
+    cli: null
+    api: "POST /api/routing/domains/refresh"
+    ui: domains.sources.refresh
+    exempt: "v1 gap: domain URL refresh is panel/API-only; no CLI refresh command."
+  - id: domains.reload
+    service: kornode.services.net.NetService.apply
+    cli: "domains reload"
+    api: null
+    ui: null
+    exempt: "CLI-specific convenience wrapper; API/UI use routes.reload."
+  - id: domains.resolve
+    service: kornode.services.domain_resolver.DomainResolverService.refresh
+    cli: "domains resolve"
+    api: null
+    ui: null
+    exempt: "CLI-only maintenance command for one-shot DNS set refresh."
+  - id: domains.watch
+    service: kornode.services.domain_resolver.DomainResolverService.refresh
+    cli: "domains watch"
+    api: null
+    ui: null
+    exempt: "Supervisor resolver loop entrypoint, not an admin management capability."
+  - id: routing.host_routes.show
+    service: kornode.services.routing.RoutingService.list_host_routes
+    cli: null
+    api: "GET /api/routing/host-routes"
+    ui: host_routes.list
+    exempt: "v1 gap: host route lists are panel/API-only; CLI only manages client split routes."
+  - id: routing.host_routes.set
+    service: kornode.services.routing.RoutingService.set_host_routes
+    cli: null
+    api: "PUT /api/routing/host-routes"
+    ui: host_routes.set
+    exempt: "v1 gap: host route lists are panel/API-only; CLI only manages client split routes."
+  - id: routing.host_routes.status
+    service: kornode.services.routing.RoutingService.host_routes_urls_status
+    cli: null
+    api: "GET /api/routing/host-routes/status"
+    ui: host_routes.sources
+    exempt: "v1 gap: host route URL source status is panel/API-only."
+  - id: routing.host_routes.refresh
+    service: kornode.services.routing.RoutingService.refresh_host_route_url
+    cli: null
+    api: "POST /api/routing/host-routes/refresh"
+    ui: host_routes.sources.refresh
+    exempt: "v1 gap: host route URL refresh is panel/API-only."
+  - id: routing.host_domains.show
+    service: kornode.services.routing.RoutingService.list_host_domains
+    cli: null
+    api: "GET /api/routing/host-domains"
+    ui: host_domains.list
+    exempt: "v1 gap: host domain lists are panel/API-only; CLI only manages client split domains."
+  - id: routing.host_domains.set
+    service: kornode.services.routing.RoutingService.set_host_domains
+    cli: null
+    api: "PUT /api/routing/host-domains"
+    ui: host_domains.set
+    exempt: "v1 gap: host domain lists are panel/API-only; CLI only manages client split domains."
+  - id: routing.host_domains.status
+    service: kornode.services.routing.RoutingService.host_domains_urls_status
+    cli: null
+    api: "GET /api/routing/host-domains/status"
+    ui: host_domains.sources
+    exempt: "v1 gap: host domain URL source status is panel/API-only."
+  - id: routing.host_domains.refresh
+    service: kornode.services.routing.RoutingService.refresh_host_domain_url
+    cli: null
+    api: "POST /api/routing/host-domains/refresh"
+    ui: host_domains.sources.refresh
+    exempt: "v1 gap: host domain URL refresh is panel/API-only."
+  - id: routing.settings
+    service: null
+    cli: null
+    api: "POST /api/routing/settings"
+    ui: routing.settings
+    exempt: "v1 gap: routing settings are panel/API-only; no dedicated CLI settings command."
+  - id: routing.host_dns.status
+    service: kornode.services.host_dns.HostDnsService.status
+    cli: "host-dns status"
+    api: "GET /api/routing/host-dns"
+    ui: routing.host_dns.status
+  - id: host_dns.apply
+    service: kornode.services.host_dns.HostDnsService.apply
+    cli: "host-dns apply"
+    api: null
+    ui: null
+    exempt: "CLI-only host resolver action; panel applies through routing settings instead."
+  - id: host_dns.restore
+    service: kornode.services.host_dns.HostDnsService.restore
+    cli: "host-dns restore"
+    api: null
+    ui: null
+    exempt: "CLI-only host resolver recovery command."
+  - id: host_dns.guard
+    service: kornode.services.host_dns.HostDnsService.apply
+    cli: "host-dns guard"
+    api: null
+    ui: null
+    exempt: "Supervisor host DNS guard entrypoint, not an admin management capability."
+
+  - id: internal_dns.status
+    service: kornode.services.internal_dns.InternalDnsService.status
+    cli: "internal-dns status"
+    api: "GET /api/internal-dns/status"
+    ui: internal_dns.status
+  - id: internal_dns.blocklist
+    service: kornode.services.internal_dns.InternalDnsService.merged_blocklist
+    cli: "internal-dns blocklist"
+    api: "GET /api/internal-dns/blocklist"
+    ui: internal_dns.blocklist
+  - id: internal_dns.settings
+    service: null
+    cli: "internal-dns settings"
+    api: "POST /api/internal-dns/settings"
+    ui: internal_dns.settings
+  - id: internal_dns.apply
+    service: kornode.services.internal_dns.InternalDnsService.ensure_listen_address
+    cli: "internal-dns ensure-listen"
+    api: "POST /api/internal-dns/apply"
+    ui: internal_dns.apply
+  - id: internal_dns.refresh
+    service: kornode.services.internal_dns.InternalDnsService.refresh_url_blocklist
+    cli: "internal-dns refresh"
+    api: "POST /api/internal-dns/blocklist/refresh"
+    ui: internal_dns.refresh
+  - id: internal_dns.run
+    service: kornode.services.internal_dns.InternalDnsService.dnsmasq_argv
+    cli: "internal-dns run"
+    api: null
+    ui: null
+    exempt: "Supervisor dnsmasq entrypoint, not an admin management capability."
+
+  - id: identity.status
+    service: null
+    cli: "identity status"
+    api: "GET /api/identity"
+    ui: identity.status
+  - id: identity.oidc.settings
+    service: null
+    cli: "identity oidc settings"
+    api: "POST /api/identity/oidc/settings"
+    ui: identity.oidc.settings
+  - id: identity.oidc.provider_set
+    service: null
+    cli: "identity oidc provider-set"
+    api: "POST /api/identity/oidc/providers"
+    ui: identity.oidc.provider_set
+  - id: identity.oidc.provider_delete
+    service: null
+    cli: null
+    api: "DELETE /api/identity/oidc/providers/{name}"
+    ui: identity.oidc.provider_delete
+    exempt: "v1 gap: provider deletion is panel/API-only; CLI can replace providers but not delete one."
+  - id: identity.settings
+    service: null
+    cli: null
+    api: "POST /api/identity/settings"
+    ui: identity.settings
+    exempt: "v1 gap: identity URL/group selection settings are panel/API-only."
+  - id: identity.group.set
+    service: null
+    cli: "identity group set"
+    api: "POST /api/identity/groups"
+    ui: identity.group.set
+  - id: identity.group.delete
+    service: null
+    cli: "identity group delete"
+    api: "DELETE /api/identity/groups/{name}"
+    ui: identity.group.delete
+
+  - id: diagnostics.run
+    service: kornode.services.diagnostics.DiagnosticsService.run
+    cli: "diagnose"
+    api: "GET /api/diagnostics"
+    ui: diagnostics.run
+  - id: net.doctor
+    service: kornode.services.doctor.DoctorService.run
+    cli: "doctor"
+    api: "GET /api/diagnostics/doctor"
+    ui: net.doctor
+  - id: diagnostics.interface_stats
+    service: kornode.services.network_stats.NetworkStatsService.snapshot
+    cli: null
+    api: "GET /api/diagnostics/interface-stats"
+    ui: diagnostics.interface_stats
+    exempt: "v1 gap: interface stats are dashboard/API-only; no CLI command yet."
+  - id: diagnostics.software
+    service: kornode.services.software_versions.SoftwareVersionService.collect
+    cli: null
+    api: "GET /api/diagnostics/software"
+    ui: diagnostics.software
+    exempt: "v1 gap: software version cards are dashboard/API-only; no CLI command yet."
+  - id: logs.tail
+    service: kornode.services.logs.LogService.tail
+    cli: "logs"
+    api: "GET /api/logs"
+    ui: logs.tail
+  - id: logs.files
+    service: kornode.services.logs.LogService.list_logs
+    cli: null
+    api: "GET /api/logs/files"
+    ui: logs.files
+    exempt: "v1 gap: log file listing is panel/API-only; no CLI list command yet."
+  - id: logs.rotation.show
+    service: null
+    cli: null
+    api: "GET /api/logs/rotation"
+    ui: logs.rotation
+    exempt: "v1 gap: log rotation settings are panel/API-only; no CLI show command."
+  - id: logs.rotation.save
+    service: null
+    cli: null
+    api: "POST /api/logs/rotation"
+    ui: logs.rotation
+    exempt: "v1 gap: log rotation settings are panel/API-only; no CLI save command."
+  - id: logs.rotate
+    service: kornode.services.logs.LogRotationService.rotate
+    cli: "logs-rotate"
+    api: "POST /api/logs/rotation/run"
+    ui: logs.rotate
+
+  - id: web.hash_password
+    service: kornode.services.password_hash.hash_password
+    cli: "web hash-password"
+    api: null
+    ui: null
+    exempt: "CLI-only offline helper; API/panel never expose raw password hashing."
+  - id: web.settings
+    service: null
+    cli: null
+    api: "POST /api/web-config/settings"
+    ui: web.settings
+    exempt: "v1 gap: web settings are panel/API-only; no dedicated CLI settings command yet."
+  - id: web.totp.status
+    service: null
+    cli: null
+    api: "GET /api/auth/totp/status"
+    ui: web.totp.status
+    exempt: "Admin TOTP is intentionally managed by the panel flow; no CLI command yet."
+  - id: web.totp.setup
+    service: kornode.services.admin_totp.AdminTotpService.generate_secret
+    cli: null
+    api: "POST /api/auth/totp/setup"
+    ui: web.totp.setup
+    exempt: "Admin TOTP is intentionally managed by the panel flow; no CLI command yet."
+  - id: web.totp.confirm
+    service: kornode.services.admin_totp.AdminTotpService.verify_code
+    cli: null
+    api: "POST /api/auth/totp/confirm"
+    ui: web.totp.confirm
+    exempt: "Admin TOTP is intentionally managed by the panel flow; no CLI command yet."
+  - id: web.totp.disable
+    service: null
+    cli: null
+    api: "POST /api/auth/totp/disable"
+    ui: web.totp.disable
+    exempt: "Admin TOTP is intentionally managed by the panel flow; no CLI command yet."
+
+  - id: terminal.run
+    service: null
+    cli: null
+    api: "POST /api/terminal/run"
+    ui: terminal.run
+    exempt: "v1 gap: terminal command execution is panel/API-only and intentionally gated by web settings."
+  - id: terminal.session.create
+    service: null
+    cli: null
+    api: "POST /api/terminal/sessions"
+    ui: terminal.session.create
+    exempt: "v1 gap: browser terminal sessions are panel/API-only; no CLI equivalent."
+  - id: terminal.ws
+    service: null
+    cli: null
+    api: "WS /api/terminal/ws"
+    ui: terminal.ws
+    exempt: "Browser terminal websocket transport; no CLI equivalent."
+  - id: net.plan
+    service: kornode.services.net.NetService.plan
+    cli: "net plan"
+    api: "GET /api/net/plan"
+    ui: net.plan
+  - id: net.apply
+    service: kornode.services.net.NetService.apply
+    cli: "net apply"
+    api: "POST /api/net/apply"
+    ui: net.apply
+  - id: net.explain
+    service: kornode.services.net.NetService.explain
+    cli: "net explain"
+    api: "POST /api/net/explain"
+    ui: net.explain
+  - id: net.status
+    service: kornode.services.net.NetService.status
+    cli: null
+    api: "GET /api/net/status"
+    ui: net.status
+    exempt: "reconciler status is panel/API-only; no CLI beyond net plan"
+  - id: net.run
+    service: kornode.services.net.run_reconciler
+    cli: "net run"
+    api: null
+    ui: null
+    exempt: "process entrypoint for supervisor, not a management action"
+
+  - id: agent.list
+    service: kornode.services.agents.AgentService.list
+    cli: "agent list"
+    api: "GET /api/agents"
+    ui: agent.list
+  - id: agent.show
+    service: kornode.services.agents.AgentService.show
+    cli: "agent show"
+    api: "GET /api/agents/{name}"
+    ui: agent.show
+  - id: agent.create
+    service: kornode.services.agents.AgentService.create
+    cli: "agent create"
+    api: "POST /api/agents"
+    ui: agent.create
+  - id: agent.update
+    service: kornode.services.agents.AgentService.update
+    cli: "agent set"
+    api: "PATCH /api/agents/{name}"
+    ui: agent.update
+  - id: agent.token
+    service: kornode.services.agents.AgentService.token
+    cli: "agent token"
+    api: "POST /api/agents/{name}/token"
+    ui: agent.token
+  - id: agent.token.revoke
+    service: kornode.services.agents.AgentService.token
+    cli: "agent token"
+    api: "DELETE /api/agents/{name}/token"
+    ui: agent.token.revoke
+  - id: agent.revoke
+    service: kornode.services.agents.AgentService.revoke
+    cli: "agent revoke"
+    api: "POST /api/agents/{name}/revoke"
+    ui: agent.revoke
+  - id: agent.delete
+    service: kornode.services.agents.AgentService.delete
+    cli: "agent delete"
+    api: "DELETE /api/agents/{name}"
+    ui: agent.delete
+  - id: agent.prefix.list
+    service: kornode.services.agents.AgentService.prefixes
+    cli: "agent prefix list"
+    api: "GET /api/agents/{name}/prefixes"
+    ui: agent.prefix.list
+  - id: agent.prefix.add
+    service: kornode.services.agents.AgentService.add_prefix
+    cli: "agent prefix add"
+    api: "POST /api/agents/{name}/prefixes"
+    ui: agent.prefix.add
+  - id: agent.prefix.delete
+    service: kornode.services.agents.AgentService.delete_prefix
+    cli: "agent prefix del"
+    api: "DELETE /api/agents/{name}/prefixes"
+    ui: agent.prefix.delete
+  - id: agent.policy.show
+    service: kornode.services.agents.AgentService.policy
+    cli: "agent egress show"
+    api: "GET /api/agents/{name}/policy"
+    ui: agent.policy.show
+  - id: agent.policy.set
+    service: kornode.services.agents.AgentService.set_policy
+    cli: "agent egress set"
+    api: "PUT /api/agents/{name}/policy"
+    ui: agent.policy.set
+  - id: agent.policy.edit
+    service: kornode.services.agents.AgentService.set_policy
+    cli: "agent egress edit"
+    api: "PUT /api/agents/{name}/policy"
+    ui: agent.policy.set
+  - id: agent.source.list
+    service: kornode.services.agents.AgentService.sources
+    cli: "agent source list"
+    api: "GET /api/agents/{name}/sources"
+    ui: agent.source.list
+  - id: agent.source.add
+    service: kornode.services.agents.AgentService.set_source
+    cli: "agent source add"
+    api: "PUT /api/agents/{name}/sources/{source}"
+    ui: agent.source.set
+  - id: agent.source.set
+    service: kornode.services.agents.AgentService.set_source
+    cli: "agent source set"
+    api: "PUT /api/agents/{name}/sources/{source}"
+    ui: agent.source.set
+  - id: agent.source.delete
+    service: kornode.services.agents.AgentService.set_source
+    cli: "agent source del"
+    api: "DELETE /api/agents/{name}/sources/{source}"
+    ui: agent.source.delete
+  - id: agent.upstream.list
+    service: kornode.services.agents.AgentService.upstreams
+    cli: "agent upstream list"
+    api: "GET /api/agents/{name}/upstreams"
+    ui: agent.upstream.list
+  - id: agent.upstream.add
+    service: kornode.services.agents.AgentService.set_upstream
+    cli: "agent upstream add"
+    api: "PUT /api/agents/{name}/upstreams/{upstream}"
+    ui: agent.upstream.set
+  - id: agent.upstream.set
+    service: kornode.services.agents.AgentService.set_upstream
+    cli: "agent upstream set"
+    api: "PUT /api/agents/{name}/upstreams/{upstream}"
+    ui: agent.upstream.set
+  - id: agent.upstream.delete
+    service: kornode.services.agents.AgentService.set_upstream
+    cli: "agent upstream del"
+    api: "DELETE /api/agents/{name}/upstreams/{upstream}"
+    ui: agent.upstream.delete
+  - id: agent.user.list
+    service: kornode.services.agents.AgentService.users
+    cli: "agent user list"
+    api: "GET /api/agents/{name}/users"
+    ui: agent.user.list
+  - id: agent.user.add
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user add"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.set
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user set"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.passwd
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user passwd"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.enable
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user enable"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.disable
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user disable"
+    api: "PUT /api/agents/{name}/users/{username}"
+    ui: agent.user.set
+  - id: agent.user.delete
+    service: kornode.services.agents.AgentService.set_user
+    cli: "agent user del"
+    api: "DELETE /api/agents/{name}/users/{username}"
+    ui: agent.user.delete
+  - id: agent.bundle.list
+    service: kornode.services.agents.AgentService.bundles_list
+    cli: "agent bundle list"
+    api: "GET /api/agents/{name}/bundles"
+    ui: agent.bundle.list
+  - id: agent.bundle.show
+    service: kornode.services.agents.AgentService.bundle
+    cli: "agent bundle show"
+    api: "GET /api/agents/{name}/bundles/{version}"
+    ui: agent.bundle.show
+  - id: agent.bundle.diff
+    service: kornode.services.agents.AgentService.bundle_diff
+    cli: "agent bundle diff"
+    api: "GET /api/agents/{name}/bundles/diff"
+    ui: agent.bundle.diff
+  - id: agent.reports
+    service: kornode.services.agents.AgentService.reports
+    cli: "agent status"
+    api: "GET /api/agents/{name}/reports"
+    ui: agent.reports
+  - id: agent.command.enqueue
+    service: kornode.services.agents.AgentService.enqueue
+    cli: "agent exec"
+    api: "POST /api/agents/{name}/commands"
+    ui: agent.command.enqueue
+  - id: agent.command.list
+    service: kornode.services.agents.AgentService.commands
+    cli: "agent commands"
+    api: "GET /api/agents/{name}/commands"
+    ui: agent.command.list
+  - id: agent.command.result
+    service: kornode.services.agents.AgentService.command
+    cli: "agent command"
+    api: "GET /api/agents/{name}/commands/{command_id}"
+    ui: agent.command.result
+  - id: agent.command.artifact
+    service: kornode.services.agents.AgentService.artifact
+    cli: "agent command"
+    api: "GET /api/agents/{name}/commands/{command_id}/artifact"
+    ui: agent.command.artifact
+  - id: control.status
+    service: kornode.services.control_management.ControlManagement.status
+    cli: "control status"
+    api: "GET /api/control"
+    ui: control.status
+  - id: control.rotate_key
+    service: kornode.services.control_management.ControlManagement.rotate
+    cli: "control rotate-signing-key"
+    api: "POST /api/control/rotate-signing-key"
+    ui: control.rotate_key
+
+parity_ignore:
+  - api: "GET /healthz"
+    reason: "Health check route, not an authenticated management capability."
+  - api: "POST /api/auth/login"
+    reason: "Authentication plumbing, not an admin management capability."
+  - api: "POST /api/auth/logout"
+    reason: "Authentication plumbing, not an admin management capability."
+  - api: "GET /api/auth/me"
+    reason: "Session identity plumbing, not an admin management capability."
+  - api: "GET /api/client/routing"
+    reason: "Korclient synchronization endpoint, not a hub admin management capability."
+  - api: "POST /api/config/fabric-settings"
+    reason: "Structured config helper endpoint covered by the Fabric settings panel, not a separate management capability."
+  - api: "POST /api/config/validate"
+    reason: "Validation helper endpoint covered by config.validate/config.source.validate, not a separate panel action."

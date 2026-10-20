@@ -303,6 +303,16 @@ export type CertificateStatus = {
 
 export type DiagnosticResult = Record<string, CommandResult>;
 
+export type DoctorCheck = {
+  argv: string[];
+  returncode: number;
+  stdout: string;
+  stderr: string;
+  ok: boolean;
+};
+
+export type DoctorResult = Record<string, DoctorCheck>;
+
 export type SoftwareVersion = {
   name: string;
   version: string;
@@ -358,13 +368,61 @@ export type TerminalSession = {
   cols: number;
 };
 
+export type NetExit = {
+  name: string;
+  mark: string;
+  table: number | null;
+  interface: string;
+  up: boolean;
+  kill_switch: boolean;
+};
+
+export type NetPlanOp = {
+  op: string;
+  text: string;
+};
+
+export type NetPlan = {
+  exits: NetExit[];
+  warnings: string[];
+  ops: NetPlanOp[];
+  schema_hash: string | null;
+};
+
+export type NetApplyResult = NetPlan & {
+  applied: boolean;
+  dry_run?: boolean;
+  via?: string;
+  status?: NetStatus;
+};
+
+export type NetExplainResult = {
+  from_class: string;
+  matched_rule: Record<string, unknown> | null;
+  implicit: string | null;
+  mark: string | null;
+  table: number | null;
+  route: string | null;
+  nat: string | null;
+  kernel_check: string | null;
+  warnings: string[];
+};
+
+export type NetStatus = {
+  running: boolean;
+  passes?: number;
+  last_error?: string | null;
+  drift?: Record<string, number>;
+  [key: string]: unknown;
+};
+
 let csrfToken: string | null = null;
 
 export function setCsrfToken(value: string | null): void {
   csrfToken = value;
 }
 
-async function requestJson<T>(
+export async function requestJson<T>(
   path: string,
   _token: string | null,
   init: RequestInit = {}
@@ -381,9 +439,24 @@ async function requestJson<T>(
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
-      const payload = (await response.json()) as { detail?: unknown };
+      const payload = (await response.json()) as {
+        detail?: unknown;
+        error?: unknown;
+        conflicts?: unknown;
+        message?: unknown;
+        details?: unknown;
+      };
       if (payload.detail) {
         detail = formatApiDetail(payload.detail);
+      } else if (typeof payload.message === "string") {
+        detail = payload.message;
+        if (Array.isArray(payload.details) && payload.details.length > 0) {
+          detail += ": " + formatApiDetail(payload.details);
+        } else if (payload.details && typeof payload.details === "object") {
+          detail += ": " + JSON.stringify(payload.details);
+        }
+      } else if (payload.error === "address_overlap" && Array.isArray(payload.conflicts)) {
+        detail = formatAddressOverlap(payload.conflicts);
       }
     } catch {
       // Keep status text for non-JSON responses.
@@ -393,15 +466,34 @@ async function requestJson<T>(
   return response.json() as Promise<T>;
 }
 
-async function requestBlob(path: string, _token: string, init: RequestInit = {}): Promise<Blob> {
+function formatAddressOverlap(conflicts: unknown[]): string {
+  const messages = conflicts
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return "";
+      }
+      const record = item as Record<string, unknown>;
+      return `${String(record.prefix ?? "prefix")} overlaps ${String(record.with ?? "network")} (${String(record.owner ?? "owner")})`;
+    })
+    .filter((item) => item.length > 0);
+  return messages.length > 0 ? `address overlap: ${messages.join("; ")}` : "address overlap";
+}
+
+export async function requestBlob(path: string, _token: string, init: RequestInit = {}): Promise<Blob> {
   const headers = new Headers(init.headers);
+  const method = (init.method ?? "GET").toUpperCase();
+  if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    headers.set("X-Kornode-CSRF", csrfToken);
+  }
   const response = await fetch(path, { ...init, credentials: "same-origin", headers });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
-      const payload = (await response.json()) as { detail?: unknown };
+      const payload = (await response.json()) as { detail?: unknown; message?: string };
       if (payload.detail) {
         detail = formatApiDetail(payload.detail);
+      } else if (typeof payload.message === "string") {
+        detail = payload.message;
       }
     } catch {
       // Keep status text for non-JSON responses.
@@ -548,6 +640,32 @@ export function fetchRenderedConfig(token: string): Promise<Record<string, strin
   return requestJson<Record<string, string>>("/api/config/render", token);
 }
 
+export function fetchNetPlan(token: string): Promise<NetPlan> {
+  return requestJson<NetPlan>("/api/net/plan", token);
+}
+
+export function applyNetPlan(token: string, dryRun: boolean): Promise<NetApplyResult> {
+  return requestJson<NetApplyResult>("/api/net/apply", token, {
+    method: "POST",
+    body: body({ dry_run: dryRun })
+  });
+}
+
+export function explainNetPolicy(
+  token: string,
+  src: string,
+  dst: string
+): Promise<NetExplainResult> {
+  return requestJson<NetExplainResult>("/api/net/explain", token, {
+    method: "POST",
+    body: body({ src, dst })
+  });
+}
+
+export function fetchNetStatus(token: string): Promise<NetStatus> {
+  return requestJson<NetStatus>("/api/net/status", token);
+}
+
 export function writeRenderedConfig(token: string): Promise<{ written: string[] }> {
   return requestJson<{ written: string[] }>("/api/config/render", token, { method: "POST" });
 }
@@ -562,6 +680,27 @@ export function saveGeneralSettings(
   }
 ): Promise<{ status: string }> {
   return requestJson<{ status: string }>("/api/config/general-settings", token, {
+    method: "POST",
+    body: body(payload)
+  });
+}
+
+export type FabricSettings = {
+  node_id: number;
+  enabled: boolean;
+  cidr: string;
+  client_pool: string;
+  source_pool: string;
+  enroll_pool: string;
+  domain: string;
+  reserved: string[];
+};
+
+export function saveFabricSettings(
+  token: string,
+  payload: FabricSettings
+): Promise<{ status: string }> {
+  return requestJson<{ status: string }>("/api/config/fabric-settings", token, {
     method: "POST",
     body: body(payload)
   });
@@ -985,24 +1124,6 @@ export function saveRoutingSettings(
 
 export function reloadRouting(token: string, dryRun: boolean): Promise<CommandResult[]> {
   return requestJson<CommandResult[]>("/api/routing/reload", token, {
-    method: "POST",
-    body: dryRunBody(dryRun)
-  });
-}
-
-export function fetchNft(token: string): Promise<CommandResult> {
-  return requestJson<CommandResult>("/api/routing/nft", token);
-}
-
-export function applyNft(token: string, dryRun: boolean): Promise<CommandResult[]> {
-  return requestJson<CommandResult[]>("/api/routing/nft/apply", token, {
-    method: "POST",
-    body: dryRunBody(dryRun)
-  });
-}
-
-export function cleanupNft(token: string, dryRun: boolean): Promise<CommandResult[]> {
-  return requestJson<CommandResult[]>("/api/routing/nft/cleanup", token, {
     method: "POST",
     body: dryRunBody(dryRun)
   });
@@ -1529,6 +1650,10 @@ export function restartServer(token: string, dryRun: boolean): Promise<CommandRe
 
 export function fetchDiagnostics(token: string): Promise<DiagnosticResult> {
   return requestJson<DiagnosticResult>("/api/diagnostics", token);
+}
+
+export function fetchDoctor(token: string): Promise<DoctorResult> {
+  return requestJson<DoctorResult>("/api/diagnostics/doctor", token);
 }
 
 export function fetchSoftwareVersions(token: string): Promise<SoftwareVersion[]> {

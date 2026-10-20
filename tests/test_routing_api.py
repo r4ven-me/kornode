@@ -260,9 +260,7 @@ def test_routing_routes_refresh_fetches_and_caches(tmp_path: Path) -> None:
     assert payload["valid"] == 1
     assert payload["skipped"] == 1
     assert payload["saved"] is True
-    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == [
-        "10.60.0.0/16"
-    ]
+    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == ["10.60.0.0/16"]
 
 
 def test_routing_domains_refresh_preview_does_not_persist(tmp_path: Path) -> None:
@@ -294,9 +292,7 @@ def test_routing_domains_refresh_preview_does_not_persist(tmp_path: Path) -> Non
 def test_routing_host_routes_bulk_set_is_independent_of_client_routes(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
-    client.put(
-        "/api/routing/routes", auth=("admin", "secret"), json={"items": ["10.1.0.0/16"]}
-    )
+    client.put("/api/routing/routes", auth=("admin", "secret"), json={"items": ["10.1.0.0/16"]})
 
     response = client.put(
         "/api/routing/host-routes",
@@ -306,9 +302,7 @@ def test_routing_host_routes_bulk_set_is_independent_of_client_routes(tmp_path: 
 
     assert response.status_code == 200
     assert response.json() == ["10.2.0.0/16"]
-    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == [
-        "10.1.0.0/16"
-    ]
+    assert client.get("/api/routing/routes", auth=("admin", "secret")).json() == ["10.1.0.0/16"]
     assert client.get("/api/routing/host-routes", auth=("admin", "secret")).json() == [
         "10.2.0.0/16"
     ]
@@ -411,12 +405,12 @@ def test_routing_host_domains_refresh_fetches_and_caches(tmp_path: Path) -> None
     ]
 
 
-def test_routing_settings_save_starts_dnsmasq_and_reapplies_nft(tmp_path: Path) -> None:
+def test_routing_settings_save_starts_dnsmasq_and_reapplies_kernel_state(tmp_path: Path) -> None:
     # Regression: saving routing settings used to only rewrite config files,
-    # leaving dnsmasq and nftables mismatched until a manual Apply/restart
+    # leaving dnsmasq and the kernel mismatched until a manual Apply/restart
     # (see services/apply.py). The built-in resolver is mandatory while
     # server.enabled (the default here), so dnsmasq must always be
-    # (re)started on save, and nft must always be reapplied -- but nothing
+    # (re)started on save, and the kernel must always be reconverged -- but nothing
     # about VPN clients' own view of DNS changes from a client_policy switch
     # alone, so no reconnect is needed.
     config_path = tmp_path / "config.yaml"
@@ -425,7 +419,9 @@ def test_routing_settings_save_starts_dnsmasq_and_reapplies_nft(tmp_path: Path) 
     with (
         patch("kornode.services.apply.ServerService.process_action") as process_action,
         patch("kornode.services.apply.ServerService.reload") as reload,
-        patch("kornode.api.routes_routing.NftablesService.apply", return_value=[]) as nft_apply,
+        patch(
+            "kornode.api.routes_routing.NetService.apply", return_value={"applied": True}
+        ) as net_apply,
         patch("kornode.services.apply.InternalDnsService.ensure_listen_address"),
         patch("kornode.services.apply.SessionService.list_sessions", return_value=[]),
         patch("kornode.api.routes_routing.HostDnsService.apply") as host_apply,
@@ -448,4 +444,5 @@ def test_routing_settings_save_starts_dnsmasq_and_reapplies_nft(tmp_path: Path) 
     assert body["reconnect_required"] is False
     process_action.assert_called_once_with("restart", "dnsmasq")
     reload.assert_not_called()
-    nft_apply.assert_called_once()
+    net_apply.assert_called_once()
+    assert body["net"] == {"applied": True}

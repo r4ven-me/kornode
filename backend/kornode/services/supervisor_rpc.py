@@ -40,9 +40,7 @@ class _UnixStreamTransport(xmlrpc.client.Transport):
         credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
         self._extra_headers = [("Authorization", f"Basic {credentials}")]
 
-    def make_connection(
-        self, host: tuple[str, dict[str, str]] | str
-    ) -> _UnixStreamHTTPConnection:
+    def make_connection(self, host: tuple[str, dict[str, str]] | str) -> _UnixStreamHTTPConnection:
         return _UnixStreamHTTPConnection(self._socket_path, self._timeout)
 
 

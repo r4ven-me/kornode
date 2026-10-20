@@ -3,6 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "node": {"id": 1},
+    "fabric": {
+        "enabled": False,
+        "cidr": "10.99.0.0/24",
+        "client_pool": "10.100.{id}.0/24",
+        "source_pool": "10.8.{id}.0/24",
+        "enroll_pool": "10.99.255.240/28",
+        "domain": "kornode.internal",
+        "reserved": [],
+    },
     "system": {
         "timezone": "UTC",
         "data_dir": "/var/lib/kornode",
@@ -59,7 +69,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cert_user_oid": "2.5.4.3",
         "tls_priorities": None,
         "camouflage": {"enabled": False, "secret": None, "realm": "Hidden service"},
-        "connect_script": None,
+        "connect_script": "/var/lib/kornode/generated/ocserv-connect-script-kornode",
         "disconnect_script": None,
         "debug_level": 2,
     },

@@ -42,9 +42,7 @@ def test_log_service_keeps_existing_timestamps(tmp_path) -> None:
     assert LogService(config).tail("api.log") == "2026-06-30 12:30:00 event"
 
 
-def test_log_service_reuses_the_timestamp_a_line_first_appeared_with(
-    tmp_path, monkeypatch
-) -> None:
+def test_log_service_reuses_the_timestamp_a_line_first_appeared_with(tmp_path, monkeypatch) -> None:
     # ocserv/supervisord write lines with no timestamp of their own, and
     # ocserv repeats the exact same banner text on every restart. Re-reading
     # the file must not re-date already-seen lines to "now" on every poll -

@@ -1,10 +1,12 @@
-import type { CertificateInfo, CertificateStatus, CommandResult, ConfigSource, DiagnosticResult, GroupConfigRecord, Health, IdentityStatus, InternalDnsStatus, LogFile, OtpRecord, ProcessStatus, RevokedCertificate, RoutingListStatus, SessionRecord, SoftwareVersion, UpstreamProfile, UpstreamStatus, UserConfig, UserRecord } from "../api";
+import type { CertificateInfo, CertificateStatus, CommandResult, ConfigSource, DiagnosticResult, DoctorResult, GroupConfigRecord, Health, IdentityStatus, InternalDnsStatus, LogFile, OtpRecord, ProcessStatus, RevokedCertificate, RoutingListStatus, SessionRecord, SoftwareVersion, UpstreamProfile, UpstreamStatus, UserConfig, UserRecord } from "../api";
 
 export type Tab =
   | "dashboard"
   | "users"
+  | "agents"
   | "groups"
   | "sessions"
+  | "network"
   | "config"
   | "diagnostics"
   | "logs"
@@ -12,6 +14,8 @@ export type Tab =
 
 export type ConfigSection =
   | "system"
+  | "backup"
+  | "fabric"
   | "server"
   | "auth"
   | "certificates"
@@ -23,12 +27,14 @@ export type ConfigSection =
 
 // "routing" is no longer its own nav section (its settings live inside the
 // "upstream" section's Profiles/Routing tabs, see views/upstream/UpstreamView.tsx)
-// but is kept as a distinct command-output/busy key so its nftables/route
+// but is kept as a distinct command-output/busy key so its network/route
 // actions don't clobber the Profiles tab's own last-command panel.
 export type CommandOutputKey = Tab | ConfigSection | "routing";
 
 export const configSections: Array<{ id: ConfigSection; label: string }> = [
   { id: "system", label: "System" },
+  { id: "backup", label: "Backup / Restore" },
+  { id: "fabric", label: "Fabric" },
   { id: "server", label: "Server" },
   { id: "certificates", label: "Certificates" },
   { id: "auth", label: "Authentication" },
@@ -146,6 +152,7 @@ export type AppState = {
   configSource: ConfigSource | null;
   renderedConfig: Record<string, string>;
   diagnostics: DiagnosticResult | null;
+  doctor: DoctorResult | null;
   logFiles: LogFile[];
   certificateStatus: CertificateStatus | null;
   softwareVersions: SoftwareVersion[];

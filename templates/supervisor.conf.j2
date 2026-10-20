@@ -19,6 +19,19 @@ serverurl=unix://{{ config.system.generated_dir }}/supervisor.sock
 username={{ rpc_username }}
 password={{ rpc_password }}
 
+[program:reconciler]
+; The only process that changes kernel networking state (sysctl, ip rule/
+; route, nftables): converges it to the compiled policy on every input
+; change, netlink event and 10 s timer. Starts before everything that
+; produces tunnels or traffic (default priority is 999).
+command=/usr/local/bin/korctl net run
+priority=10
+autorestart=true
+stopwaitsecs=5
+stdout_logfile={{ config.system.log_dir }}/reconciler.log
+stdout_logfile_maxbytes=0
+redirect_stderr=true
+
 {% if config.server.enabled %}
 [program:ocserv]
 ; --log-stderr (long form only: ocserv's getopt short-option string omits
@@ -74,7 +87,7 @@ redirect_stderr=true
 
 [program:domain-resolver]
 ; Always registered, like dnsmasq/host-dns-guard above: resolves configured
-; split/profile/host domains into their nftables *_dynamic sets on its own
+; split/profile/host domains for the reconciler's dynamic sets on its own
 ; schedule, independent of which resolver VPN clients or the host actually
 ; use for their own lookups (see services/domain_resolver.py). A no-op
 ; cycle when no domain-based routing is configured at all.
@@ -106,3 +119,27 @@ autorestart=true
 stdout_logfile={{ config.system.log_dir }}/log-rotation.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
+
+{% if config.fabric.enabled %}
+[program:registry-snapshot]
+command=/bin/sh -c 'while true; do korctl registry snapshot || true; korctl registry maintain || true; sleep 3600; done'
+autorestart=true
+stdout_logfile={{ config.system.log_dir }}/registry-snapshot.log
+stdout_logfile_maxbytes=0
+redirect_stderr=true
+{% endif %}
+
+{% if config.control.enabled %}
+[program:control-api]
+; Agent-facing mTLS API on the hub fabric address. Independent of web.enabled.
+; The address is bound to lo by the reconciler: until it exists the bind
+; fails and supervisor retries.
+command=/usr/local/bin/python -m kornode.control
+priority=20
+autorestart=true
+startretries=100
+stopwaitsecs=5
+stdout_logfile={{ config.system.log_dir }}/control-api.log
+stdout_logfile_maxbytes=0
+redirect_stderr=true
+{% endif %}

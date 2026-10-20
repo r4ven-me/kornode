@@ -10,6 +10,13 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kornode.config.models import DOMAIN_RE, AppConfig
+from kornode.config.reserved import (
+    CLIENTS_GROUP,
+    ENROLL_GROUP,
+    ENROLL_USER_RE,
+    RESERVED_GROUPS,
+    is_reserved_username,
+)
 from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.files import FileManager
 
@@ -215,8 +222,7 @@ class UserConfig(BaseModel):
 
     def is_empty(self) -> bool:
         return not any(
-            value not in (None, [], "")
-            for value in self.model_dump(mode="python").values()
+            value not in (None, [], "") for value in self.model_dump(mode="python").values()
         )
 
 
@@ -237,11 +243,15 @@ class UserService:
             raise ValueError(
                 f"username '{username}' may contain letters, numbers, _, ., @ and - only"
             )
+        if is_reserved_username(username):
+            raise ValueError(f"username '{username}' is reserved for fabric agents/enrollment")
         return username
 
     def validate_group_name(self, group: str) -> str:
         if not USERNAME_RE.match(group):
             raise ValueError(f"group '{group}' may contain letters, numbers, _, ., @ and - only")
+        if group.lower() in RESERVED_GROUPS:
+            raise ValueError(f"group '{group}' is reserved")
         return group
 
     def list_users(self) -> list[UserRecord]:
@@ -300,6 +310,34 @@ class UserService:
             f"groups for {username}: {', '.join(clean_groups) if clean_groups else 'none'}\n",
             "",
         )
+
+    def ensure_default_group(
+        self,
+        group: str = CLIENTS_GROUP,
+        *,
+        dry_run: bool = False,
+    ) -> list[str]:
+        clean_group = self.validate_group_name(group.strip())
+        changed_users: list[str] = []
+        with _PASSWD_REWRITE_LOCK:
+            lines = self.files.read_lines(self.passwd_file)
+            next_lines: list[str] = []
+            for line in lines:
+                if not line or line.startswith("#") or ":" not in line:
+                    next_lines.append(line)
+                    continue
+                record = self._parse_passwd_record(line)
+                if record.groups:
+                    next_lines.append(line)
+                    continue
+                changed_users.append(record.username)
+                next_lines.append(self._render_passwd_record(record, [clean_group]))
+            if changed_users and not dry_run:
+                self.files.atomic_write_private_text(
+                    self.passwd_file,
+                    "\n".join(next_lines) + ("\n" if next_lines else ""),
+                )
+        return changed_users
 
     @staticmethod
     def _parse_groups_field(value: str) -> list[str]:
@@ -381,9 +419,7 @@ class UserService:
         if user_config.is_empty():
             deleted = self.delete_user_config(username)
             stdout = (
-                "deleted empty per-user config\n"
-                if deleted
-                else "per-user config already empty\n"
+                "deleted empty per-user config\n" if deleted else "per-user config already empty\n"
             )
         else:
             self.files.ensure_dir(path.parent, mode=0o700)
@@ -524,13 +560,16 @@ class UserService:
     ) -> CommandResult:
         self.validate_username(username)
         self.files.ensure_dir(self.config.system.secrets_dir, mode=0o700)
-        return self.runner.run(
+        result = self.runner.run(
             self._passwd_argv(username),
             input_text=f"{password}\n{password}\n",
             timeout=30,
             dry_run=dry_run,
             extra_secrets=[password],
         )
+        if result.ok and not dry_run and self.config.fabric.enabled:
+            self.ensure_default_group()
+        return result
 
     def change_password(
         self,
@@ -541,8 +580,39 @@ class UserService:
     ) -> CommandResult:
         return self.create_user(username, password, dry_run=dry_run)
 
+    def create_enroll_user(
+        self,
+        username: str,
+        password: str,
+        *,
+        dry_run: bool = False,
+    ) -> CommandResult:
+        """One-shot enrollment account, created directly in the `enroll` group.
+
+        validate_username() rejects `enroll-*` for operators, so the fabric
+        enrollment service goes through this narrow entry point instead.
+        """
+        if not ENROLL_USER_RE.fullmatch(username):
+            raise ValueError(f"enroll username '{username}' is malformed")
+        self.files.ensure_dir(self.config.system.secrets_dir, mode=0o700)
+        return self.runner.run(
+            self._passwd_argv("-g", ENROLL_GROUP, username),
+            input_text=f"{password}\n{password}\n",
+            timeout=30,
+            dry_run=dry_run,
+            extra_secrets=[password],
+        )
+
+    def delete_enroll_user(self, username: str) -> bool:
+        if not ENROLL_USER_RE.fullmatch(username):
+            raise ValueError(f"enroll username '{username}' is malformed")
+        return self._remove_passwd_entry(username)
+
     def delete_user(self, username: str) -> bool:
         self.validate_username(username)
+        return self._remove_passwd_entry(username)
+
+    def _remove_passwd_entry(self, username: str) -> bool:
         with _PASSWD_REWRITE_LOCK:
             lines = self.files.read_lines(self.passwd_file)
             kept = [

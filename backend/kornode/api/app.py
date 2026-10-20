@@ -13,15 +13,18 @@ from starlette.responses import Response
 
 from kornode import __version__
 from kornode.api import (
+    routes_agents,
     routes_auth,
     routes_certificates,
     routes_client_sync,
     routes_config,
     routes_diagnostics,
     routes_groups,
+    routes_hub,
     routes_identity,
     routes_internal_dns,
     routes_logs,
+    routes_net,
     routes_routing,
     routes_server,
     routes_sessions,
@@ -31,7 +34,8 @@ from kornode.api import (
     routes_web_config,
 )
 from kornode.config.loader import DEFAULT_CONFIG_PATH, load_config
-from kornode.config.models import AppConfig
+from kornode.config.models import AddressOverlapError, AppConfig
+from kornode.services.agent_models import ManagementError
 from kornode.services.audit import AuditService
 from kornode.services.command import CommandError
 
@@ -74,16 +78,20 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
+        if request.url.path.startswith(("/api/agents", "/api/control", "/api/hub")):
+            response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'"
         )
         if config.web.tls:
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
-        if (
-            request.url.path.startswith("/api/")
-            and request.method in {"POST", "PUT", "PATCH", "DELETE"}
-        ):
+        if request.url.path.startswith("/api/") and request.method in {
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+        }:
             # Best-effort, same tradeoff as UpstreamService._append_log: the
             # mutating action itself already fully executed and its
             # response is already built by the time this runs -- disk
@@ -102,9 +110,23 @@ def create_app(
                 )
         return response
 
+    @app.exception_handler(ManagementError)
+    def management_error_handler(_request: Request, exc: ManagementError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status, content=exc.body())
+
     @app.exception_handler(ValueError)
     def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(AddressOverlapError)
+    def address_overlap_handler(_request: Request, exc: AddressOverlapError) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "address_overlap",
+                "conflicts": [conflict.to_dict() for conflict in exc.conflicts],
+            },
+        )
 
     @app.exception_handler(CommandError)
     def command_error_handler(_request: Request, exc: CommandError) -> JSONResponse:
@@ -149,6 +171,10 @@ def create_app(
     app.include_router(routes_upstream.router, prefix="/api/upstream", tags=["upstream"])
     app.include_router(routes_terminal.router, prefix="/api/terminal", tags=["terminal"])
     app.include_router(routes_diagnostics.router, prefix="/api/diagnostics", tags=["diagnostics"])
+    app.include_router(routes_net.router, prefix="/api/net", tags=["net"])
+    app.include_router(routes_hub.router, prefix="/api/hub", tags=["hub"])
+    app.include_router(routes_agents.router, prefix="/api/agents", tags=["agents"])
+    app.include_router(routes_agents.control_router, prefix="/api/control", tags=["control"])
     app.include_router(routes_logs.router, prefix="/api/logs", tags=["logs"])
     app.include_router(routes_web_config.router, prefix="/api/web-config", tags=["web-config"])
 

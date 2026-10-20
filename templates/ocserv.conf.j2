@@ -17,13 +17,20 @@ log-level = {{ config.server.debug_level }}
 server-cert = {{ server_cert }}
 server-key = {{ server_key }}
 ca-cert = {{ ca_cert }}
-{% if config.auth.certificate.enabled %}
+{% if config.auth.certificate.enabled or config.fabric.enabled %}
 cert-user-oid = {{ config.server.cert_user_oid }}
+{% endif %}
+{% if config.fabric.enabled %}
+cert-group-oid = 2.5.4.11
+crl = {{ crl }}
 {% endif %}
 
 {% for item in auth_lines %}
 auth = "{{ item }}"
 {% endfor %}
+{% if config.fabric.enabled %}
+enable-auth = "certificate"
+{% endif %}
 {% if config.identity.config_per_user_dir %}
 config-per-user = {{ config.identity.config_per_user_dir }}
 {% endif %}

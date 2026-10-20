@@ -1,23 +1,15 @@
-"""Pre-resolve configured domains into nftables *_dynamic sets.
+"""Pre-resolve the egress policy's domains for the reconciler.
 
-Before this module, domain-based routing worked by piggybacking on dnsmasq's
-`nftset=` directive (templates/dnsmasq.conf.j2): a *_dynamic set only ever
-got an IP the moment dnsmasq itself answered a live query for that domain.
-That tied correct routing to which resolver a VPN client or the host
-actually used -- a client using its own DNS (or DoH, bypassing dnsmasq
-entirely) never populated the set at all, and a domain removed from config
-left its old IPs in the set forever (dnsmasq's directive only ever adds).
+Domain-based routing never depends on which resolver a VPN client or the
+host actually uses for its own lookups (a client with its own DNS or DoH
+bypasses dnsmasq entirely): this service resolves every domain of the
+policy's destination sets itself, on its own schedule, and records the
+addresses per set in `generated_dir/resolved/<set>.txt` (the set name is the
+key of NodeFacts.resolved, D-25). The file is rewritten wholesale every
+cycle, so a domain dropped from config also drops out on the next one.
 
-This service resolves the same domain lists itself, on its own schedule,
-independent of any client/host query, and replaces (flush + add, never just
-add) each *_dynamic set's contents every cycle -- so a domain dropped from
-config also drops out of the set on the next cycle. dnsmasq.conf.j2 no
-longer has any nftset= directives.
-
-RUNTIME: writes live nftables set state via `nft -f`. See
-NftablesService.apply()'s docstring for why *_dynamic sets are never
-touched by a routes/domains-only config refresh -- this is the one thing
-that is allowed to touch them, and only them.
+It only changes that input and wakes the reconciler -- kernel state
+(nft sets) is kornode.net's business alone.
 """
 
 from __future__ import annotations
@@ -30,11 +22,13 @@ from pathlib import Path
 import dns.exception
 import dns.resolver
 
+from kornode.config.legacy import profile_slug
 from kornode.config.models import AppConfig
-from kornode.renderers.nftables import NftablesConfigRenderer
-from kornode.services.command import CommandResult, CommandRunner
+from kornode.net.model import EgressPolicy
 from kornode.services.files import FileManager
-from kornode.services.routing import RoutingService
+from kornode.services.net import NetService
+from kornode.services.netinputs import HubNetInputs, resolved_state_dir
+from kornode.services.upstream_pushed import PushedRoutingStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,89 +42,48 @@ LOOKUP_TIMEOUT_SECONDS = 5.0
 
 @dataclass(frozen=True)
 class DomainGroup:
-    """One nftables *_dynamic set pair's worth of domains to resolve, and
-    which nameservers to resolve them through. domains may be empty -- the
-    group is still included so its set gets flushed with nothing to add,
-    clearing out whatever an earlier cycle left there."""
+    """One destination set's domains to resolve (`name` is the set's name in
+    the policy) and which nameservers to resolve them through."""
 
-    set_v4: str
-    set_v6: str
+    name: str
     domains: tuple[str, ...]
     nameservers: tuple[str, ...]
 
 
 @dataclass
 class ResolvedSet:
-    set_v4: str
-    set_v6: str
-    ips_v4: list[str] = field(default_factory=list)
-    ips_v6: list[str] = field(default_factory=list)
+    name: str
+    ips: list[str] = field(default_factory=list)
 
 
 @dataclass
 class RefreshOutcome:
-    result: CommandResult | None
     resolved: list[ResolvedSet]
+    # Whether any set's addresses differ from what was recorded before.
+    changed: bool
     # How long to wait before the next cycle -- the lowest TTL seen this
     # cycle, clamped to [MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS].
     next_interval_seconds: int
 
 
-def domain_groups(config: AppConfig) -> list[DomainGroup]:
-    """The same domain/nameserver choices dnsmasq.conf.j2's nftset=
-    directives used to encode, minus the two that only ever existed to
-    answer the client's *own* query a particular way (the default target's
-    split domains, and a named target's plain -- non-server-pushed -- host
-    domains): those always used the normal upstream DNS already, so
-    removing their nftset= directive changes nothing about how they
-    resolve for a client, only who populates the nftables set.
-    """
-    renderer = NftablesConfigRenderer()
-    targets, _, _ = renderer.resolve_targets(config)
+def domain_groups(config: AppConfig, policy: EgressPolicy | None = None) -> list[DomainGroup]:
+    """Every policy set that has domains. A profile's host set resolves
+    through the DNS its upstream pushed (accept_server_routes), when it has
+    one; everything else through the internal DNS upstreams."""
+    policy = policy or HubNetInputs(config).policy()
     upstreams = tuple(config.internal_dns.upstreams)
-    groups: list[DomainGroup] = []
-    for target in targets:
-        if target.name == "default":
-            if config.routing.client_policy == "split":
-                groups.append(
-                    DomainGroup(
-                        target.set_v4_dynamic,
-                        target.set_v6_dynamic,
-                        tuple(target.domains),
-                        upstreams,
-                    )
-                )
-            continue
-        groups.append(
-            DomainGroup(
-                target.set_v4_dynamic, target.set_v6_dynamic, tuple(target.domains), upstreams
-            )
-        )
-        if target.host_set_v4_dynamic is not None and target.host_set_v6_dynamic is not None:
-            # Simplification: if the profile has its own DNS (pushed by the
-            # upstream, see UpstreamProfileConfig.accept_server_routes),
-            # resolve ALL of this target's host domains through it, not
-            # just the server-pushed subset -- dnsmasq used to split that
-            # hair because it needed the subset for a `server=/domain/...`
-            # answer override too; that distinction has no equivalent need
-            # here, resolving is resolving.
-            nameservers = tuple(target.server_dns) if target.server_dns else upstreams
-            groups.append(
-                DomainGroup(
-                    target.host_set_v4_dynamic,
-                    target.host_set_v6_dynamic,
-                    tuple(target.host_domains),
-                    nameservers,
-                )
-            )
-    if config.routing.host_policy == "split":
-        host_domains = tuple(RoutingService(config).list_host_domains())
-        groups.append(
-            DomainGroup(
-                "host_split_v4_dynamic", "host_split_v6_dynamic", host_domains, upstreams
-            )
-        )
-    return groups
+    pushed_dns: dict[str, tuple[str, ...]] = {}
+    if config.upstream.enabled:
+        store = PushedRoutingStore(config, FileManager())
+        for profile in config.upstream.profiles:
+            dns_servers = tuple(store.effective(profile).dns)
+            if dns_servers:
+                pushed_dns[f"p_{profile_slug(profile.name)}_host"] = dns_servers
+    return [
+        DomainGroup(name, tuple(dest.domains), pushed_dns.get(name, upstreams))
+        for name, dest in policy.sets.items()
+        if dest.domains
+    ]
 
 
 class DnsLookup:
@@ -177,64 +130,48 @@ class DomainResolverService:
         config: AppConfig,
         *,
         lookup: DnsLookup | None = None,
-        runner: CommandRunner | None = None,
         files: FileManager | None = None,
+        net: NetService | None = None,
     ) -> None:
         self.config = config
         self.lookup = lookup or DnsLookup()
-        self.runner = runner or CommandRunner()
         self.files = files or FileManager()
-        self.renderer = NftablesConfigRenderer()
+        self.net = net or NetService(config)
 
-    @property
-    def filter_table(self) -> str:
-        return f"{self.config.routing.nft_prefix}_filter"
-
-    def target_path(self) -> Path:
-        return self.config.generated_path("nftables-dynamic-refresh.nft")
+    def state_dir(self) -> Path:
+        return resolved_state_dir(self.config)
 
     def refresh(self, *, dry_run: bool = False) -> RefreshOutcome:
         groups = domain_groups(self.config)
-        if not groups:
-            return RefreshOutcome(
-                result=None, resolved=[], next_interval_seconds=MAX_INTERVAL_SECONDS
-            )
-
-        # Only ever touch a *_dynamic set the current config/nftables schema
-        # actually expects -- defensive, since domain_groups() is derived
-        # from the same targets expected_set_names() uses, but an nft apply
-        # may not have run yet (first boot) and a stale/missing set must
-        # not turn into a confusing nft error every cycle.
-        expected = self.renderer.expected_set_names(self.config)
-
         resolved: list[ResolvedSet] = []
         min_ttl: int | None = None
         for group in groups:
-            if group.set_v4 not in expected and group.set_v6 not in expected:
-                continue
-            ips_v4: list[str] = []
-            ips_v6: list[str] = []
+            ips: list[str] = []
             for domain in group.domains:
-                v4, ttl4 = self.lookup.resolve(domain, group.nameservers, "A")
-                v6, ttl6 = self.lookup.resolve(domain, group.nameservers, "AAAA")
-                ips_v4.extend(v4)
-                ips_v6.extend(v6)
-                for ttl in (ttl4, ttl6):
+                for rdtype in ("A", "AAAA"):
+                    found, ttl = self.lookup.resolve(domain, group.nameservers, rdtype)
+                    ips.extend(found)
                     if ttl is not None and (min_ttl is None or ttl < min_ttl):
                         min_ttl = ttl
-            resolved.append(ResolvedSet(group.set_v4, group.set_v6, _dedup(ips_v4), _dedup(ips_v6)))
+            resolved.append(ResolvedSet(group.name, sorted(_dedup(ips))))
 
-        interval = _clamp_interval(min_ttl)
-        if not resolved:
-            return RefreshOutcome(result=None, resolved=[], next_interval_seconds=interval)
-
-        content = self.renderer.render_dynamic_refresh(resolved, self.filter_table)
-        if dry_run:
-            return RefreshOutcome(
-                result=CommandResult(("nft", "-f", str(self.target_path())), 0, content, "", True),
-                resolved=resolved,
-                next_interval_seconds=interval,
-            )
-        self.files.atomic_write_text(self.target_path(), content)
-        result = self.runner.run(["nft", "-f", str(self.target_path())], timeout=30, check=False)
-        return RefreshOutcome(result=result, resolved=resolved, next_interval_seconds=interval)
+        directory = self.state_dir()
+        previous = {
+            path.stem: self.files.read_lines(path) for path in sorted(directory.glob("*.txt"))
+        }
+        current = {item.name: item.ips for item in resolved}
+        changed = {
+            name: [line for line in lines if line] for name, lines in previous.items()
+        } != current
+        if changed and not dry_run:
+            self.files.ensure_dir(directory)
+            for name, ips in current.items():
+                self.files.atomic_write_text(
+                    directory / f"{name}.txt", "".join(f"{ip}\n" for ip in ips)
+                )
+            for name in previous.keys() - current.keys():
+                (directory / f"{name}.txt").unlink(missing_ok=True)
+            self.net.wake()
+        return RefreshOutcome(
+            resolved=resolved, changed=changed, next_interval_seconds=_clamp_interval(min_ttl)
+        )

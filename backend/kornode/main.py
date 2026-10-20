@@ -12,7 +12,7 @@ from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandError
 from kornode.services.config import ConfigService
 from kornode.services.files import FileManager
-from kornode.services.nftables import NftablesService
+from kornode.services.net import NetApplyError, NetService
 from kornode.services.server_certificates import ServerCertificateService
 
 
@@ -20,6 +20,7 @@ def unlink_stale_runtime_sockets(generated_dir: Path) -> None:
     for path in [
         generated_dir / "supervisor.sock",
         generated_dir / "occtl.sock",
+        generated_dir / "reconciler.sock",
         *generated_dir.glob("ocserv.sock*"),
         *generated_dir.glob("occtl.sock*"),
     ]:
@@ -38,7 +39,7 @@ def initialize_runtime(config_path: Path | None = None) -> None:
     unlink_stale_runtime_sockets(config.system.generated_dir)
     config = prepare_startup_letsencrypt(config, resolved_config_path, files)
     ConfigService(files).write_rendered_files(config)
-    NftablesService(config, files=files).apply()
+    _converge_kernel(config)
 
     certs = CertificateService(config, files=files)
     if not config.cert_path("ca.key").exists() or not config.cert_path("ca.crt").exists():
@@ -49,6 +50,15 @@ def initialize_runtime(config_path: Path | None = None) -> None:
         server_cert_missing = not config.cert_path("server.crt").exists()
         if server_key_missing or server_cert_missing:
             certs.create_server_certificate()
+
+
+def _converge_kernel(config: AppConfig) -> None:
+    """One reconciler pass before anything starts: the sysctls, rules and
+    kill-switch must be in place first. Failure is fatal."""
+    try:
+        NetService(config).converge()
+    except (NetApplyError, OSError) as exc:
+        raise SystemExit(f"failed to converge kernel networking state:\n{exc}") from exc
 
 
 def prepare_startup_letsencrypt(

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from kornode.services.cert_pin import (
+from kornode.tunnels.pin import (
     certificate_file_pin,
     fetch_server_pin,
     pem_to_der,

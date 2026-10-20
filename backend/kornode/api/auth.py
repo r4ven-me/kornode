@@ -123,8 +123,7 @@ def authenticate_password(request: Request, username: str, password: str) -> Non
     password_matches = (
         verify_password(password, expected_hash)
         if expected_hash is not None
-        else expected_password is not None
-        and secrets.compare_digest(password, expected_password)
+        else expected_password is not None and secrets.compare_digest(password, expected_password)
     )
     if not (secrets.compare_digest(username, config.web.admin_user) and password_matches):
         registry.record_failure(source)

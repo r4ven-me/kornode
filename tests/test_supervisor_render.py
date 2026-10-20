@@ -106,6 +106,45 @@ def test_supervisor_render_always_includes_log_rotation_loop(tmp_path: Path) -> 
     assert "korctl logs-rotate" in rendered
 
 
+def test_supervisor_render_adds_registry_snapshot_when_fabric_enabled(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "generated_dir": str(tmp_path / "generated"),
+                "log_dir": str(tmp_path / "logs"),
+            },
+            "fabric": {"enabled": True},
+        },
+        environ={},
+    )
+
+    rendered = SupervisorConfigRenderer().render(config)
+
+    assert "[program:registry-snapshot]" in rendered
+    assert "korctl registry snapshot" in rendered
+    assert "korctl registry maintain" in rendered
+    assert f"stdout_logfile={tmp_path}/logs/registry-snapshot.log" in rendered
+
+
+def test_supervisor_render_omits_registry_snapshot_when_fabric_disabled(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "generated_dir": str(tmp_path / "generated"),
+                "log_dir": str(tmp_path / "logs"),
+            },
+            "fabric": {"enabled": False},
+        },
+        environ={},
+    )
+
+    rendered = SupervisorConfigRenderer().render(config)
+
+    assert "[program:registry-snapshot]" not in rendered
+
+
 def test_supervisor_render_always_includes_domain_resolver(tmp_path: Path) -> None:
     # Always registered, like host-dns-guard/log-rotation: a no-op cycle
     # when there's nothing configured to resolve, so turning split routing
@@ -241,3 +280,53 @@ def test_supervisor_render_enables_proxy_headers_for_trusted_proxies(tmp_path: P
 
     assert "--proxy-headers" in rendered
     assert "--forwarded-allow-ips 127.0.0.1,172.18.0.0/16" in rendered
+
+
+def test_supervisor_render_runs_the_reconciler_before_everything_else(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "generated_dir": str(tmp_path / "generated"),
+                "log_dir": str(tmp_path / "logs"),
+            },
+            "upstream": {
+                "enabled": True,
+                "profiles": [{"name": "main", "server": "203.0.113.2", "username": "u"}],
+            },
+        },
+        environ={},
+    )
+
+    rendered = SupervisorConfigRenderer().render(config)
+
+    section = rendered.split("[program:reconciler]")[1].split("\n[")[0]
+    assert "command=/usr/local/bin/korctl net run" in section
+    assert "autorestart=true" in section
+    # supervisor starts lower priorities first; the default is 999.
+    priority = int(section.split("priority=")[1].split()[0])
+    assert priority < 999
+    assert "priority=" not in rendered.split("[program:upstream-watchdog]")[1].split("\n[")[0]
+
+
+def test_supervisor_registers_control_api_only_when_enabled(tmp_path: Path) -> None:
+    overrides = {
+        "system": {
+            "generated_dir": str(tmp_path / "generated"),
+            "log_dir": str(tmp_path / "logs"),
+        },
+        "fabric": {"enabled": True},
+        "web": {"enabled": False},
+    }
+    off = load_config(tmp_path / "missing.yaml", cli_overrides=overrides, environ={})
+    on = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={**overrides, "control": {"enabled": True}},
+        environ={},
+    )
+
+    assert "[program:control-api]" not in SupervisorConfigRenderer().render(off)
+    rendered = SupervisorConfigRenderer().render(on)
+    assert "[program:control-api]" in rendered
+    assert "command=/usr/local/bin/python -m kornode.control" in rendered
+    assert "[program:api]" not in rendered

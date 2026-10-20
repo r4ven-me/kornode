@@ -258,6 +258,32 @@ export type GeneralSettingsDraft = {
   cliEnabled: boolean;
 };
 
+export type FabricSettingsDraft = {
+  nodeId: number;
+  enabled: boolean;
+  cidr: string;
+  clientPool: string;
+  sourcePool: string;
+  enrollPool: string;
+  domain: string;
+  reserved: string;
+};
+
+export function readFabricSettingsDraft(config: Record<string, unknown>): FabricSettingsDraft {
+  const node = readRecord(config.node);
+  const fabric = readRecord(config.fabric);
+  return {
+    nodeId: readNumber(node.id, 1),
+    enabled: readBoolean(fabric.enabled, false),
+    cidr: readString(fabric.cidr, "10.99.0.0/24"),
+    clientPool: readString(fabric.client_pool, "10.100.{id}.0/24"),
+    sourcePool: readString(fabric.source_pool, "10.8.{id}.0/24"),
+    enrollPool: readString(fabric.enroll_pool, "10.99.255.240/28"),
+    domain: readString(fabric.domain, "kornode.internal"),
+    reserved: readStringArray(fabric.reserved).join("\n")
+  };
+}
+
 export function readGeneralSettingsDraft(config: Record<string, unknown>): GeneralSettingsDraft {
   const system = readRecord(config.system);
   const cli = readRecord(config.cli);

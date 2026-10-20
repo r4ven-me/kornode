@@ -168,9 +168,7 @@ def test_refresh_domain_url_validates_caches_and_merges(
     assert service.list_domains() == ["corp.example.com"]
 
 
-def test_routes_urls_status_reports_counts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_routes_urls_status_reports_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     url = "https://lists.example.com/routes.txt"
     service = RoutingService(_config(tmp_path, routes_urls=[url]))
     monkeypatch.setattr(

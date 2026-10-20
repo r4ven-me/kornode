@@ -1,0 +1,62 @@
+# Hub (node 1) — v2 additions only. Existing sections (system, server, auth,
+# certificates, identity, web, internal_dns, ...) stay as in v1.
+
+node:
+  id: 1
+
+fabric:
+  enabled: true
+  cidr: 10.99.0.0/24
+  client_pool: 10.100.{id}.0/24
+  source_pool: 10.8.{id}.0/24
+  domain: kornode.internal
+  reserved: []
+
+control:
+  enabled: true
+  port: 8444
+  long_poll_seconds: 60
+  report_interval_seconds: 30
+  offline_after_seconds: 90
+  cert_lifetime_days: 90
+  enroll_token_ttl_minutes: 60
+  bundle_history: 20
+
+# Hub's own external upstreams keep the v1 `upstream.profiles` shape;
+# routing knobs move into `egress`.
+upstream:
+  enabled: true
+  profiles:
+    - name: office
+      server: office-vpn.example.org
+      port: "443"
+      auth_type: password
+      username: hub
+      password: "${SECRET:OFFICE_PASSWORD}"
+      check_host: 10.60.0.1
+
+sets:
+  corp:
+    routes: [10.60.0.0/16]
+    domains: [corp.example.com]
+
+egress:
+  # Transit between agents and from hub clients into the fabric.
+  - id: fabric
+    from: [clients, host, fabric]
+    to: fabric
+    via: fabric
+  # Corporate network through the external office VPN.
+  - id: corp
+    from: [clients, host]
+    to: { set: corp }
+    via: upstream:office
+  # Agents that declared `exit:1` use the hub as their internet exit.
+  - id: fabric-exit
+    from: [fabric]
+    to: any
+    via: local
+  - id: internet
+    from: [clients]
+    to: any
+    via: local

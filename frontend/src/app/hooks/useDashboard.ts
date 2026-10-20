@@ -3,7 +3,7 @@ import {
   type CommandResult,
   type InterfaceStats,
   type SessionRecord,
-  applyNft,
+  applyNetPlan,
   fetchInterfaceStats,
   fetchServerProcesses,
   fetchServerStatus,
@@ -15,6 +15,7 @@ import {
   writeRenderedConfig
 } from "../../api";
 import { confirmAction, delay } from "../../lib/async";
+import { syntheticCommand } from "../../lib/commands";
 import { diagnosticKind } from "../../lib/errors";
 import { serverRuntimeState } from "../../lib/serverStatus";
 import type { PanelCore } from "../core";
@@ -208,14 +209,25 @@ export function useDashboard(
   const writeConfig = () =>
     void runAction("write-config", "Generated configs written", writeRenderedConfig);
 
-  const applyNftAction = async () => {
+  const applyNetAction = async () => {
     const result = await runAction(
-      "apply-nft",
-      "nftables rules applied",
-      (token) => applyNft(token, dryRun),
+      "apply-net",
+      "Network policy applied",
+      (token) => applyNetPlan(token, dryRun),
       { dryRunAware: true }
     );
-    recordCommand("dashboard", result);
+    if (result !== null) {
+      const stdout = [
+        result.applied ? "applied: true" : "applied: false",
+        `dry_run: ${result.dry_run ?? dryRun}`,
+        `operations: ${result.ops.length}`,
+        ...result.warnings.map((warning) => `warning: ${warning}`)
+      ].join("\n");
+      recordCommand("dashboard", {
+        ...syntheticCommand(["korctl", "net", "apply"], stdout),
+        dry_run: result.dry_run ?? dryRun
+      });
+    }
   };
 
   return {
@@ -227,6 +239,6 @@ export function useDashboard(
     reloadServer: reloadServerAction,
     restartServer: restartServerAction,
     writeConfig,
-    applyNft: applyNftAction
+    applyNet: applyNetAction
   };
 }

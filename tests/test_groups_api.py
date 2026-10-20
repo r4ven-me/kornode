@@ -34,12 +34,7 @@ def test_delete_group_removes_config_policy_and_membership(tmp_path: Path) -> No
     client = _client(
         config_path,
         tmp_path,
-        extra=(
-            "identity:\n"
-            "  group_policies:\n"
-            "    - name: devops\n"
-            "      routes: [10.20.0.0/16]\n"
-        ),
+        extra=("identity:\n  group_policies:\n    - name: devops\n      routes: [10.20.0.0/16]\n"),
     )
 
     # A config-per-group file for the same group.

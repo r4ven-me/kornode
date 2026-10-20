@@ -33,7 +33,7 @@ export function UserGroupsDialog({
   };
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel group-dialog" role="dialog" aria-modal="true">
+      <section className="modal-panel group-dialog" role="dialog" aria-modal="true" data-capability="user.groups">
         <div className="panel-header">
           <h2>{state.username} groups</h2>
           <IconButton label="Close" icon={X} onClick={onClose} />
@@ -67,6 +67,7 @@ export function UserGroupsDialog({
             disabled={saving || availableGroups.length === 0}
             onClick={onSave}
             type="button"
+            data-capability="user.groups"
           >
             <Save size={18} aria-hidden="true" />
             <span>{saving ? "Working" : "Save"}</span>

@@ -45,6 +45,18 @@ class GeneralSettingsRequest(BaseModel):
     cli_enabled: bool = True
 
 
+class FabricSettingsRequest(BaseModel):
+    node_id: int = 1
+    enabled: bool = False
+    cidr: str = "10.99.0.0/24"
+    client_pool: str = "10.100.{id}.0/24"
+    source_pool: str = "10.8.{id}.0/24"
+    enroll_pool: str = "10.99.255.240/28"
+    domain: str = "kornode.internal"
+    reserved: list[str] = []
+    write_rendered: bool = True
+
+
 @router.get("")
 def get_config(request: Request) -> dict[str, Any]:
     config: AppConfig = request.app.state.config
@@ -179,6 +191,34 @@ def save_general_settings(
     }
 
 
+@router.post("/fabric-settings")
+def save_fabric_settings(
+    request: Request,
+    payload: FabricSettingsRequest,
+) -> dict[str, object]:
+    patch = {
+        "node": {"id": payload.node_id},
+        "fabric": {
+            "enabled": payload.enabled,
+            "cidr": payload.cidr,
+            "client_pool": payload.client_pool,
+            "source_pool": payload.source_pool,
+            "enroll_pool": payload.enroll_pool,
+            "domain": payload.domain,
+            "reserved": payload.reserved,
+        },
+    }
+    loaded_config, written = apply_config_patch(request, patch)
+    return {
+        "status": "saved",
+        "written": written,
+        "node": loaded_config.node.model_dump(mode="json"),
+        "fabric": loaded_config.fabric.model_dump(mode="json"),
+        "server": loaded_config.server.model_dump(mode="json"),
+        "internal_dns": loaded_config.internal_dns.model_dump(mode="json"),
+    }
+
+
 def apply_config_patch(
     request: Request,
     patch: dict[str, Any],
@@ -220,10 +260,11 @@ def _load_existing_mapping(path: Path) -> dict[str, Any]:
 def _validate_yaml_config(data: dict[str, Any], path: Path) -> AppConfig:
     environment = combined_environment(path, environ=None)
     env_overrides = env_overrides_from_mapping(environment)
+    explicit_paths = _leaf_paths(env_overrides) | _leaf_paths(data)
     merged = deep_merge(DEFAULT_CONFIG, env_overrides)
     merged = deep_merge(merged, data)
     merged = resolve_secret_refs(merged, environment)
-    return AppConfig.model_validate(merged)
+    return AppConfig.model_validate(merged, context={"explicit_paths": explicit_paths})
 
 
 def _restore_masked_values(value: Any, old_value: Any, key: str | None = None) -> Any:
@@ -271,3 +312,14 @@ def _masked_yaml(content: str, config: AppConfig) -> str:
 
 def _dump_yaml(data: Any) -> str:
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=False)
+
+
+def _leaf_paths(value: dict[str, Any], prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    paths: set[tuple[str, ...]] = set()
+    for key, item in value.items():
+        path = (*prefix, str(key))
+        if isinstance(item, dict):
+            paths.update(_leaf_paths(item, path))
+        else:
+            paths.add(path)
+    return paths

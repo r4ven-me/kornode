@@ -1,0 +1,22 @@
+# kornode agent. Enroll once, then run:
+#   docker compose -f compose.agent.yaml run --rm agent kornode-agent enroll <token>
+#   docker compose -f compose.agent.yaml up -d
+name: kornode-agent
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: kornode-agent:latest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: host
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./agent-data:/var/lib/kornode-agent
+    entrypoint: []
+    command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/kornode-agent.conf"]

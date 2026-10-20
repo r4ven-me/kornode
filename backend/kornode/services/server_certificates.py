@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kornode.config.models import AppConfig
-from kornode.services.cert_pin import certificate_file_pin
 from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.files import FileManager
+from kornode.tunnels.pin import certificate_file_pin
 
 
 @dataclass(frozen=True)

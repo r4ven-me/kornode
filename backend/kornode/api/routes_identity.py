@@ -181,9 +181,7 @@ def _mask_provider(provider: OidcProviderConfig) -> dict[str, object]:
 def _identity_dump(config: AppConfig) -> dict[str, object]:
     return {
         "auth": config.auth.oidc.model_dump(mode="json"),
-        "oidc_providers": [
-            _mask_provider(provider) for provider in config.identity.oidc_providers
-        ],
+        "oidc_providers": [_mask_provider(provider) for provider in config.identity.oidc_providers],
         "group_policies": [
             group.model_dump(mode="json") for group in config.identity.group_policies
         ],

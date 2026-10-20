@@ -215,11 +215,15 @@ def test_save_ca_material_writes_private_files(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert config.cert_path("ca.crt").read_text(encoding="utf-8").startswith(
-        "-----BEGIN CERTIFICATE-----"
+    assert (
+        config.cert_path("ca.crt")
+        .read_text(encoding="utf-8")
+        .startswith("-----BEGIN CERTIFICATE-----")
     )
-    assert config.cert_path("ca.key").read_text(encoding="utf-8").startswith(
-        "-----BEGIN PRIVATE KEY-----"
+    assert (
+        config.cert_path("ca.key")
+        .read_text(encoding="utf-8")
+        .startswith("-----BEGIN PRIVATE KEY-----")
     )
 
 
@@ -269,9 +273,7 @@ def test_concurrent_revocations_do_not_lose_changes(tmp_path: Path) -> None:
 
     config = _config(tmp_path)
     service = CertificateService(config, runner=RecordingRunner())
-    certs = [
-        f"-----BEGIN CERTIFICATE-----\nuser{i}\n-----END CERTIFICATE-----\n" for i in range(8)
-    ]
+    certs = [f"-----BEGIN CERTIFICATE-----\nuser{i}\n-----END CERTIFICATE-----\n" for i in range(8)]
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(service.append_revoked_certificate, cert) for cert in certs]
