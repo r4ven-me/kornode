@@ -184,7 +184,7 @@ mTLS probes (not access-client forwarding); it requires paired **different immut
 `E2E_PREVIOUS_HUB_IMAGE` / `E2E_PREVIOUS_AGENT_IMAGE` digest refs with compatible
 CLI/schema. Missing baselines skip; identical images fail rather than pass as an upgrade.
 
-`test_routed_fabric.py` has 12 explicit P4 skips: E2E-07, NL-01…09, full NL-13
+`test_routed_fabric.py` runs NL-01 and NL-04 on real VMs (case `routed`, 2026-10-20: passed, D-65) and keeps 10 explicit P4 skips: E2E-07, NL-02…09, full NL-13
 client forwarding and E2E-06 client continuity. They are listed in offline plan
 and run summary. There is no claimed wg-easy/domain/leak/throughput/host-network
 coverage. None of the real VM cases has been run; local faked SSH/Docker safety

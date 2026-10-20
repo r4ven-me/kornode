@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -33,6 +34,7 @@ CASES = {
     "route",
     "rollback",
     "tamper",
+    "routed",
 }
 ROLES = {"hub", "agent-a", "agent-b", "ext"}
 IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(?:@sha256:[0-9a-f]{64})?$")
@@ -145,6 +147,29 @@ with closing(open_registry(config.system.data_dir/"registry.db")) as conn, trans
   key_id=key_id(key.public_key()),reason="test-only injected fault")
  registry.update_node(node.id,desired_version=version)
 print(json.dumps({"version":version}))
+"""
+LISTEN = """import json,socket,sys
+options=json.load(sys.stdin)
+server=socket.socket()
+server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+server.bind(("0.0.0.0",options["port"]))
+server.listen(4)
+server.settimeout(options["seconds"])
+try:
+ conn,peer=server.accept()
+ conn.close()
+ print(json.dumps({"peer":peer[0]}))
+except socket.timeout:
+ print(json.dumps({"peer":None}))
+"""
+CONNECT = """import json,socket,sys
+options=json.load(sys.stdin)
+try:
+ source=(options["source"],0) if options.get("source") else None
+ socket.create_connection((options["host"],options["port"]),timeout=3,source_address=source).close()
+ print(json.dumps({"ok":True}))
+except OSError:
+ print(json.dumps({"ok":False}))
 """
 IDENTITY = """import hashlib,json
 from pathlib import Path
@@ -534,6 +559,78 @@ class Worker:
             raise ValueError("invalid dpd")
         return self.cli("agent", "set", self.payload["name"], "--dpd", str(dpd))
 
+    def fabric_address(self) -> Any:
+        if not self.role.startswith("agent-") or self.case != "routed":
+            raise ValueError("routed case, agent only")
+        out = self.execute(["ip", "-4", "-j", "addr", "show", "dev", "oc-hub0"])[1]
+        return {"address": json.loads(out)[0]["addr_info"][0]["local"]}
+
+    def net_dump(self) -> Any:
+        """Routing state of the case container; carries no credentials (addresses,
+        rules and routes only), so it may appear in a test failure message."""
+        if self.case != "routed":
+            raise ValueError("routed case only")
+        dump = {}
+        for name, argv in (
+            ("rules", ["ip", "rule", "show"]),
+            ("routes", ["ip", "route", "show", "table", "all"]),
+            ("nft", ["nft", "list", "ruleset"]),
+            ("rp_filter", ["sysctl", "-a", "--pattern", "rp_filter|ip_forward"]),
+        ):
+            try:
+                _, out = self.execute(argv, allowed=tuple(range(256)), timeout=20)
+            except (ValueError, subprocess.TimeoutExpired):
+                out = b"unavailable"
+            dump[name] = out.decode(errors="replace")[:6000]
+        return dump
+
+    def lan_setup(self) -> Any:
+        if not self.role.startswith("agent-") or self.case != "routed":
+            raise ValueError("routed case, agent only")
+        cidr = str(ipaddress.ip_interface(self.payload["cidr"]))
+        for argv in (
+            ["ip", "link", "add", "kn-lan0", "type", "dummy"],
+            ["ip", "addr", "add", cidr, "dev", "kn-lan0"],
+            ["ip", "link", "set", "kn-lan0", "up"],
+        ):
+            self.execute(argv)
+        return {"cidr": cidr}
+
+    def export_prefix(self) -> Any:
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        if self.payload["name"] not in {"agent-a", "agent-b"}:
+            raise ValueError("invalid agent")
+        cidr = str(ipaddress.ip_network(self.payload["cidr"]))
+        return self.cli("agent", "prefix", "add", self.payload["name"], cidr, "--kind", "lan")
+
+    def fabric_listen(self) -> Any:
+        if not self.role.startswith("agent-") or self.case != "routed":
+            raise ValueError("routed case, agent only")
+        seconds = self.payload["seconds"]
+        if type(seconds) is not int or not 1 <= seconds <= 120:
+            raise ValueError("invalid window")
+        _, data = self.execute(
+            ["python", "-c", LISTEN],
+            data=json.dumps({"port": 9100, "seconds": seconds}).encode(),
+            timeout=seconds + 20,
+        )
+        return json.loads(data)
+
+    def fabric_connect(self) -> Any:
+        if self.case != "routed":
+            raise ValueError("routed case only")
+        host = str(ipaddress.ip_address(self.payload["host"]))
+        source = self.payload.get("source")
+        if source is not None:
+            source = str(ipaddress.ip_address(source))
+        _, data = self.execute(
+            ["python", "-c", CONNECT],
+            data=json.dumps({"host": host, "port": 9100, "source": source}).encode(),
+            timeout=20,
+        )
+        return json.loads(data)
+
     def repair_route(self) -> Any:
         if not self.role.startswith("agent-") or self.case != "route":
             raise ValueError("route case only")
@@ -827,6 +924,12 @@ class Worker:
             "change",
             "revoke",
             "repair_route",
+            "fabric_address",
+            "lan_setup",
+            "net_dump",
+            "export_prefix",
+            "fabric_listen",
+            "fabric_connect",
             "inject_bundle",
             "rejected",
             "rollback_report",

@@ -31,6 +31,8 @@ not claims made by this isolated P3 implementation. See implementation choice D-
 | E2E-04 | revoke agent-b: fabric unusable and actual mTLS HTTP 403 via a test-only TCP relay |
 | E2E-05 | announce signing rotation, confirm agents, encrypted backup, advance agent version, stop/wipe ONLY owned hub data, restore/activate, same certs, monotonic high-water recovery |
 | E2E-06 | two different digest-pinned previous images → current hub/agents under continuous fabric mTLS probes, maximum good-probe gap ≤30 s, same certs |
+| NL-01 | hub container connects to a TCP listener in agent-a over the fabric; the listener sees the hub fabric address `10.99.0.1` (no NAT) |
+| NL-04 | a dummy LAN `192.168.30.0/24` on agent-b is exported (`agent prefix add`); agent-a (source = its fabric address) connects to it through the hub; agent-b sees agent-a's fabric address (no NAT); the hub route is installed by its reconciler (`proto 77`) |
 | NL-10 | delete an owned fabric unicast route via `kornode.net.Kernel` inside agent; running reconciler repairs ≤2 s |
 | NL-11 | inject a validly signed bundle that dials fabric port 1; real apply rolls back ≤70 s and reports to hub |
 | NL-12 | deliver a body changed after signing; require agent's actual signature-rejection evidence, unchanged applied/high-water versions |
@@ -42,7 +44,7 @@ contracts (P3-07+) and forward-only DB schema. This does not attempt a downgrade
 already-current data: the upgrade scenario starts fresh on previous images.
 
 **P4 blockers stay skipped**, with reasons in `test_routed_fabric.py`, the offline
-plan and summary: E2E-07; NL-01…09; access-client traffic during upgrade and hub
+plan and summary: E2E-07; NL-02…03, NL-05…09; access-client traffic during upgrade and hub
 outage. An existing upstream tunnel is not proof of access-client forwarding,
 wg-easy integration, no fabric NAT, domain-based exit selection or no traffic leak.
 No production P4 feature or GUI/AppConfig field is added by test tooling.

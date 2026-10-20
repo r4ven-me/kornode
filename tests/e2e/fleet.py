@@ -309,6 +309,44 @@ class Cluster:
                 "initial agent bundle was not confirmed",
             )
 
+    def tcp_peer(
+        self,
+        listener: str,
+        connector: str,
+        host: str,
+        *,
+        source: str | None = None,
+        seconds: int = 120,
+    ) -> str:
+        """Open a TCP connection `connector` -> host:9100 where `listener` accepts it;
+        return the peer address the listener saw (NAT would change it)."""
+        result: dict[str, Any] = {}
+
+        def listen() -> None:
+            try:
+                result["peer"] = self.call(listener, "fabric_listen", seconds=seconds)["peer"]
+            except E2EError as exc:
+                result["error"] = exc
+
+        thread = threading.Thread(target=listen, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + seconds
+        while thread.is_alive() and time.monotonic() < deadline:
+            if self.call(connector, "fabric_connect", host=host, source=source)["ok"]:
+                break
+            time.sleep(2)
+        thread.join(30)
+        if "error" in result:
+            raise result["error"]
+        peer = result.get("peer")
+        if not isinstance(peer, str):
+            dumps = {role: self.call(role, "net_dump") for role in ("hub", listener, connector)}
+            lines = [f"no connection {connector} -> {host} reached {listener}"]
+            for role, dump in dumps.items():
+                lines += [f"--- {role} {name}\n{text}" for name, text in dump.items()]
+            raise E2EError("\n".join(lines))
+        return peer
+
     def changed(self, role: str, dpd: int = 25, *, seconds: float = 10) -> int:
         started = time.monotonic()
         updated = self.call("hub", "change", name=role, dpd=dpd)
