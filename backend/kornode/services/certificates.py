@@ -460,6 +460,78 @@ class CertificateService:
             template.unlink(missing_ok=True)
         return out
 
+    def issue_access_server_certificate(
+        self, node_id: int, hostname: str, *, lifetime_days: int
+    ) -> tuple[str, str]:
+        """Server certificate of an agent's access listener (P4-04, D-67).
+
+        Signed by the hub CA for `hostname` (DNS name or IP address), with no
+        OU: the hub's certificate login refuses OU-less certificates, so this
+        certificate can never authenticate to the hub. The key is generated
+        here and returned with the certificate; the caller seals it to the
+        agent and stores it encrypted, never in plain text on disk.
+        """
+        import ipaddress
+
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        key_pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+        try:
+            ipaddress.ip_address(hostname)
+            san = f"ip_address = {hostname}"
+        except ValueError:
+            san = f'dns_name = "{hostname}"'
+        name = f"access-{node_id}"
+        work = self.cert_dir / "agents"
+        self.files.ensure_dir(work, mode=0o700)
+        key_path = work / f"{name}.key.tmp"
+        out = work / f"{name}.crt.tmp"
+        self.files.atomic_write_text(key_path, key_pem, mode=0o600)
+        template = self._write_template(
+            self._template_path(f"{name}.tmpl"),
+            "\n".join(
+                [
+                    f'cn = "{hostname}"',
+                    san,
+                    "tls_www_server",
+                    "signing_key",
+                    "encryption_key",
+                    f"expiration_days = {lifetime_days}",
+                    "",
+                ]
+            ),
+        )
+        try:
+            self.runner.run(
+                [
+                    "certtool",
+                    "--generate-certificate",
+                    "--load-privkey",
+                    str(key_path),
+                    "--load-ca-certificate",
+                    str(self.config.cert_path("ca.crt")),
+                    "--load-ca-privkey",
+                    str(self.config.cert_path("ca.key")),
+                    "--template",
+                    str(template),
+                    "--outfile",
+                    str(out),
+                ],
+                timeout=60,
+            )
+            cert_pem = out.read_text(encoding="utf-8")
+        finally:
+            key_path.unlink(missing_ok=True)
+            out.unlink(missing_ok=True)
+            template.unlink(missing_ok=True)
+        return cert_pem, key_pem
+
     def ensure_crl(self, *, dry_run: bool = False) -> bool:
         """Create the CRL if absent; ocserv refuses to start with `crl =` pointing nowhere."""
         if (self.cert_dir / "crl.pem").exists():

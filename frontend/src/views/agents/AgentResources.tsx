@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AccessUser, Mutate, Prefix, Source, Upstream } from "../../agentsApi";
+import type { AccessListener, AccessUser, Mutate, Prefix, Source, Upstream } from "../../agentsApi";
 
 const lines = (text: string) => text.split(/[\n,]+/).map(v => v.trim()).filter(Boolean);
 
@@ -69,7 +69,7 @@ export function UpstreamEditor({ upstreams, busy, mutate }: { upstreams: Upstrea
 export function AccessUserEditor({ users, busy, mutate }: { users: AccessUser[]; busy: boolean; mutate: Mutate }) {
   const [username, setUsername] = useState(""); const [password, setPassword] = useState("");
   const [groups, setGroups] = useState(""); const [enabled, setEnabled] = useState(true); const [editing, setEditing] = useState(false);
-  return <section className="panel"><h2>Access users</h2><p role="status">Registry only: delivery to the agent and local ocserv authentication are P4-04. Saving here does not create a working VPN login yet.</p>
+  return <section className="panel"><h2>Access users</h2><p role="status">Users reach the agent as password hashes in its signed bundle and keep working while the hub is unreachable. Configure the access listener first.</p>
     <ul className="agent-items" data-capability="agent.user.list">{users.map(u => <li key={u.username}><span>{u.username} · {u.enabled ? "enabled" : "disabled"} · {u.groups.join(", ")}</span><div className="row-actions"><button className="action-button" type="button" onClick={() => { setUsername(u.username); setGroups(u.groups.join(", ")); setEnabled(u.enabled); setEditing(true); setPassword(""); }}>Edit</button><button className="action-button" type="button" disabled={busy} data-capability="agent.user.delete" onClick={() => void mutate(`/users/${encodeURIComponent(u.username)}`, "DELETE", undefined, `Delete registry user ${u.username}?`)}>Delete</button></div></li>)}</ul>
     <form onSubmit={e => { e.preventDefault(); const data: Record<string, unknown> = { groups: lines(groups), enabled }; if (password) data.password = password; void mutate(`/users/${encodeURIComponent(username)}`, "PUT", data).then(ok => { if (ok) setPassword(""); }); }}>
       <fieldset className="agent-fields" disabled={busy}>
@@ -79,6 +79,24 @@ export function AccessUserEditor({ users, busy, mutate }: { users: AccessUser[];
         <label className="agent-check"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> User enabled</label>
       </fieldset>
       <div className="panel-footer"><button className="action-button" type="button" onClick={() => { setUsername(""); setPassword(""); setGroups(""); setEnabled(true); setEditing(false); }}>New user</button><button className="action-button primary" disabled={busy} data-capability="agent.user.set">Save access user</button></div>
+    </form>
+  </section>;
+}
+
+export function AccessListenerEditor({ access, busy, mutate }: { access: AccessListener; busy: boolean; mutate: Mutate }) {
+  const [hostname, setHostname] = useState(access.hostname ?? ""); const [port, setPort] = useState(String(access.port ?? 443));
+  const [udp, setUdp] = useState(access.udp ?? false); const [reissue, setReissue] = useState(false);
+  return <section className="panel" data-capability="agent.access.show"><h2>Access listener</h2>
+    <p role="status">{access.configured ? `ocserv on ${access.hostname}:${access.port}; server certificate ${access.certificate?.pin ?? ""} valid until ${access.certificate?.not_after ?? "unknown"}.` : "Not configured: the agent runs no VPN server."}</p>
+    <form onSubmit={e => { e.preventDefault(); void mutate("/access", "PUT", { hostname, port: Number(port), udp, reissue }).then(ok => { if (ok) setReissue(false); }); }}>
+      <fieldset className="agent-fields" disabled={busy}>
+        <label>Listener hostname or IP<input value={hostname} onChange={e => setHostname(e.target.value)} required /></label>
+        <label>Listener port<input type="number" min={1} max={65535} value={port} onChange={e => setPort(e.target.value)} required /></label>
+        <label className="agent-check"><input type="checkbox" checked={udp} onChange={e => setUdp(e.target.checked)} /> Allow DTLS (UDP)</label>
+        <label className="agent-check"><input type="checkbox" checked={reissue} onChange={e => setReissue(e.target.checked)} /> Issue a new server certificate</label>
+      </fieldset>
+      <div className="panel-footer"><button className="action-button primary" disabled={busy} data-capability="agent.access.set">Save access listener</button>
+        {access.configured && <button className="action-button" type="button" disabled={busy} data-capability="agent.access.delete" onClick={() => void mutate("/access", "DELETE", undefined, "Remove the access listener? Connected VPN clients of this agent are disconnected.")}>Remove listener</button>}</div>
     </form>
   </section>;
 }

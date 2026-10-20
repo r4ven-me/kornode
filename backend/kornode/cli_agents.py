@@ -110,7 +110,8 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
     policy = typer.Typer(help="Agent egress policy")
     source = typer.Typer(help="Agent attached sources")
     upstream = typer.Typer(help="Agent external upstreams")
-    user = typer.Typer(help="Access users (registry; runtime delivery is P4-04)")
+    user = typer.Typer(help="Access users of an agent with role access (delivered as hashes)")
+    access = typer.Typer(help="Access listener (ocserv) of an agent with role access")
     bundle = typer.Typer(help="Agent bundle history and redacted views")
 
     def service() -> AgentService:
@@ -282,6 +283,26 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
     def upstream_del(name: str, upstream: str, json: Json = False) -> None:
         invoke(lambda: service().set_upstream(name, upstream, None), json)
 
+    @access.command("show")
+    def access_show(name: str, json: Json = False) -> None:
+        invoke(lambda: service().access(name), json)
+
+    @access.command("set")
+    def access_set(
+        name: str,
+        hostname: Annotated[str, typer.Option(help="Public DNS name or IP of the listener")],
+        port: int = 443,
+        udp: bool = False,
+        reissue: bool = typer.Option(False, help="Issue a new server certificate"),
+        json: Json = False,
+    ) -> None:
+        payload = {"hostname": hostname, "port": port, "udp": udp, "reissue": reissue}
+        invoke(lambda: service().set_access(name, payload), json)
+
+    @access.command("del")
+    def access_del(name: str, json: Json = False) -> None:
+        invoke(lambda: service().set_access(name, None), json)
+
     @user.command("list")
     def user_list(name: str, json: Json = False) -> None:
         invoke(lambda: service().users(name), json)
@@ -428,6 +449,7 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
         ("source", source),
         ("upstream", upstream),
         ("user", user),
+        ("access", access),
         ("bundle", bundle),
     ):
         agent.add_typer(group, name=name)

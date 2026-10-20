@@ -176,15 +176,21 @@ class Dns(_Model):
         return None if value is None else tuple(dns_name(item) for item in value)
 
 
+# Access users become ocpasswd lines `user:groups:hash` (P4-04, D-67): no
+# field may carry a separator, a newline or anything but its own syntax.
+_ACCESS_USER_RE = re.compile(r"^[a-zA-Z0-9_@.\-]{1,64}$")
+_CRYPT_RE = re.compile(r"^\$[0-9a-z]{1,4}\$[./0-9A-Za-z$=]{1,200}$")
+
+
 class AccessUser(_Model):
-    username: StrictStr
-    pw_hash: StrictStr | None = None
-    groups: tuple[StrictStr, ...] | None = None
+    username: Annotated[StrictStr, Field(pattern=_ACCESS_USER_RE.pattern)]
+    pw_hash: Annotated[StrictStr, Field(pattern=_CRYPT_RE.pattern)] | None = None
+    groups: tuple[Annotated[StrictStr, Field(pattern=NAME_PATTERN)], ...] | None = None
     enabled: StrictBool
 
 
 class Access(_Model):
-    port: StrictInt
+    port: Annotated[StrictInt, Field(ge=1, le=65535)]
     udp: StrictBool | None = None
     auth: Annotated[tuple[Literal["password", "certificate"], ...], Field(min_length=1)]
     camouflage: Sealed | None = None

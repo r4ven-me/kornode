@@ -30,7 +30,7 @@ def test_open_registry_creates_private_wal_database(tmp_path: Path) -> None:
 
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
 
     # data_dir is shared with other services; its mode is not ours to change.
     assert (data_dir.stat().st_mode & 0o777) == 0o755
@@ -38,7 +38,7 @@ def test_open_registry_creates_private_wal_database(tmp_path: Path) -> None:
 
     with open_registry(db_path) as conn:
         migrate(conn)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_migrate_refuses_newer_database(tmp_path: Path) -> None:

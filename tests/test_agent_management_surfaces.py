@@ -37,7 +37,7 @@ def test_api_auth_crud_and_no_store(world: Any) -> None:
             assert response.status_code == 401, (method, path, response.text)
             assert response.headers["cache-control"] == "no-store"
             checked += 1
-    assert checked == 32
+    assert checked == 35
     auth = ("admin", "admin-secret")
     created = client.post("/api/agents", auth=auth, json={"name": "branch"})
     assert created.status_code == 200 and created.json()["token"] == "one-time-token"

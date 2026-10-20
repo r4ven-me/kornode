@@ -154,6 +154,21 @@ def agent_upstream_delete(name: str, upstream: str, request: Request) -> dict[st
     return service(request).set_upstream(name, upstream, None)
 
 
+@router.get("/{name}/access")
+def agent_access(name: str, request: Request) -> dict[str, Any]:
+    return service(request).access(name)
+
+
+@router.put("/{name}/access")
+async def agent_access_set(name: str, request: Request) -> dict[str, Any]:
+    return await run_in_threadpool(service(request).set_access, name, await payload(request))
+
+
+@router.delete("/{name}/access")
+def agent_access_delete(name: str, request: Request) -> dict[str, Any]:
+    return service(request).set_access(name, None)
+
+
 @router.get("/{name}/users")
 def agent_users(name: str, request: Request) -> dict[str, Any]:
     return service(request).users(name)

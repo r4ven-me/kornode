@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -28,6 +28,8 @@ class Node:
     last_seen: str | None
     created_at: str
     updated_at: str
+    # Access listener settings and server certificate (P4-04, D-67).
+    access: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

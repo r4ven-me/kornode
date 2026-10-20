@@ -1010,6 +1010,21 @@ capabilities:
     cli: "agent upstream del"
     api: "DELETE /api/agents/{name}/upstreams/{upstream}"
     ui: agent.upstream.delete
+  - id: agent.access.show
+    service: kornode.services.agents.AgentService.access
+    cli: "agent access show"
+    api: "GET /api/agents/{name}/access"
+    ui: agent.access.show
+  - id: agent.access.set
+    service: kornode.services.agents.AgentService.set_access
+    cli: "agent access set"
+    api: "PUT /api/agents/{name}/access"
+    ui: agent.access.set
+  - id: agent.access.delete
+    service: kornode.services.agents.AgentService.set_access
+    cli: "agent access del"
+    api: "DELETE /api/agents/{name}/access"
+    ui: agent.access.delete
   - id: agent.user.list
     service: kornode.services.agents.AgentService.users
     cli: "agent user list"

@@ -320,6 +320,7 @@ class BundleService:
             },
             "policy": _policy_with_fabric_rule(node.policy),
             "dns": self._dns(registry, node.id, hub.client_pool),
+            **self._access(registry, node),
             "settings": {
                 "report_interval_seconds": self.config.control.report_interval_seconds,
                 "confirm_window_seconds": 60,
@@ -330,6 +331,38 @@ class BundleService:
         if announcement:
             plan["next_signing_pubkey"] = announcement
         return plan
+
+    def _access(self, registry: Registry, node: Node) -> dict[str, Any]:
+        """`access` only for role `access` with a configured listener (D-67).
+        Users travel as ocpasswd hashes; the server key is sealed to the
+        agent. Password authentication only in P4-04."""
+        access = node.access
+        if "access" not in node.roles or not access.get("cert_pem"):
+            return {}
+        key = self._decrypt_external_secrets(
+            node.id, "access-server", base64.b64decode(access["key_enc"])
+        )["key"]
+        users = [
+            {
+                "username": user["username"],
+                "pw_hash": user["pw_hash"],
+                "groups": list(user["groups"]),
+                "enabled": bool(user["enabled"]),
+            }
+            for user in registry.access_users(node.id)
+            if user["pw_hash"]
+        ]
+        return {
+            "access": {
+                "port": int(access["port"]),
+                "udp": bool(access.get("udp", False)),
+                "auth": ["password"],
+                "ca_pem": self.config.cert_path("ca.crt").read_text(encoding="utf-8"),
+                "server_cert_pem": access["cert_pem"],
+                "server_key": {SECRET_MARKER: key},
+                "users": users,
+            }
+        }
 
     def _dns(
         self, registry: Registry, node_id: int, hub_pool: ipaddress.IPv4Network

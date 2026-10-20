@@ -19,12 +19,14 @@ export type Upstream = {
   dns?: string[]; credentials_set?: boolean;
 };
 export type AccessUser = { username: string; groups: string[]; enabled: boolean; password_set: boolean };
+export type AccessListener = { configured: boolean; role?: boolean; hostname?: string; port?: number; udp?: boolean; certificate?: { not_after: string | null; pin: string | null } };
 export type BundleVersion = { version: number; key_id: string; created_at: string; reason: string };
 export type AgentCommand = { id: string; type: string; state: string; created_at: string; args: JsonObject; result: (JsonObject & { artefact_available?: boolean }) | null };
 export type ControlStatus = { enabled: boolean; fabric_enabled: boolean; agents: number; active?: number; signing_key_id: string | null; rotation: { phase: string; promotes_at: string; warning: string } | null };
 export type Detail = {
   agent: Agent; prefixes: Prefix[]; policy: Policy; upstreams: Upstream[];
   users: AccessUser[]; bundles: BundleVersion[]; reports: JsonObject[]; commands: AgentCommand[];
+  access: AccessListener;
 };
 
 export function agentPath(name: string, suffix = ""): string {
@@ -36,14 +38,15 @@ export const agentWrite = (path: string, method: string, body: unknown, token: s
 
 export async function loadAgent(name: string, token: string | null): Promise<Detail> {
   const path = agentPath(name);
-  const [agent, prefixes, policy, upstreams, users, bundles, reports, commands] = await Promise.all([
+  const [agent, prefixes, policy, upstreams, users, bundles, reports, commands, access] = await Promise.all([
     agentGet<Agent>(path, token), agentGet<{ prefixes: Prefix[] }>(path + "/prefixes", token),
     agentGet<{ policy: Policy }>(path + "/policy", token), agentGet<{ upstreams: Upstream[] }>(path + "/upstreams", token),
     agentGet<{ users: AccessUser[] }>(path + "/users", token), agentGet<{ bundles: BundleVersion[] }>(path + "/bundles", token),
-    agentGet<{ reports: JsonObject[] }>(path + "/reports", token), agentGet<{ commands: AgentCommand[] }>(path + "/commands", token)
+    agentGet<{ reports: JsonObject[] }>(path + "/reports", token), agentGet<{ commands: AgentCommand[] }>(path + "/commands", token),
+    agentGet<AccessListener>(path + "/access", token)
   ]);
   return { agent, prefixes: prefixes.prefixes, policy: policy.policy, upstreams: upstreams.upstreams,
-    users: users.users, bundles: bundles.bundles, reports: reports.reports, commands: commands.commands };
+    users: users.users, bundles: bundles.bundles, reports: reports.reports, commands: commands.commands, access };
 }
 
 export async function downloadAgentArtifact(name: string, id: string, token: string | null) {

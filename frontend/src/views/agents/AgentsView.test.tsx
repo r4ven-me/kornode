@@ -11,7 +11,7 @@ vi.mock("../../agentsApi", () => ({
   agentPath: (name: string, suffix = "") => `/api/agents/${encodeURIComponent(name)}${suffix}`
 }));
 const agent: Agent = { id: 2, name: "branch", description: "", roles: ["access"], state: "pending", online: false, desired_version: 0, applied_version: 0, last_seen: null, cert_not_after: null, transport: {} };
-const detail: Detail = { agent, prefixes: [], policy: {}, upstreams: [], users: [], bundles: [], reports: [], commands: [] };
+const detail: Detail = { agent, prefixes: [], policy: {}, upstreams: [], users: [], bundles: [], reports: [], commands: [], access: { configured: false } };
 const status = { enabled: true, fabric_enabled: true, agents: 0, active: 0, rotation: null, signing_key_id: "public-id" };
 
 afterEach(cleanup);
@@ -24,6 +24,17 @@ beforeEach(() => {
 });
 
 describe("Agent management", () => {
+  it("configures the access listener of an access agent", async () => {
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/agents" ? { agents: [agent] } : { records: [] }));
+    render(<AgentsView token="session" />);
+    await userEvent.click(await screen.findByRole("button", { name: /branch · node 2/ }));
+    await userEvent.selectOptions(await screen.findByLabelText("Agent section"), "users");
+    expect(screen.getByText("Not configured: the agent runs no VPN server.")).not.toBeNull();
+    await userEvent.type(screen.getByLabelText("Listener hostname or IP"), "vpn.branch.example");
+    await userEvent.click(screen.getByRole("button", { name: "Save access listener" }));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/agents/branch/access", "PUT", { hostname: "vpn.branch.example", port: 443, udp: false, reissue: false }, "session"));
+  });
+
   it("creates an agent, reveals token only in ephemeral dialog, and forgets it on close", async () => {
     render(<AgentsView token="session" />);
     await screen.findByText("No agents registered yet.");
