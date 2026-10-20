@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added (P4-04, D-67)
+
+- Role `access` on agents: `korctl agent access show/set/del`, `GET/PUT/DELETE /api/agents/{name}/access`, panel listener editor. The hub issues the listener's server certificate from its CA **without OU** (it can never log in to the hub), keeps the key encrypted and seals it to the agent; the bundle carries `access` (port, DTLS, password auth, CA, certificate, sealed key, users as ocpasswd hashes) with strict validation of usernames, hashes and groups.
+- The agent renders ocserv files under `/run/kornode-access` and runs ocserv as a supervisor program (`autostart=false`): user changes only rewrite `ocpasswd` and disconnect removed users, other changes restart it, removing the listener stops it and wipes the secrets; failures are the doctor finding `access_failed`. Local logins work while the hub is down (E2E NL-03).
+- Security defaults for access nodes: clients are not in the implicit fabric rule, may reach the node itself only for DNS/ping (`vpns*` input guard), and the listener certificate is revoked in the hub CRL at issuance; hub doctor `access-certificates` warns before expiry.
+- `kornode.net`: strict reverse-path rule for `vpns*` (`NodeFacts.access_ifaces`); doctor ignores per-session host routes in the client pool.
+- Registry migration 0003 (`nodes.access`); agent image ships ocserv; netlab `test_p4_access`; E2E NL-03.
+
 ### Added (P4-03, D-66)
 
 - Fabric DNS: the hub answers the whole `<fabric.domain>` zone (`hub`, `node<N>` and registry records) from local data; each agent runs dnsmasq on its service address, answers its own `node<id>.<domain>` zone (also with the hub down) and forwards the rest of the zone to the hub over the fabric.

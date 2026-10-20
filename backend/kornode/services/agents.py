@@ -563,9 +563,17 @@ class AgentService:
         ):
             # certtool spawns a process: issue before the registry write lock.
             try:
-                issued = self.certificates().issue_access_server_certificate(
+                certificates = self.certificates()
+                issued = certificates.issue_access_server_certificate(
                     current.id, payload.hostname, lifetime_days=ACCESS_CERT_DAYS
                 )
+                # Defence in depth (D-67): a hub-CA certificate without OU must never
+                # log in to the hub. Revoking it in the hub CRL makes ocserv refuse it
+                # as a client certificate whatever groups are configured; the agent's
+                # ocserv has no CRL and clients do not check one for a server.
+                certificates.revoke_certificate_pem(issued[0])
+                with contextlib.suppress(Exception):
+                    self._reload_ocserv()
             except Exception:
                 raise ManagementError(
                     503, "certificate_failed", "access server certificate could not be issued"

@@ -4,6 +4,8 @@ The P3 cache/upgrade probes exercise fabric/upstream connectivity, not client
 throughput, no-NAT routed prefixes or wg-easy access/exit runtime.
 """
 
+import secrets
+
 import pytest
 from tests.e2e.fleet import Cluster, wait_for
 from tests.e2e.inventory import E2EError
@@ -12,7 +14,6 @@ pytestmark = pytest.mark.e2e
 
 BLOCKED = {
     "E2E-07": "P4 access/exit, source routing and domain resolution are not implemented",
-    "NL-03": "P4 agent access server and client forwarding/MSS",
     "NL-05": "P4 attached wg-easy source and fail-closed packet capture",
     "NL-06": "P4 source-prefix export to hub monitoring",
     "NL-07": "P4 local delivery with the new egress model",
@@ -103,3 +104,86 @@ def test_nl_02_agent_reaches_hub_monitoring_by_fabric_name(cluster: Cluster) -> 
     peer = cluster.tcp_peer("hub", "agent-a", HUB_FABRIC_ADDRESS, source=source)
 
     assert peer == source
+
+
+ACCESS_PORT = 8443  # published by the harness on agent-a (worker.ACCESS_PORT)
+
+
+@pytest.mark.e2e_case("routed")
+def test_nl_03_access_client_of_an_agent_reaches_the_fabric_and_leaves_through_the_node(
+    cluster: Cluster,
+) -> None:
+    """A VPN client of agent-a (role access): reaches the hub across the fabric
+    without NAT, leaves through the node with NAT, and a *new* login works while
+    the hub is down (users travel in the bundle as hashes). A throwaway openconnect
+    client runs in its own container on the agent-b VM (outside the node's policy)
+    and routes only the hub addresses through the tunnel. MSS clamping is covered by the
+    golden/netlab suites, not here."""
+    inventory = cluster.fleet.inventory
+    agent_a, hub_lan = inventory.host("agent-a").address, inventory.host("hub").address
+    node_id = cluster.call("agent-a", "fabric_address")["address"].rsplit(".", 1)[1]
+    password = secrets.token_hex(12)
+    before = cluster.status("agent-a")["applied_version"]
+    access = cluster.call(
+        "hub", "access_setup", name="agent-a", host=agent_a, port=ACCESS_PORT,
+        user="alice", password=password,
+    )  # fmt: skip
+    pin = access["certificate"]["pin"]
+    cluster.call("hub", "access_policy")
+    wait_for(
+        lambda: cluster.status("agent-a")["applied_version"] > before,
+        60,
+        "agent-a did not apply the bundle with the access listener",
+    )
+
+    # Only these destinations go through the tunnel of the throwaway client.
+    routes = [f"{HUB_FABRIC_ADDRESS}/32", f"{hub_lan}/32"]
+
+    def connect() -> dict[str, str] | None:
+        try:
+            return dict(
+                cluster.call(
+                    "agent-b", "access_client", host=agent_a, port=ACCESS_PORT, pin=pin,
+                    user="alice", password=password, routes=routes,
+                )
+            )  # fmt: skip
+        except E2EError:
+            return None
+
+    def login() -> str:
+        result: dict[str, str] = {}
+
+        def attempt() -> bool:
+            found = connect()
+            if found is not None:
+                result.update(found)
+            return found is not None
+
+        try:
+            wait_for(attempt, 90, "VPN login to the access server of agent-a failed")
+        except E2EError as exc:
+            diag = {role: cluster.call(role, "access_diag") for role in ("agent-a", "agent-b")}
+            raise E2EError(f"{exc}: {diag}") from None
+        return result["address"]
+
+    try:
+        client = login()
+        assert client.startswith(f"10.100.{node_id}."), client
+        # Across the fabric: the hub sees the client's own address (no NAT).
+        assert cluster.tcp_peer("hub", "agent-b", HUB_FABRIC_ADDRESS, client=True) == client
+        # Outside the fabric: leaves through agent-a with its address (masquerade).
+        assert cluster.tcp_peer("hub", "agent-b", hub_lan, client=True) == agent_a
+        cluster.call("agent-b", "access_client_stop")
+
+        cluster.call("hub", "stop")
+        try:
+            wait_for(lambda: cluster.ping("agent-a") == 0, 20, "hub stop did not interrupt control")
+            assert login().startswith(f"10.100.{node_id}."), "no login while the hub is down"
+        finally:
+            cluster.call("agent-b", "access_client_stop")
+            cluster.call("hub", "restart")
+        wait_for(
+            lambda: cluster.ping("agent-a") == 204, 120, "agent did not reconnect after hub outage"
+        )
+    finally:
+        cluster.call("agent-b", "access_client_stop")

@@ -317,6 +317,7 @@ class Cluster:
         *,
         source: str | None = None,
         seconds: int = 120,
+        client: bool = False,
     ) -> str:
         """Open a TCP connection `connector` -> host:9100 where `listener` accepts it;
         return the peer address the listener saw (NAT would change it)."""
@@ -332,7 +333,9 @@ class Cluster:
         thread.start()
         deadline = time.monotonic() + seconds
         while thread.is_alive() and time.monotonic() < deadline:
-            if self.call(connector, "fabric_connect", host=host, source=source)["ok"]:
+            if self.call(connector, "fabric_connect", host=host, source=source, client=client)[
+                "ok"
+            ]:
                 break
             time.sleep(2)
         thread.join(30)

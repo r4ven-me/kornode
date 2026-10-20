@@ -112,9 +112,10 @@ class ExternalInput(Model):
 class AccessInput(Model):
     """Access listener of an agent with role `access` (P4-04, D-67)."""
 
+    # At most 64 characters: it becomes the certificate's CN.
     hostname: str = Field(
         min_length=1,
-        max_length=253,
+        max_length=64,
         pattern=r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$",
     )
     port: int = Field(default=443, ge=1, le=65535)

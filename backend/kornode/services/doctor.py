@@ -39,6 +39,7 @@ class DoctorService:
             ("policy-tables", self._check_exit_tables),
             ("nft-version", self._check_nft_version),
             ("carrier-exclusions", self._check_carrier_exclusions),
+            ("access-certificates", self._check_access_certificates),
         )
         results: dict[str, CommandResult] = {}
         for name, check in checks:
@@ -125,6 +126,42 @@ class DoctorService:
             self._pending({"AddRule", "DelRule"}),
             "policy rules (carrier exclusions included) as planned",
         )
+
+    def _check_access_certificates(self) -> CommandResult:
+        """Listener certificates of agents with role access (P4-04, D-67) are
+        valid for 825 days and renewed only on request: warn 30 days ahead,
+        because clients pin them and an expired one fails without any signal."""
+        argv = ("registry", "access-certificates")
+        path = self.config.system.data_dir / "registry.db"
+        if not self.config.fabric.enabled or not path.exists():
+            return CommandResult(argv, 0, "no agent access listeners", "", False)
+        from datetime import UTC, datetime, timedelta
+
+        from kornode.registry.db import migrate, open_registry
+        from kornode.registry.repository import Registry
+
+        conn = open_registry(path)
+        try:
+            migrate(conn)
+            nodes = Registry(conn).list_nodes()
+        finally:
+            conn.close()
+        limit = datetime.now(UTC) + timedelta(days=30)
+        due = []
+        for node in nodes:
+            raw = node.access.get("cert_not_after")
+            if node.state == "revoked" or not raw:
+                continue
+            if datetime.fromisoformat(str(raw).replace("Z", "+00:00")) < limit:
+                due.append(
+                    f"{node.name} ({raw}): korctl agent access set {node.name} --reissue ..."
+                )
+        if due:
+            return CommandResult(
+                argv, 1, "", "listener certificate expires within 30 days: " + "; ".join(due), False
+            )
+        listeners = sum(1 for node in nodes if node.access.get("cert_not_after"))
+        return CommandResult(argv, 0, f"{listeners} agent access listener(s) valid", "", False)
 
     def _check_nft_version(self) -> CommandResult:
         nft_result = self.runner.run(["nft", "--version"], check=False, timeout=5)

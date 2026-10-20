@@ -295,6 +295,7 @@ def test_run_returns_every_check(tmp_path: Path) -> None:
         "policy-tables",
         "nft-version",
         "carrier-exclusions",
+        "access-certificates",
     }
 
 

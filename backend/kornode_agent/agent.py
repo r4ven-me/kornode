@@ -73,7 +73,7 @@ class AgentRuntime:
         self.config = config
         self.root = root
         self.resolver = resolver or NodeResolver(root)
-        self.access = access or AccessServer(root)
+        self.access = access or AccessServer()
 
     def activate(self, validated: Any) -> None:
         # Kill-switches of the exits in use are part of every desired state, so

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(shutil.which("certtool") is None, reason="needs 
 
 
 class World:
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, password_hasher: Callable[[str], str] | None = None) -> None:
         self.env = Env(tmp_path)
         CertificateService(self.env.config).init_ca()
         self.issued: list[str] = []
@@ -32,7 +32,7 @@ class World:
             bundles=self.env.service,
             enrollment=Enrollment(self.env),
             sync=lambda: None,
-            password_hasher=lambda pw: "$6$salt$" + "h" * 86,
+            password_hasher=password_hasher or (lambda pw: "$6$salt$" + "h" * 86),
         )
         real = self.service.certificates
 
@@ -128,7 +128,7 @@ def test_listener_requires_the_role(world: World) -> None:
 
 
 @pytest.mark.parametrize(
-    "hostname", ["bad host", "-x.example", "a" * 64 + ".example", 'x"; cn = evil', ""]
+    "hostname", ["bad host", "-x.example", "a" * 60 + ".example", 'x"; cn = evil', ""]
 )
 def test_hostname_is_validated_before_certtool(world: World, hostname: str) -> None:
     with pytest.raises(ManagementError) as raised:
@@ -155,3 +155,59 @@ def test_bundle_access_users_are_strict(user: dict[str, Any]) -> None:
 def test_bundle_access_port_range() -> None:
     with pytest.raises(ValidationError):
         Access.model_validate({"port": 0, "auth": ["password"], "ca_pem": "x", "users": []})
+
+
+def test_doctor_warns_before_a_listener_certificate_expires(world: World) -> None:
+    from kornode.services.doctor import DoctorService
+
+    world.service.set_access("node3", {"hostname": "vpn.branch.example"})
+    doctor = DoctorService(world.env.config)
+    ok = doctor._check_access_certificates()
+    assert ok.ok and "1 agent access listener" in ok.stdout
+    access = dict(world.env.registry.get_node(3).access, cert_not_after="2026-11-01T00:00:00Z")
+    world.env.registry.update_node(3, access=access)
+    soon = doctor._check_access_certificates()
+    assert not soon.ok
+    assert "node3" in soon.stderr and "--reissue" in soon.stderr
+
+
+def test_the_listener_certificate_is_revoked_in_the_hub_crl_when_issued(world: World) -> None:
+    """Defence in depth (D-67): a hub-CA certificate without OU must not log in to the hub."""
+    certificates = CertificateService(world.env.config)
+    assert certificates.list_revoked_certificates() == []
+    world.service.set_access("node3", {"hostname": "vpn.branch.example"})
+    revoked = certificates.list_revoked_certificates()
+    assert [entry["subject"] for entry in revoked] == [revoked[0]["subject"]]
+    assert "vpn.branch.example" in revoked[0]["subject"]
+    crl = world.env.config.cert_path("crl.pem")
+    assert crl.exists() and crl.stat().st_size > 0
+    # Unchanged hostname: nothing new to issue or revoke; `reissue` adds one entry.
+    world.service.set_access("node3", {"hostname": "vpn.branch.example", "port": 9443})
+    assert len(certificates.list_revoked_certificates()) == 1
+    world.service.set_access("node3", {"hostname": "vpn.branch.example", "reissue": True})
+    assert len(certificates.list_revoked_certificates()) == 2
+
+
+def _policy(world: World, roles: list[str], egress: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    world.env.registry.update_node(3, roles=roles, policy={"egress": egress})
+    world.env.compile(3)
+    return [rule.model_dump(by_alias=True) for rule in world.bundle().bundle.policy.egress]
+
+
+def test_clients_of_an_access_node_do_not_get_the_fabric_by_default(world: World) -> None:
+    rules = _policy(world, ["access"], [])
+    implicit = next(rule for rule in rules if rule["id"] == "to-fabric")
+    assert "clients" not in implicit["from"] and "host" in implicit["from"]
+    # Other nodes keep the old behaviour: the bundle never cuts clients from the hub.
+    rules = _policy(world, [], [])
+    assert "clients" in next(rule for rule in rules if rule["id"] == "to-fabric")["from"]
+
+
+def test_an_explicit_client_fabric_rule_does_not_remove_the_hosts_path_to_the_hub(
+    world: World,
+) -> None:
+    explicit = {"id": "branch-hub", "from": ["clients"], "to": "fabric", "via": "fabric"}
+    rules = _policy(world, ["access"], [explicit])
+    ids = [rule["id"] for rule in rules]
+    assert ids == ["to-fabric", "branch-hub"]
+    assert list(rules[0]["from"]) == ["host"]

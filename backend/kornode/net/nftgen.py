@@ -129,6 +129,22 @@ def _session_rpf(facts: NodeFacts) -> list[str]:
     return lines
 
 
+def _access_input(facts: NodeFacts) -> list[str]:
+    """VPN clients of an access node reach the node's own services only for DNS and
+    ping (D-67); forwarded traffic (LAN, fabric, exits) is governed by the egress
+    policy as usual. Anything else addressed to the host is dropped."""
+    lines: list[str] = []
+    for glob in facts.access_ifaces:
+        iface = _ifname_glob(glob)
+        lines.append(f'    iifname "{iface}" ct state established,related accept')
+        for address in facts.local_addresses:  # the node resolver
+            for proto in ("udp", "tcp"):
+                lines.append(f'    iifname "{iface}" ip daddr {address} {proto} dport 53 accept')
+        lines.append(f'    iifname "{iface}" icmp type echo-request accept')
+        lines.append(f'    iifname "{iface}" fib daddr type local drop')
+    return lines
+
+
 def render_script(
     *,
     exits: tuple[Exit, ...],
@@ -187,6 +203,7 @@ def render_script(
                 f'    ct state new iifname "{_ifname(exit_.interface)}" '
                 f"ct mark set {_hex(exit_.mark)}"
             )
+    lines += _access_input(facts)
     if facts.enroll is not None:
         lines.extend(
             [

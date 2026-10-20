@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import stat
 from collections.abc import Iterator
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,10 @@ class Occtl:
 
 @pytest.fixture
 def world(tmp_path: Path) -> Iterator[World]:
-    result = World(tmp_path / "hub")
+    # A hash per password, as ocpasswd makes: a password change must change the entry.
+    result = World(
+        tmp_path / "hub", password_hasher=lambda pw: "$6$s$" + sha256(pw.encode()).hexdigest()
+    )
     result.service.set_access("node3", {"hostname": "vpn.branch.example", "port": 8443})
     result.service.set_user("node3", "alice", {"password": "alice-password", "groups": ["staff"]})
     result.service.set_user("node3", "bob", {"password": "bob-password1"})
@@ -50,7 +54,7 @@ def world(tmp_path: Path) -> Iterator[World]:
 
 def server(tmp_path: Path) -> tuple[AccessServer, Control, Occtl]:
     control, occtl = Control(), Occtl()
-    return AccessServer(tmp_path / "agent", control=control, occtl=occtl), control, occtl
+    return AccessServer(tmp_path / "agent/run/access", control=control, occtl=occtl), control, occtl
 
 
 def test_render_is_derived_from_the_bundle(world: World, tmp_path: Path) -> None:
@@ -160,6 +164,112 @@ def test_session_devices_get_the_strict_reverse_path_check(world: World) -> None
     assert facts.access_ifaces == ("vpns*",)
     script = compile_policy(inputs.policy(), facts).script
     assert 'iifname "vpns*" meta nfproto ipv4 fib saddr . iif oif missing drop' in script
+    # Clients reach the node itself only for DNS and ping; the rest of the host is closed.
+    assert 'iifname "vpns*" ip daddr 10.100.3.1 udp dport 53 accept' in script
+    assert 'iifname "vpns*" ip daddr 10.100.3.1 tcp dport 53 accept' in script
+    assert 'iifname "vpns*" icmp type echo-request accept' in script
+    assert script.index("echo-request accept") < script.index(
+        'iifname "vpns*" fib daddr type local drop'
+    )
     # Without the listener there is no rule.
     inputs.set_bundle(None)
     assert "vpns*" not in compile_policy(inputs.policy(), inputs.facts()).script
+
+
+def test_runtime_uses_the_run_directory_the_supervisor_program_reads(tmp_path: Path) -> None:
+    """agent/supervisord.conf starts ocserv from RUN_DIR; the runtime must write there."""
+    from unittest.mock import MagicMock
+
+    from kornode_agent.access import RUN_DIR
+    from kornode_agent.agent import AgentRuntime
+
+    runtime = AgentRuntime(MagicMock(), MagicMock(), MagicMock(), MagicMock(), tmp_path)
+    assert runtime.access.run == RUN_DIR
+    conf = (Path(__file__).parent.parent / "agent/supervisord.conf").read_text()
+    assert f"--config {RUN_DIR}/ocserv.conf" in conf
+
+
+def test_password_or_group_change_ends_the_session_of_that_user(
+    world: World, tmp_path: Path
+) -> None:
+    first = world.bundle()
+    access, control, occtl = server(tmp_path)
+    access.apply(first.bundle, first.secrets)
+    world.service.set_user("node3", "alice", {"groups": ["admins"]})
+    second = world.bundle()
+    access.apply(second.bundle, second.secrets)
+    assert occtl.calls == [["disconnect", "user", "alice"]]
+    world.service.set_user("node3", "bob", {"password": "another-password"})
+    third = world.bundle()
+    access.apply(third.bundle, third.secrets)
+    assert occtl.calls[-1] == ["disconnect", "user", "bob"] and control.calls == ["restart"]
+
+
+def test_a_failed_disconnect_is_retried_not_forgotten(world: World, tmp_path: Path) -> None:
+    first = world.bundle()
+    access, _, occtl = server(tmp_path)
+    access.apply(first.bundle, first.secrets)
+    world.service.set_user("node3", "bob", None)
+    second = world.bundle()
+    ran = [False, True]
+    access.occtl = lambda args: ran.pop(0)  # type: ignore[assignment]
+    assert access.apply(second.bundle, second.secrets) is False
+    assert access.error == "occtl could not disconnect a user"
+    assert access.apply(second.bundle, second.secrets) is True and access.error is None
+    assert occtl.calls == []
+
+
+def test_a_bundle_whose_key_did_not_unseal_is_reported_and_serves_nothing(
+    world: World, tmp_path: Path
+) -> None:
+    validated = world.bundle()
+    access, control, _ = server(tmp_path)
+    assert access.apply(validated.bundle, {}) is True
+    assert access.error and "unusable" in access.error
+    assert control.calls == []  # never started, so nothing to stop
+    assert access.apply(validated.bundle, validated.secrets) is True
+    assert access.error is None and control.calls == ["restart"]
+
+
+def test_a_node_without_the_role_never_touches_ocserv(world: World, tmp_path: Path) -> None:
+    access, control, _ = server(tmp_path)
+    assert access.apply(None, {}) is True
+    bare = world.bundle().bundle.model_copy(update={"access": None})
+    assert access.apply(bare, {}) is True
+    assert control.calls == [] and access.error is None
+
+
+def test_a_leftover_configuration_is_stopped_when_the_role_is_gone(
+    world: World, tmp_path: Path
+) -> None:
+    validated = world.bundle()
+    first, control, _ = server(tmp_path)
+    first.apply(validated.bundle, validated.secrets)
+    # The agent process restarted (new instance, same container): the files remain.
+    second = AccessServer(tmp_path / "agent/run/access", control=control, occtl=Occtl())
+    bare = validated.bundle.model_copy(update={"access": None})
+    assert second.apply(bare, {}) is True
+    assert control.calls == ["restart", "stop"]
+    assert not (tmp_path / "agent/run/access/server.key").exists()
+
+
+def test_the_worker_survives_an_unexpected_exception(tmp_path: Path) -> None:
+    import threading
+
+    from kornode_agent.programs import Converger
+
+    seen: list[str | None] = []
+    done = threading.Event()
+
+    class Flaky(Converger[str]):
+        def apply_content(self, desired: str | None) -> bool:
+            seen.append(desired)
+            if len(seen) == 1:
+                raise ValueError("bug")
+            done.set()
+            return True
+
+    flaky = Flaky(retry_seconds=0.05)
+    flaky.submit_content("x")
+    assert done.wait(5)
+    assert seen == ["x", "x"]

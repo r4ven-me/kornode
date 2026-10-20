@@ -70,7 +70,11 @@ class Converger[T]:
             self._wake.clear()
             with self._lock:
                 desired = self._desired
-            if not self.apply_content(desired):
+            try:
+                done = self.apply_content(desired)
+            except Exception as exc:  # a bug must not end convergence for good
+                done = self.failed(f"unexpected {type(exc).__name__}")
+            if not done:
                 self._wake.wait(self.retry_seconds)
                 continue
             with self._lock:

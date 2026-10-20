@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import secrets
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -487,7 +488,8 @@ class CertificateService:
             san = f"ip_address = {hostname}"
         except ValueError:
             san = f'dns_name = "{hostname}"'
-        name = f"access-{node_id}"
+        # Unique per call: two concurrent issues for one node must not share files.
+        name = f"access-{node_id}-{secrets.token_hex(4)}"
         work = self.cert_dir / "agents"
         self.files.ensure_dir(work, mode=0o700)
         key_path = work / f"{name}.key.tmp"
