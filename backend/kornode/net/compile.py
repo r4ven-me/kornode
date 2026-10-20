@@ -87,6 +87,8 @@ class NodeFacts:
     enroll: EnrollGuard | None = None
     # Hub control-plane address, bound to `lo` so it never depends on a link.
     service_address: ipaddress.IPv4Address | None = None
+    # Further addresses bound to `lo`, e.g. an agent's resolver address (D-66).
+    local_addresses: tuple[ipaddress.IPv4Address, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,9 +141,8 @@ class Compiled:
 
 
 def _addresses(facts: NodeFacts) -> frozenset[Address]:
-    if facts.service_address is None:
-        return frozenset()
-    return frozenset({Address("lo", f"{facts.service_address}/32")})
+    bound = (facts.service_address, *facts.local_addresses)
+    return frozenset(Address("lo", f"{address}/32") for address in bound if address is not None)
 
 
 def _dest_name(rule: Rule, index: int) -> str | None:

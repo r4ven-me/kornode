@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
+import re
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -13,6 +15,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     field_validator,
+    model_validator,
 )
 
 from kornode.bundle.sealing import SEAL_ALG
@@ -51,6 +54,12 @@ class NodeInfo(_Model):
     client_pool: StrictStr
     source_range: StrictStr | None = None
     uplink_hint: StrictStr | None = None
+
+    # Both end up in the node resolver's configuration (D-66).
+    @field_validator("fabric_address", "service_address")
+    @classmethod
+    def _ipv4(cls, value: str) -> str:
+        return str(ipaddress.IPv4Address(value))
 
     @field_validator("roles")
     @classmethod
@@ -104,15 +113,49 @@ class Tunnels(_Model):
     upstreams: tuple[UpstreamTunnel, ...] = ()
 
 
+# DNS names land in the agent's dnsmasq configuration: only plain lower-case
+# host names pass, so a bundle can never smuggle an extra option line in.
+_DNS_NAME_RE = re.compile(
+    r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
+)
+
+
+def dns_name(value: str) -> str:
+    if not _DNS_NAME_RE.fullmatch(value):
+        raise ValueError("invalid DNS name")
+    return value
+
+
+def _ip(value: str) -> str:
+    return str(ipaddress.ip_address(value))
+
+
 class ForwardZone(_Model):
     zone: StrictStr
     servers: tuple[StrictStr, ...]
+
+    _zone = field_validator("zone")(dns_name)
+
+    @field_validator("servers")
+    @classmethod
+    def addresses(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_ip(item) for item in value)
 
 
 class LocalRecord(_Model):
     name: StrictStr
     type: Literal["A", "AAAA", "CNAME"]
     value: StrictStr
+
+    _name = field_validator("name")(dns_name)
+
+    @model_validator(mode="after")
+    def typed_value(self) -> Self:
+        if self.type == "CNAME":
+            dns_name(self.value)
+        elif ipaddress.ip_address(self.value).version != (4 if self.type == "A" else 6):
+            raise ValueError(f"{self.type} record needs an IPv{4 if self.type == 'A' else 6}")
+        return self
 
 
 class Dns(_Model):
@@ -121,6 +164,16 @@ class Dns(_Model):
     forward_zones: tuple[ForwardZone, ...] | None = None
     local_records: tuple[LocalRecord, ...] | None = None
     blocklist_domains: tuple[StrictStr, ...] | None = None
+
+    @field_validator("upstream_servers")
+    @classmethod
+    def upstreams(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        return None if value is None else tuple(_ip(item) for item in value)
+
+    @field_validator("blocklist_domains")
+    @classmethod
+    def blocklist(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        return None if value is None else tuple(dns_name(item) for item in value)
 
 
 class AccessUser(_Model):

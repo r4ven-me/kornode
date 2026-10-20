@@ -55,8 +55,21 @@ class DnsmasqConfigRenderer(TemplateRenderer):
             "named_targets_with_server_domains": named_targets_with_server_domains,
             "blocklist_conf": InternalDnsService(config).blocklist_conf_path(),
             "local_records": local_records,
+            "fabric_zone": _fabric_zone(config),
         }
         return self.render_template("dnsmasq.conf.j2", context)
 
     def target_path(self, config: AppConfig) -> Path:
         return config.generated_path("dnsmasq.conf")
+
+
+def _fabric_zone(config: AppConfig) -> dict[str, Any] | None:
+    """The hub answers the whole fabric zone from local data (D-66)."""
+    if not config.fabric.enabled:
+        return None
+    from kornode.services.fabric_dns import FabricDnsService, dnsmasq_lines
+
+    return {
+        "domain": config.fabric.domain,
+        "lines": dnsmasq_lines(FabricDnsService(config).hub_records()),
+    }

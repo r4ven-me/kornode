@@ -1,4 +1,4 @@
-# Prompt for the next session — слияние PR #1, P4-03…P4-07, E2E через GitHub Actions
+# Prompt for the next session — слияние PR #1, P4-04…P4-07, E2E через GitHub Actions
 
 > **Состояние на 2026-10-20.** Ветка `redesign/p4-01-routed-fabric` **запушена**, открыт PR
 > https://github.com/r4ven-me/kornode/pull/1 в `main` (**не влит**, ревью и слияние — решение владельца).
@@ -6,8 +6,14 @@
 > `netlab` на GitHub-раннере). Локально: `make check` 1105 passed / 68 skipped, `make parity` 4 passed.
 > Привилегированный netlab на VM hub: 46 passed. Четырёхмашинный E2E: NL-01 и NL-04 (case `routed`) —
 > passed; остальной набор последний раз гонялся на прошлом HEAD (9 passed, 13 skipped, D-62).
-> Сделано: P2…P3-10, P4-01, P4-02, закрытие LOW-находок ревью. **Не сделано:** P4-03…P4-07, E2E-06,
+> Сделано: P2…P3-10, P4-01, P4-02, закрытие LOW-находок ревью. **Не сделано:** P4-04…P4-07, E2E-06,
 > прогон `e2e.yml` на GitHub Actions, расследование плавающего E2E-04.
+>
+> **Обновление 2026-10-20 (вторая сессия):** P4-03 (DNS фабрики, D-66) сделан на локальной ветке
+> `redesign/p4-03-fabric-dns`, ответвлённой от `redesign/p4-01-routed-fabric` (стек поверх PR #1, **не запушена**).
+> `make check` 1145 passed / 70 skipped, `make parity` 4 passed, frontend 32 passed; netlab на hub-VM —
+> полный набор 48 passed (из них `test_p4_dns` 2); E2E case `routed`: NL-01, NL-02, NL-04 — 3 passed.
+> На hub-VM поставлен `dnsmasq-base`; в CI netlab он тоже ставится.
 
 Вставь всё ниже черты в новую сессию Claude Code в
 `/home/lans/Cloud/Projects/public/kornode`. Начни в режиме плана.
@@ -43,7 +49,13 @@
   запечатано), `OSError` → `503 backup_io`, `_validate` проверяет политику только изменяемого узла, кэш
   `doctor` в отчёте агента (120 с по версии), проверка формата diag-архива на хабе, netlab принимает оба
   формата вывода nft (1.0 и 1.1).
-- Остаётся 10 skip в `tests/e2e/test_routed_fabric.py`: E2E-07, NL-02, NL-03, NL-05…NL-09, NL-13-forwarding,
+- **P4-03** (D-66): записи зоны в реестре (`korctl dns record add/del/list [--node]`, `/api/dns/records`,
+  панель Agents → Fabric DNS), хаб отвечает за всю зону (`local=` + `host-record`/`cname`, рестарт dnsmasq
+  только при изменении и только если он под supervisor), секция `dns` в пакете (своя зона + форвард на
+  `internal_dns.listen`), dnsmasq агента (supervisor, `autostart=false`, асинхронно с повторами,
+  `bind-dynamic`, форвард с `@<fabric_address>` — иначе RPF хаба режет запрос), адрес резолвера на `lo`
+  ставит `kornode.net` (`NodeFacts.local_addresses`). Harness: `dns_record`, `dns_resolve`.
+- Остаётся 9 skip в `tests/e2e/test_routed_fabric.py`: E2E-07, NL-03, NL-05…NL-09, NL-13-forwarding,
   E2E-06-clients (причины — в самом файле).
 
 ## Окружение
@@ -72,7 +84,7 @@
 ## Что делать дальше (по порядку)
 1. **PR #1** ждёт ревью владельца. Он большой (≈90 коммитов; промежуточные коммиты по отдельности не
    проверялись зелёными — зелёный только HEAD). Без слияния новые PR строить не на чем.
-2. **P4-03 … P4-07** (`ROADMAP.md`, `docs/spec/07-fabric.md`): DNS по зонам узлов, роль `access`, источники
+2. **P4-04 … P4-07** (`ROADMAP.md`, `docs/spec/07-fabric.md`; P4-03 сделан на стековой ветке): роль `access`, источники
    (wg-easy/Amnezia), `via: exit:<node>`, панель/CLI/API фабрики. Каждая задача: spec → тесты → код →
    docs → `make check` → netlab → (E2E там, где задача трогает data plane); `parity.yaml` обновляется в той же
    задаче. Каждому E2E-кейсу из списка skip нужен реальный сценарий, не заглушка.

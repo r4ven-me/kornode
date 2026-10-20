@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import ipaddress
 import json
 import os
 import secrets
@@ -318,6 +319,7 @@ class BundleService:
                 "upstreams": self._upstreams(registry, node.id),
             },
             "policy": _policy_with_fabric_rule(node.policy),
+            "dns": self._dns(registry, node.id, hub.client_pool),
             "settings": {
                 "report_interval_seconds": self.config.control.report_interval_seconds,
                 "confirm_window_seconds": 60,
@@ -328,6 +330,27 @@ class BundleService:
         if announcement:
             plan["next_signing_pubkey"] = announcement
         return plan
+
+    def _dns(
+        self, registry: Registry, node_id: int, hub_pool: ipaddress.IPv4Network
+    ) -> dict[str, Any]:
+        """The agent's own `node<id>` zone plus forwarding of the fabric zone
+        to the hub resolver (D-66). The resolver must sit in the hub client
+        pool, which every bundle routes via the fabric; otherwise the zone is
+        not forwarded at all rather than toward an unreachable address."""
+        from kornode.services.fabric_dns import node_zone_records
+
+        dns: dict[str, Any] = {
+            "enabled": True,
+            "local_records": [
+                {"name": item.fqdn, "type": item.type, "value": item.value}
+                for item in node_zone_records(self.config, registry, node_id)
+            ],
+        }
+        listen = ipaddress.ip_address(self.config.internal_dns.listen)
+        if listen in hub_pool:
+            dns["forward_zones"] = [{"zone": self.config.fabric.domain, "servers": [str(listen)]}]
+        return dns
 
     def _pin(self) -> str:
         if self._hub_pin is not None:

@@ -38,7 +38,7 @@ jobs:
       - name: Install namespace test tooling
         run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          iproute2 nftables tcpdump ocserv openconnect gnutls-bin
+          iproute2 nftables tcpdump ocserv openconnect gnutls-bin dnsmasq-base
       # A venv rather than setup-python's interpreter directly: `sudo` resets
       # PATH, and the Makefile picks .venv/bin/python up by path.
       - run: python -m venv .venv && .venv/bin/python -m pip install -e '.[dev]'

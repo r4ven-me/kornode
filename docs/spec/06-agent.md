@@ -10,7 +10,9 @@
   volume `/var/lib/kornode-agent`. `compose.agent.yaml` in the repo.
 - One supervisor (s6 or supervisord, same as hub) with programs:
   `agent` (Python main loop: control client + reconciler + tunnel manager),
-  `ocserv` (role `access` only), `dnsmasq` (when the bundle enables DNS).
+  `ocserv` (role `access` only), `dnsmasq` (when the bundle enables DNS: the
+  agent writes `run/dnsmasq.conf` and starts/restarts/stops the program through
+  the supervisor's local socket; `autostart=false`, D-66).
 - Target: image ≤ 400 MB (measured 396 MB on python:3.12-slim-trixie + openconnect/nftables/supervisor, D-61), RSS of `agent` ≤ 80 MB idle.
 
 ## Local files

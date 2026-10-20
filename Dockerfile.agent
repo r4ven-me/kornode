@@ -7,11 +7,13 @@ ENV PYTHONUNBUFFERED=1 \
     KORNODE_AGENT_DIR=/var/lib/kornode-agent
 
 # openconnect/nftables/iproute2 are the data plane; vpnc-scripts is used by the
-# short-lived enroll session; iputils-ping backs the upstream check_host probe.
-# ocserv/dnsmasq (roles access / DNS) arrive with P4.
+# short-lived enroll session; iputils-ping backs the upstream check_host probe;
+# dnsmasq-base is the node resolver (P4-03, no Debian service/unit files).
+# ocserv (role access) arrives with P4-04.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates iproute2 iputils-ping nftables openconnect supervisor vpnc-scripts \
+        ca-certificates dnsmasq-base iproute2 iputils-ping nftables openconnect supervisor \
+        vpnc-scripts \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/kornode

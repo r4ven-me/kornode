@@ -6,12 +6,12 @@ throughput, no-NAT routed prefixes or wg-easy access/exit runtime.
 
 import pytest
 from tests.e2e.fleet import Cluster, wait_for
+from tests.e2e.inventory import E2EError
 
 pytestmark = pytest.mark.e2e
 
 BLOCKED = {
     "E2E-07": "P4 access/exit, source routing and domain resolution are not implemented",
-    "NL-02": "P4 fabric internal DNS",
     "NL-03": "P4 agent access server and client forwarding/MSS",
     "NL-05": "P4 attached wg-easy source and fail-closed packet capture",
     "NL-06": "P4 source-prefix export to hub monitoring",
@@ -29,6 +29,7 @@ def test_pending_runtime_contract(scenario: str, reason: str) -> None:
 
 
 HUB_FABRIC_ADDRESS = "10.99.0.1"
+HUB_RESOLVER = "10.100.1.1"
 AGENT_B_LAN = "192.168.30.0/24"
 AGENT_B_LAN_HOST = "192.168.30.1"
 
@@ -59,5 +60,46 @@ def test_nl_04_agent_reaches_a_service_in_another_agents_lan_via_the_hub_without
 
     # Host traffic of an agent uses its fabric address as the source (strict RPF on the hub).
     peer = cluster.tcp_peer("agent-b", "agent-a", AGENT_B_LAN_HOST, source=source)
+
+    assert peer == source
+
+
+def _service_address(fabric_address: str) -> str:
+    # 10.99.0.<id> -> 10.100.<id>.1 (default fabric templates, spec 01).
+    return f"10.100.{fabric_address.rsplit('.', 1)[1]}.1"
+
+
+@pytest.mark.e2e_case("routed")
+def test_nl_02_agent_reaches_hub_monitoring_by_fabric_name(cluster: Cluster) -> None:
+    """The agent resolves its own zone locally and the rest of the fabric zone
+    through the hub resolver over the fabric; TCP to the resolved address works
+    and keeps the agent's fabric address (no NAT)."""
+    source = cluster.call("agent-a", "fabric_address")["address"]
+    resolver = _service_address(source)
+    node = f"node{source.rsplit('.', 1)[1]}.kornode.internal"
+    cluster.call("hub", "dns_record", name="monitoring", type="A", value=HUB_FABRIC_ADDRESS)
+
+    def resolves(name: str, expected: str) -> bool:
+        answer = cluster.call("agent-a", "dns_resolve", name=name, server=resolver)
+        return bool(answer["address"] == expected)
+
+    wait_for(lambda: resolves(node, resolver), 60, f"agent-a resolver does not answer {node}")
+    try:
+        wait_for(
+            lambda: resolves("monitoring.kornode.internal", HUB_FABRIC_ADDRESS),
+            60,
+            "monitoring.kornode.internal is not resolved through the hub",
+        )
+    except E2EError as exc:
+        name = "monitoring.kornode.internal"
+        probes = {
+            "agent->agent": cluster.call("agent-a", "dns_resolve", name=name, server=resolver),
+            "agent->hub": cluster.call("agent-a", "dns_resolve", name=name, server=HUB_RESOLVER),
+            "hub->hub": cluster.call("hub", "dns_resolve", name=name, server=HUB_RESOLVER),
+            "hub-node": cluster.call("hub", "dns_resolve", name=node, server=HUB_RESOLVER),
+        }
+        raise E2EError(f"{exc}: {probes}; agent-a {cluster.call('agent-a', 'net_dump')}") from None
+
+    peer = cluster.tcp_peer("hub", "agent-a", HUB_FABRIC_ADDRESS, source=source)
 
     assert peer == source

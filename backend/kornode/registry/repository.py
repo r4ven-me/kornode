@@ -13,6 +13,8 @@ from kornode.registry.db import RegistryError, transaction
 from kornode.registry.models import (
     Command,
     CommandState,
+    DnsRecord,
+    DnsRecordType,
     EnrollToken,
     External,
     Node,
@@ -559,6 +561,38 @@ class Registry:
             )
         if cursor.rowcount == 0:
             raise RegistryNotFound("user not found")
+
+    def dns_records(self) -> list[DnsRecord]:
+        return [
+            DnsRecord(
+                name=str(row["name"]),
+                type=cast(DnsRecordType, row["type"]),
+                value=str(row["value"]),
+                node_id=None if row["node_id"] is None else int(row["node_id"]),
+            )
+            for row in self.conn.execute(
+                "SELECT * FROM dns_records ORDER BY name, type, value"
+            )
+        ]
+
+    def add_dns_record(self, record: DnsRecord) -> None:
+        with self._write():
+            try:
+                self.conn.execute(
+                    "INSERT INTO dns_records (name, type, value, node_id) VALUES (?, ?, ?, ?)",
+                    (record.name, record.type, record.value, record.node_id),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise RegistryConflict(str(exc)) from exc
+
+    def delete_dns_record(self, name: str, type_: str, value: str) -> None:
+        with self._write():
+            cursor = self.conn.execute(
+                "DELETE FROM dns_records WHERE name = ? AND type = ? AND value = ?",
+                (name, type_, value),
+            )
+        if cursor.rowcount == 0:
+            raise RegistryNotFound("dns record not found")
 
     def rotation(self) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM control_rotation WHERE singleton = 1").fetchone()

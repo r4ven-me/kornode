@@ -19,6 +19,7 @@ from kornode.api import (
     routes_client_sync,
     routes_config,
     routes_diagnostics,
+    routes_dns,
     routes_groups,
     routes_hub,
     routes_identity,
@@ -175,6 +176,7 @@ def create_app(
     app.include_router(routes_hub.router, prefix="/api/hub", tags=["hub"])
     app.include_router(routes_agents.router, prefix="/api/agents", tags=["agents"])
     app.include_router(routes_agents.control_router, prefix="/api/control", tags=["control"])
+    app.include_router(routes_dns.router, prefix="/api/dns", tags=["dns"])
     app.include_router(routes_logs.router, prefix="/api/logs", tags=["logs"])
     app.include_router(routes_web_config.router, prefix="/api/web-config", tags=["web-config"])
 
