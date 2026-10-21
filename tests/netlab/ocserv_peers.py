@@ -78,7 +78,10 @@ class Peer:
         password: str | None = None,
         cert: tuple[Path, Path] | None = None,
         extra_routes: tuple[str, ...] = (),
+        sni: str | None = None,
+        no_dtls: bool = False,
     ) -> bool:
+        """`sni` dials the hub by IP but under that host name (TLS SNI selects the vhost)."""
         script = self.tmp / "vpnc-script"
         if not script.exists():
             script.write_text(VPNC_SCRIPT, encoding="utf-8")
@@ -98,7 +101,11 @@ class Peer:
             argv.extend(["--user", user, "--passwd-on-stdin"])
         if cert is not None:
             argv.extend(["--certificate", str(cert[0]), "--sslkey", str(cert[1])])
-        argv.append(f"https://{self.hub_addr}:443")
+        if no_dtls:
+            argv.append("--no-dtls")
+        if sni is not None:
+            argv.append(f"--resolve={sni}:{self.hub_addr}")
+        argv.append(f"https://{sni or self.hub_addr}:443")
         env = {
             **os.environ,
             "KN_ENV_DUMP": str(self.tmp / f"{self.iface}.env"),

@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from ipaddress import ip_address, ip_network
 from pathlib import Path
@@ -115,7 +115,15 @@ def spike_tmp() -> Iterator[Path]:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _start(lab: Lab, tmp: Path, *, guard: bool, revoke_client_cert: bool = False) -> GroupsLab:
+def _start(
+    lab: Lab,
+    tmp: Path,
+    *,
+    guard: bool,
+    revoke_client_cert: bool = False,
+    write_conf: Callable[[Namespace, Path], None] | None = None,
+) -> GroupsLab:
+    """`write_conf(hub, tmp)` replaces the default ocserv.conf before ocserv starts (S-07)."""
     hub = lab.add_namespace("hub")
     inet = lab.add_namespace("inet")
     hub.run(["sysctl", "-qw", "net.ipv4.ip_forward=1"])
@@ -146,6 +154,8 @@ def _start(lab: Lab, tmp: Path, *, guard: bool, revoke_client_cert: bool = False
         hub, tmp / "pki" / "ca.crt", tmp / "pki" / "ca.key", tmp / "pki", CLIENT_USER, unit=None
     )
     _write_ocserv_files(hub, tmp, guard=guard)
+    if write_conf is not None:
+        write_conf(hub, tmp)
     if revoke_client_cert:
         _revoke(hub, tmp, client_cert[0])
     (tmp / "enroll.nft").write_text(ENROLL_NFT, encoding="utf-8")
