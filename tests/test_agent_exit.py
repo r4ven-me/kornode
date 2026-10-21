@@ -69,12 +69,7 @@ def test_an_operators_own_fabric_rule_is_not_duplicated(world: Any) -> None:  # 
         ([{"from": ["clients"], "to": "any", "via": "exit:2"}], "exit_node"),
         ([{"from": ["host"], "to": "any", "via": "exit:3"}], "runtime_unsupported"),
         ([{"from": ["clients"], "to": "fabric", "via": "exit:3"}], "runtime_unsupported"),
-        # Sets resolve on each node separately: not identical to the hub's (D-78).
-        ([{"from": ["clients"], "to": {"set": "web"}, "via": "exit:3"}], "runtime_unsupported"),
-        (
-            [{"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "exit:3"}],
-            "runtime_unsupported",
-        ),
+        ([{"from": ["clients"], "to": {"node": 3}, "via": "exit:3"}], "runtime_unsupported"),
     ],
 )
 def test_bad_exit_rules_are_refused(world: Any, rules: list[dict[str, Any]], code: str) -> None:  # type: ignore[no-untyped-def]
@@ -177,3 +172,93 @@ def test_the_hub_ignores_an_exit_whose_target_is_not_an_exit_node(
     env.registry.update_node(3, roles=[])
     facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
     assert facts.transit_exits == ()
+
+
+def test_the_hub_marks_a_set_exit_by_the_static_routes_and_the_addresses_the_agent_reported(
+    world: Any,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    """D-79: the agent classifies by the addresses it resolved itself and reports them;
+    the hub matches the same ones (no second resolution that could differ)."""
+    env, service = make(world)
+    service.set_policy(
+        "node2",
+        {
+            "sets": {"web": {"routes": ["198.51.100.0/24"], "domains": ["example.org"]}},
+            "egress": [
+                {"from": ["clients"], "to": {"set": "web"}, "via": "exit:3"},
+                {"from": ["clients"], "to": "any", "via": "exit:3"},
+            ],
+        },
+    )
+    runner = FakeRunner()
+
+    before = HubNetInputs(env.config, runner=runner, proc_sys=tmp_path).facts()
+    assert [t.dest for t in before.transit_exits] == [frozenset({"198.51.100.0/24"}), None]
+
+    env.registry.add_report(
+        2,
+        {"applied_version": 1, "exit_sets": {"web": ["203.0.113.9", "not-an-address"]}},
+    )
+    facts = HubNetInputs(env.config, runner=runner, proc_sys=tmp_path).facts()
+    assert [t.dest for t in facts.transit_exits] == [
+        frozenset({"198.51.100.0/24", "203.0.113.9/32"}),
+        None,
+    ]
+
+
+def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rules() -> None:
+    """D-79: keyed like NodeFacts.resolved (set name, `rule<N>` for an inline destination);
+    rules that do not exit via another node contribute nothing."""
+    from types import SimpleNamespace
+
+    from kornode.net.model import EgressPolicy
+    from kornode_agent.agent import Agent
+
+    policy = EgressPolicy.model_validate(
+        {
+            "sets": {"web": {"domains": ["example.org"]}, "lan": {"routes": ["10.0.0.0/8"]}},
+            "egress": [
+                {"from": ["clients"], "to": {"set": "web"}, "via": "exit:3"},
+                {"from": ["clients"], "to": {"domains": ["example.net"]}, "via": "exit:3"},
+                {"from": ["clients"], "to": {"set": "lan"}, "via": "local"},
+                {"from": ["clients"], "to": "any", "via": "exit:3"},
+            ],
+        }
+    )
+    stub = SimpleNamespace(
+        inputs=SimpleNamespace(active=SimpleNamespace(bundle=SimpleNamespace(policy=policy))),
+        set_resolver=SimpleNamespace(
+            read=lambda: {
+                "web": frozenset({"203.0.113.9", "198.51.100.1"}),
+                "rule1": frozenset({"192.0.2.5"}),
+                "lan": frozenset({"10.1.1.1"}),
+            }
+        ),
+    )
+
+    assert Agent._exit_sets(stub) == {  # type: ignore[arg-type]
+        "web": ["198.51.100.1", "203.0.113.9"],
+        "rule1": ["192.0.2.5"],
+    }
+
+    stub.inputs.active = None
+    assert Agent._exit_sets(stub) == {}  # type: ignore[arg-type]
+
+
+def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implicit_rules(
+    world: Any,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    """The bundle gets `to-fabric` in front of the operator's rules, so the agent reports its
+    inline destination as `rule1`; the hub must read the same key (D-79)."""
+    env, service = make(world)
+    service.set_policy(
+        "node2",
+        {"egress": [{"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "exit:3"}]},
+    )
+    env.registry.add_report(2, {"applied_version": 1, "exit_sets": {"rule1": ["203.0.113.9"]}})
+
+    facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
+
+    assert [t.dest for t in facts.transit_exits] == [frozenset({"203.0.113.9/32"})]

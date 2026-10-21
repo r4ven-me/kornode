@@ -706,6 +706,17 @@ class Worker:
             dump[name] = out.decode(errors="replace")[:6000]
         return dump
 
+    def resolved_sets(self) -> Any:
+        """What the agent's set resolver recorded (addresses only, D-78/D-79)."""
+        if not self.role.startswith("agent-") or self.case != "routed":
+            raise ValueError("routed case, agent only")
+        _, out = self.execute(
+            ["sh", "-c", "tail -n +1 /var/lib/kornode-agent/resolved/*.txt 2>&1"],
+            allowed=tuple(range(256)),
+            timeout=20,
+        )
+        return {"resolved": out.decode(errors="replace")[:4000]}
+
     def lan_setup(self) -> Any:
         if not self.role.startswith("agent-") or self.case != "routed":
             raise ValueError("routed case, agent only")
@@ -837,9 +848,16 @@ class Worker:
         via = self.payload.get("via", "local")
         if via not in {"local", "exit:3"}:  # exit:3 is agent-b, the second enrolled agent
             raise ValueError("invalid exit")
+        domain = self.payload.get("domain")
+        to: Any = "any"
+        if domain is not None:
+            # D-79: only this fabric-zone name leaves through the exit node.
+            if via == "local" or not re.fullmatch(r"[a-z0-9-]{1,63}\.kornode\.internal", domain):
+                raise ValueError("invalid domain exit")
+            to = {"domains": [domain]}
         rules = [
             {"id": "clients-fabric", "from": ["clients"], "to": "fabric", "via": "fabric"},
-            {"id": "clients-out", "from": ["clients"], "to": "any", "via": via},
+            {"id": "clients-out", "from": ["clients"], "to": to, "via": via},
         ]
         atomic(path, {"egress": rules})
         try:
@@ -1277,6 +1295,7 @@ class Worker:
             "fabric_address",
             "lan_setup",
             "net_dump",
+            "resolved_sets",
             "export_prefix",
             "dns_record",
             "dns_resolve",

@@ -13,18 +13,29 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    field_validator,
+)
 
 from kornode.bundle.errors import BundleError
 from kornode.config.models import AppConfig
 from kornode.control.auth import RateLimiter, RevocationList, agent_identity
 from kornode.control.errors import ControlError
+from kornode.net.lists import parse_exit_sets
 from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.models import Command, StoredBundle
 from kornode.registry.repository import Registry, RegistryNotFound
 from kornode.services.audit import AuditService
 from kornode.services.bundle import BundleService
 from kornode.services.enrollment import EnrollmentError, EnrollmentService
+from kornode.services.net import NetService
 
 MAX_REPORT_BYTES = 256 * 1024
 MAX_RESULT_BYTES = 8 * 1024 * 1024  # 5 MB artefact, base64-encoded, plus the envelope
@@ -45,6 +56,14 @@ class ReportBody(BaseModel):
     applied_version: StrictInt = Field(ge=0, le=MAX_VERSION)
     pending_version: StrictInt | None = Field(default=None, ge=0, le=MAX_VERSION)
     high_water_version: StrictInt | None = Field(default=None, ge=0, le=MAX_VERSION)
+    # Addresses the agent resolved for the destinations of its `exit:<n>` rules (D-79).
+    exit_sets: dict[str, list[str]] | None = None
+
+    @field_validator("exit_sets")
+    @classmethod
+    def _valid_exit_sets(cls, value: dict[str, list[str]] | None) -> dict[str, list[str]] | None:
+        parse_exit_sets(value, strict=True)
+        return value
 
 
 class CommandResult(BaseModel):
@@ -183,12 +202,20 @@ class ControlService:
         report = parse_model(ReportBody, data)
         if report.node_id is not None and report.node_id != node_id:
             raise ControlError("invalid", "report node_id does not match the certificate")
+        changed = False
         with self.registry() as registry, transaction(registry.conn):
+            previous = registry.list_reports(node_id, 1)
+            changed = parse_exit_sets(report.exit_sets) != parse_exit_sets(
+                previous[0].body.get("exit_sets") if previous else None
+            )
             registry.add_report(node_id, data, keep=REPORTS_KEPT)
             registry.update_node(node_id, applied_version=report.applied_version)
             if report.high_water_version is not None:
                 registry.raise_high_water(node_id, report.high_water_version)
             registry.touch_node(node_id)
+        if changed:
+            # The hub marks transit traffic of set exits by these addresses (D-79).
+            NetService(self.config).wake()
 
     def finish_command(self, node_id: int, command_id: str, data: Any) -> None:
         result = parse_model(CommandResult, data)

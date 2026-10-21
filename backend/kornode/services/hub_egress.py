@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from kornode.config.loader import load_config, load_yaml_file
 from kornode.config.models import AppConfig, profile_slug
 from kornode.net.compile import dead_rules
-from kornode.net.model import EgressPolicy, Source
+from kornode.net.model import EgressPolicy, InlineDest, SetRef, Source
 from kornode.registry.db import migrate, open_registry
 from kornode.registry.models import Node
 from kornode.registry.repository import Registry
@@ -52,10 +52,11 @@ def validate_hub_policy(
             )
         if "exit" not in node.roles:
             raise HubEgressError("role_required", f"egress[{index}]: agent {node.name} lacks exit")
-        if rule.to != "any":
+        if not (rule.to == "any" or isinstance(rule.to, SetRef | InlineDest)):
             raise HubEgressError(
                 "runtime_unsupported",
-                f"egress[{index}]: exit via another node supports `to: any` only",
+                f"egress[{index}]: exit via another node supports `to: any`, a set or an "
+                "inline destination, not `fabric` or a node",
             )
 
 

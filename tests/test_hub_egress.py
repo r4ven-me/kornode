@@ -87,16 +87,24 @@ def test_exit_target_must_be_active_exit_agent() -> None:
         assert err.value.code == code
 
 
-def test_exit_to_hub_or_set_is_rejected() -> None:
+def test_exit_to_the_hub_or_to_fabric_is_rejected() -> None:
     with pytest.raises(HubEgressError):
         check_hub_policy(cfg(egress=[{"from": ["clients"], "to": "any", "via": "exit:1"}]), [])
-    both = {
-        "sets": {"s": {"routes": ["10.1.0.0/16"]}},
-        "egress": [{"from": ["clients"], "to": {"set": "s"}, "via": "exit:2"}],
-    }
+    fabric = {"egress": [{"from": ["clients"], "to": "fabric", "via": "exit:2"}]}
     with pytest.raises(HubEgressError) as err:
-        check_hub_policy(cfg(**both), [node(2, ["exit"])])
+        check_hub_policy(cfg(**fabric), [node(2, ["exit"])])
     assert err.value.code == "runtime_unsupported"
+
+
+def test_exit_to_a_set_or_inline_destination_is_accepted_since_d79() -> None:
+    sets = {
+        "sets": {"s": {"routes": ["10.1.0.0/16"]}},
+        "egress": [
+            {"from": ["clients"], "to": {"set": "s"}, "via": "exit:2"},
+            {"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "exit:2"},
+        ],
+    }
+    check_hub_policy(cfg(**sets), [node(2, ["exit"])])
 
 
 def test_unknown_upstream_rejected() -> None:

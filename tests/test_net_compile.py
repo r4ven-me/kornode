@@ -31,6 +31,7 @@ from tests.test_net_transit import (  # noqa: E402
     exit_node_case,
     hub_egress_exit_case,
     hub_transit_case,
+    hub_transit_set_case,
 )
 
 
@@ -113,6 +114,7 @@ def _render(compiled: Compiled) -> dict[str, str]:
         ("node3", node3_case),
         ("hub_transit", hub_transit_case),
         ("hub_egress_exit", hub_egress_exit_case),
+        ("hub_transit_set", hub_transit_set_case),
         ("agent_exit", agent_exit_case),
         ("exit_node", exit_node_case),
     ],

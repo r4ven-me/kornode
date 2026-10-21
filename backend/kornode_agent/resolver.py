@@ -91,8 +91,10 @@ def udp_lookup(
     rdtype: int,
     timeout: float = QUERY_TIMEOUT_SECONDS,
     port: int = 53,
+    source: str | None = None,
 ) -> tuple[list[str], int | None]:
-    """One A/AAAA query, tried against each nameserver in turn."""
+    """One A/AAAA query, tried against each nameserver in turn. `source` pins the local
+    address: the hub's strict reverse path drops fabric traffic from any other one (D-47)."""
     query_id = random.SystemRandom().randrange(1 << 16)
     try:
         question = _encode_name(domain) + struct.pack("!HH", rdtype, 1)
@@ -104,6 +106,8 @@ def udp_lookup(
         try:
             with socket.socket(family, socket.SOCK_DGRAM) as sock:
                 sock.settimeout(timeout)
+                if source and family == socket.AF_INET and ":" not in source:
+                    sock.bind((source, 0))
                 sock.sendto(packet, (server, port))
                 data, _ = sock.recvfrom(4096)
             return parse_answers(data, query_id, rdtype)
@@ -136,15 +140,22 @@ class AgentSetResolver:
         *,
         nameservers: Callable[[], Sequence[str]],
         policy: Callable[[], EgressPolicy | None],
-        lookup: Lookup = udp_lookup,
+        lookup: Lookup | None = None,
         lists: UrlListCache | None = None,
+        source: Callable[[], str | None] = lambda: None,
     ) -> None:
         self.directory = root / "resolved"
         self.nameservers = nameservers
         self.policy = policy
-        self.lookup = lookup
+        self.source = source
+        self.lookup: Lookup = lookup or self._udp
         self.lists = lists or UrlListCache(root / "url-lists")
         self.changed = threading.Event()  # set when the active bundle changes
+
+    def _udp(
+        self, domain: str, nameservers: Sequence[str], rdtype: int
+    ) -> tuple[list[str], int | None]:
+        return udp_lookup(domain, nameservers, rdtype, source=self.source())
 
     def refresh(self) -> int:
         """Resolve every dynamic set, record the result and return seconds until the next cycle."""
@@ -153,12 +164,20 @@ class AgentSetResolver:
         servers = list(self.nameservers())
         min_ttl: int | None = None
         current: dict[str, list[str]] = {}
+        incomplete = False
         for name, target in targets.items():
             addresses, ttl = self._resolve(target, servers)
             current[name] = sorted(dict.fromkeys(addresses))
+            # A set that has domains but no address yet (resolver or tunnel not reachable at
+            # that moment) must not wait out a whole hour: retry on the short interval.
+            incomplete = incomplete or (
+                bool(target.domains or target.domain_urls) and not addresses
+            )
             if ttl is not None:
                 min_ttl = ttl if min_ttl is None else min(min_ttl, ttl)
         self._record(current)
+        if incomplete:
+            return MIN_INTERVAL_SECONDS
         if min_ttl is None:
             return MAX_INTERVAL_SECONDS
         return max(MIN_INTERVAL_SECONDS, min(min_ttl, MAX_INTERVAL_SECONDS))
