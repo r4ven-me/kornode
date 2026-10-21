@@ -1,22 +1,24 @@
-# Prompt for the next session — P4-06 часть 2 + P5-03, P4-07, `e2e.yml`
+# Prompt for the next session — P4-07, остаток P4-06, P5-05, `e2e.yml`
 
-> **Состояние на 2026-10-21 (конец четвёртой сессии).** В `main` влиты PR #1…#3, P4-05, P4-06
-> часть 1, фикс CI (`vite` 8.3.x), **S-07 / D-71** (vhost фабрики по SNI) и **удаление `fabric.enabled`** (хаб всегда
-> запускает фабрику). Всё слито локальным `git merge --no-ff`/fast-forward + `git push origin main` (`gh` не работает,
-> см. память `gh-keyring-blocks-cli`). **CI на `main` (`3366c2e`) зелёный: backend, frontend, netlab**; после него
-> коммитились только docs.
+> **Состояние на 2026-10-21 (пятая сессия).** В `main` влита ветка `redesign/p4-06b-hub-egress` (`95b0b62`, три
+> среза + удаление v1): модель egress хаба (**D-72**), `HubEgressService` (`korctl egress|source`, `/api/egress`,
+> `/api/sources`, панель Network → Egress and sources, parity), источники хаба, выход хаба через `exit:<n>`, и
+> **удаление всего v1-маршрутизации одним блоком (D-73, P5-03)** — `config/legacy.py`, `RoutingService`,
+> `external_lists`, `upstream_pushed`, ключи `routing.client_policy|host_policy|split|host_split|fwmark|table_id`,
+> per-profile маршруты/host-маршруты/pushed-маршруты, `korctl routes|upstream hook|sync`, вкладка Routing панели.
+> `examples/` и `config.example.yaml` — формат v2 (`tests/test_examples.py`). **CI на `main` (`95b0b62`) зелёный:
+> backend, frontend, netlab.** Слияние — локально `git merge --no-ff` + `git push origin main` (`gh` не работает).
 >
-> Доказательства: spike S-07 — netlab `test_spike_p4_vhosts.py` 12 passed (ocserv 1.3.0 на hub-VM); `make lint
-> typecheck test render parity` зелёные на Python 3.13 и 3.12 (1223 passed / 91 skipped); netlab на hub-VM 68 passed
-> (на шаге «без флага» один тест — `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` — упал по таймауту
-> HTTP 2 с под нагрузкой, отдельно 2/2 passed; в CI-netlab зелёный); E2E `routed` (оба шага): 6 passed, 7 skipped —
-> NL-01, NL-02, NL-03, NL-04, NL-06, E2E-07. **Флаг-день D-71:** хаб и агенты обновляются вместе (новый хаб не пускает
-> агента, который идёт на хост клиентов); образы базы E2E-06 и переменные `E2E_PREVIOUS_*_IMAGE` надо пересобрать/
-> обновить из текущего `main` (см. пункт 5).
+> Доказательства: `make lint typecheck test render parity` на Python 3.13 и 3.12 — 1150 passed / 92 skipped;
+> фронтенд 32 теста + сборка; netlab на hub-VM 69 passed (golden `hub_egress_exit` загружается в ядро). **E2E на
+> четырёх VM после этих изменений не гонялся** (конфиги harness переведены на `egress: []`) — прогнать `routed`.
 >
-> **Не сделано:** P4-06 часть 2 вместе с P5-03 (модель egress хаба, удаление legacy-ключей), P4-07 (раздел Fabric в
-> панели/CLI/API), NL-05, NL-07…NL-09, прогон `e2e.yml` на GitHub Actions, `examples/` и README в формате v2 (P5-05;
-> они ещё используют явный пул `10.10.10.0/24`, это валидно), пересборка образов E2E-06.
+> **Не сделано:** P4-07 (раздел Fabric: топология/префиксы/DNS/источники в одном месте), set/domain-выходы через
+> `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спеки,
+> упорядоченный редактор правил с drag и inline-explain (P5-01, сейчас JSON), URL-источники `sets` на хабе
+> (`route_urls`/`domain_urls` отвергаются как `runtime_unsupported`), README / `docs/architecture.md` /
+> `docs/networking.md` (всё ещё про v1, P5-05), прогон `e2e.yml` на GitHub Actions, пересборка образов E2E-06
+> (флаг-день D-71 и новая конфигурация).
 >
 > **Важно для продолжения:**
 > 1. Хост перезагружался: VM `debian13-kornode1..4` были выключены, их запускают `virsh -c qemu:///system start
@@ -158,30 +160,8 @@
 1. ~~Проверить CI на `main`~~ — сделано (vite 8.3.x, `main` зелёный).
 2. ~~Spike S-07~~ — сделано (D-71): vhost `fabric.<fabric.domain>`, отдельный сертификат `fabric.crt`, `ocpasswd-enroll`,
    guard по `$VHOST`, токен `sni`, пакет `hubs[].server_name`; `fabric.enabled` удалён и влит в `main`.
-2a. **P4-06 часть 2 вместе с P5-03** (D-69, D-70): модель egress хаба. Ключи `egress`/`sources`/`sets` в `config/models.py`
-   **заменяют** старые ключи — `legacy_policy` и `kornode.config.legacy` удаляются, тесты v1-поведения тоже (списком в PR), валидация против ролей реестра, parity-поверхности
-   `egress.hub`/`sources.hub` (CLI `egress show/edit/set/check`, `GET/PUT /api/egress`, `source add/del/list`,
-   панель Network → Egress/Sources, строки в `parity.yaml`), источники хаба в `HubNetInputs.facts()` (`SourceFact`,
-   их подсеть в `node_prefixes[1]`, экспорт агентам через пакет и per-user `route`), выход хаба через `exit:<n>`
-   (клиенты хаба, источники хаба, хост хаба): таблица узла n уже есть, нужны метки по классам хаба и **обратный маршрут
-   на узле n** для источников с `export: false`. Затем: доменные/set-выходы агентов (нужны одинаковые наборы на хабе),
-   NL-17/NL-18 (netlab), E2E-07 в редакции спецификации, NL-05. Источники хаба и их doctor-проверки отложены сюда из D-68.
-   **Карта legacy-ключей (снята 2026-10-21, grep по `backend frontend tests docs/spec parity.yaml`):** ключи
-   `client_policy`/`host_policy`/`host_split`/`legacy_policy`/`routing.split`/`fwmark`/`table_id` живут в
-   `config/models.py` (RoutingConfig и миграции), `config/legacy.py` (175 строк, удаляется целиком),
-   `config/defaults.py`, `services/routing.py` (550 строк), `services/netinputs.py` (`legacy_policy`),
-   `services/upstream.py`, `services/host_dns.py`, `services/backup_state.py`, `services/apply.py`,
-   `renderers/dnsmasq.py` (split-домены), `api/routes_routing.py`, `api/routes_upstream.py`,
-   `tunnels/vpnc-script-kornode`; фронтенд — `lib/drafts.ts`, `app/hooks/useRouting.ts`, `api.ts`,
-   `views/upstream/*` (RoutingListSourcesPanel, профили). Тесты v1: `test_config_legacy.py`,
-   `test_routing_policy_migration.py`, `test_routing_api.py`, `test_routing_service.py`, `test_domain_resolver.py`,
-   `test_dnsmasq_render.py`, часть `test_upstream_*`, `test_net_service.py`, `test_netinputs.py`, netlab
-   `test_p0_upstream.py`/`kornode_nodes.py`/`tests/golden/hub.rules`. Общая инфраструктура, которая **остаётся**:
-   `net/` (kernel, compile, diff, state: `fwmark`/таблицы выходов как внутренняя деталь компилятора), reconciler,
-   kill switch. Делать вертикальными срезами: модель `egress`/`sources`/`sets` + валидатор → компилятор хаба поверх
-   `kornode.net` → CLI/API/панель + parity → удаление legacy одним блоком → netlab NL-17/NL-18.
-   Перед пушем в `main` гонять **все** шаги CI: `make lint typecheck test render parity` (память
-   `ci-steps-beyond-make-check`), иначе красный `main` из-за `config.example.yaml` повторится.
+2a. ~~P4-06 часть 2 + P5-03~~ — сделано (D-72, D-73). Остаток: доменные/set-выходы агентов и хаба, NL-17/NL-18 (netlab),
+   E2E-07 по спеке, NL-05, прогон E2E `routed` на четырёх VM.
 3. **P4-07**: панель/CLI/API фабрики (топология, префиксы узлов, записи DNS — сейчас они на странице Agents →
    Fabric DNS —, источники), parity. Раздел `Fabric` в панели.
 4. **Прогон `e2e.yml` на GitHub Actions**: настроено (см. начало файла). Нужно, чтобы владелец разблокировал keyring, затем
