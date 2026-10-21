@@ -246,7 +246,10 @@ def connect_node_upstream(
     try:
         korctl(ns, root.config_path, "upstream", "connect", UPSTREAM_PROFILE)
         _wait_until(lambda: _interface_exists(ns, handle.interface), f"{handle.interface} exists")
-        _wait_until(lambda: _policy_table_has_default(ns, handle.table), f"table {handle.table}")
+        _wait_until(
+            lambda: _policy_table_has_default(ns, handle.table, handle.interface),
+            f"table {handle.table} routes through {handle.interface}",
+        )
     except BaseException:
         # openconnect may already be backgrounded even though connect failed.
         handle.kill_leftover()
@@ -400,9 +403,11 @@ def _kill_openconnect(pid_file: Path) -> None:
             time.sleep(0.1)
 
 
-def _policy_table_has_default(ns: Namespace, table: str) -> bool:
+def _policy_table_has_default(ns: Namespace, table: str, interface: str) -> bool:
+    # The kill-switch `unreachable default` is there from the start; only the tunnel's
+    # own default means the reconciler has converged on the connected state.
     result = ns.run(["ip", "route", "show", "table", table], check=False)
-    return result.ok and "default" in result.stdout
+    return result.ok and f"default dev {interface}" in result.stdout
 
 
 def _wait_until(
