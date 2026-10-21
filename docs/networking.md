@@ -1,19 +1,22 @@
 # Networking, routing and DNS
 
+Contracts live in `docs/spec/` (`01-addressing`, `02-egress-and-sources`, `03-kernel-dataplane`,
+`04-netcore-reconciler`, `07-fabric`). This page is the operator's overview.
+
 ## Principles
 
-- Use nftables, not iptables.
-- Do not flush host firewall rules.
-- Create project-owned tables/chains/sets only.
-- Use unique names with configurable prefix, default `kornode`.
-- Support dry-run output.
-- Make apply operations idempotent.
-- Apply rendered project-owned tables/chains/sets automatically at Korvus Node startup.
-- Cleanup only project-owned state.
+- Inter-node transport is ocserv/openconnect on 443/tcp. DTLS is used opportunistically; TCP alone works.
+- Only `kornode.net` changes kernel state (sysctl, `ip rule`/`ip route`, nftables). Everything else edits
+  inputs and wakes the reconciler.
+- kornode owns only its objects: nft tables `inet kornode` and `ip kornode_nat`, rule priorities 90–199,
+  route tables 12000–12999, main-table routes with `proto 77`. It never flushes global state or host firewall rules.
+- Fail closed: traffic assigned to a tunnel never leaks through the uplink, including while a tunnel
+  reconnects or the reconciler restarts (`unreachable default` in every exit table, stale-mark rejects).
+- No NAT inside the fabric. Masquerade happens only toward the internet (`via: local`) and toward
+  external upstreams (`via: upstream:<profile>`).
+- Applying is idempotent, supports dry-run, and is one `nft -f` transaction.
 
 ## Required Linux capabilities
-
-Container requires:
 
 ```yaml
 cap_add:
@@ -23,78 +26,113 @@ devices:
   - /dev/net/tun:/dev/net/tun
 ```
 
-Rootless mode is not expected to fully work for network control operations. Document this clearly.
+Both images need `network_mode: host` so the node's interfaces, routes and nftables are the host's.
+Rootless mode cannot control the network and is not supported.
 
-## Full routing mode
+## Addressing
 
-VPN clients are NATed or routed through the selected outbound interface.
+The hub is node 1, agents are 2..254. With the default `fabric` settings:
 
-For middle-server mode, default outbound interface is upstream OpenConnect tunnel interface.
+| Item | Formula | Hub | Node 3 |
+| --- | --- | --- | --- |
+| Fabric address | `10.99.0.<id>` | `10.99.0.1` | `10.99.0.3` |
+| Client pool | `10.100.<id>.0/24` | `10.100.1.0/24` | `10.100.3.0/24` |
+| Service address (dnsmasq, panel, probes) | first host of the pool | `10.100.1.1` | `10.100.3.1` |
+| Source default range | `10.8.<id>.0/24` | `10.8.1.0/24` | `10.8.3.0/24` |
+| DNS zone | `node<id>.<fabric.domain>` | `node1.kornode.internal` | `node3.kornode.internal` |
 
-## Split routing mode
+A fabric prefix is any prefix a node owns and exports: its client pool, source subnets, exported LANs.
+The overlap validator runs on every registry or config change and on bundle apply, and rejects overlapping
+prefixes with `409 address_overlap` (CLI exit code 3). Ids of deleted agents are quarantined for 30 days.
 
-Traffic selection sources:
+## Egress policy
 
-- static CIDR routes;
-- static IPs;
-- domains from YAML;
-- domains from external file;
-- dnsmasq-resolved IPs inserted into nftables sets.
+One ordered rule list per node decides where traffic goes; the first match wins. The same model is used on
+the hub (YAML) and on agents (bundle):
 
-Current behavior:
-
-- dnsmasq is started only when split DNS is enabled;
-- nftables rules are rendered from YAML/runtime route and domain files;
-- `full` mode installs forwarding/NAT rules for VPN clients;
-- `split` mode prepares project-owned chains/sets for selected traffic;
-- apply and cleanup operations are scoped to Korvus Node-owned tables.
-
-## Suggested names
-
-```text
-nft table inet kornode_filter
-nft table ip kornode_nat
-nft set inet kornode_filter split_v4
-nft set inet kornode_filter split_v6
-fwmark 0x0c01
-routing table 1201
+```yaml
+sources:
+  - {name: amnezia, interface: awg0, cidr: 10.8.3.0/24, export: true}
+sets:
+  corp: {routes: [10.60.0.0/16], domains: [corp.example.com]}
+egress:
+  - {from: [clients, host, amnezia], to: fabric, via: fabric}
+  - {from: [clients, amnezia], to: {set: corp}, via: "upstream:office"}
+  - {from: [clients, amnezia], to: any, via: local}
 ```
 
-All names and numeric IDs are configurable.
+- `from`: `clients` (this node's ocserv pool), `host` (locally originated traffic), `fabric` (transit from the
+  fabric), or a named source.
+- `to`: `any`, `fabric`, `{set: <name>}`, inline `{routes, domains}`, or `{node: <id>}`.
+- `via`: `local` (main table, masquerade to the uplink), `fabric`, `exit:<node>`, `upstream:<profile>`, `drop`.
+- `kill_switch` defaults to `true` for every `via` except `local`: when the exit is down, traffic is rejected
+  instead of falling through to the next rule.
 
-Korvus Node startup writes generated config files and runs the shared nftables apply
-service, so empty project-owned tables, base chains and sets exist before the operator
-opens the GUI diagnostics page. Manual `korctl nft apply` stays available for re-apply,
-dry-run checks and repair after runtime changes.
+Always prepended, not editable: local delivery to the node's own addresses, connected networks (docker bridges
+and LANs always beat policies), and tunnel carrier addresses. Always appended: `clients`/sources to `any` is
+dropped, `host` to `any` goes through normal routing.
 
-`korctl nft apply` renders and applies `/var/lib/kornode/generated/nftables.nft`.
-If `nft` exits with signal 11 inside the container while the same rules work directly
-on the host, debug nftables userspace/kernel compatibility first:
+Domain sets are filled by `DomainResolverService` into nft sets with element timeouts; clients routed by domain
+should use the node's dnsmasq (service address) so they connect to the addresses that were put in the set.
 
-```bash
-docker compose exec kornode nft -f /var/lib/kornode/generated/nftables.nft
-docker compose exec kornode nft --version
-uname -r
-```
+Inspect and edit with `korctl egress` (`show`, `check`, `set`, `edit`), `korctl source`, `/api/egress`, `/api/sources`
+or the panel's Network → Egress and sources. `korctl net explain SRC DST` answers "where does this packet go and why".
 
-That failure mode is outside normal route rendering; updating the image's `nftables`
-package or using a base image aligned with the host kernel is usually required.
+## Kernel layout
+
+Each distinct exit gets a fwmark (`0x0c000000 | index << 8`, mask `0xffffff00`) and a routing table
+`12000 + index`:
+
+| Priority | Rule |
+| --- | --- |
+| 90 | `lookup main suppress_prefixlength 0` — connected routes and fabric sessions beat policies |
+| 95 | `to <carrier>/32 lookup main` — a tunnel carrier never enters its own tunnel |
+| 100+i | `fwmark <mark_i>/0xffffff00 lookup <12000+i>` |
+
+The rule list compiles to a single `egress_classify` chain (`meta mark set … accept` in order). The mark is
+copied to `ct mark` on the first packet, so a connection keeps its path for life. A connection whose exit was
+removed by a policy change is rejected instead of leaking; new connections use the new policy.
+`sysctl`: `ip_forward=1`, `src_valid_mark=1`, `rp_filter=2` on tunnel and source interfaces.
+
+`korctl net plan` prints what the reconciler would change right now without touching the kernel; `korctl net apply`
+runs one reconciler pass.
+
+## Hub, agents and sources
+
+- **Hub**: ocserv serves clients, agents and one-time enroll sessions on one 443/tcp, selected by SNI (clients
+  host and `fabric.<fabric.domain>` vhost). Routes to agent prefixes come from ocserv `iroute` sessions, installed
+  into `main` with `proto 77` by the hub reconciler. Agent ↔ agent traffic is forwarded by the hub.
+- **Agent**: openconnect to the hub (the fabric exit) and to external upstreams; the reconciler converges the
+  signed bundle. With a cached bundle it keeps forwarding when the hub is down and boots from cache.
+- **Exit nodes**: an agent with role `exit` accepts `from: fabric` traffic and masquerades it; another node
+  sends traffic there with `via: exit:<node>`.
+- **Sources** (wg-easy, Amnezia, any access server): run it in `network_mode: host`, disable its own NAT hooks;
+  kornode owns routing and NAT for the source subnet. `korctl doctor` reports foreign NAT rules on a source
+  subnet as an error. See `docs/sources.md`.
+
+## DNS
+
+The hub owns the fabric zone (`node<id>.<fabric.domain>` and registry records: `korctl dns record add|del|list`).
+Each node runs dnsmasq on its service address, bound to `lo`; agents forward fabric names to the hub through
+their fabric address. Clients of a node use that node's dnsmasq (blocklists, domain-set resolution).
 
 ## Diagnostics
 
-Command/API diagnostics cover:
+`korctl doctor` (hub) and `kornode-agent doctor` check addressing, sources, tunnels and foreign NAT. For manual
+inspection:
 
 ```text
 ip addr
-ip route
 ip route show table all
 ip rule
-nft list ruleset
-nft list table inet kornode_filter
+nft list table inet kornode
 nft list table ip kornode_nat
 ss -lntup
 occtl show users
-occtl show status
 ```
 
-Output must mask secrets and avoid dumping private key content.
+Output of the diagnostics commands masks secrets and never prints private keys.
+
+If `nft` exits with signal 11 inside the container while the same rules load on the host, check nftables
+userspace/kernel compatibility first (`nft --version`, `uname -r`); updating the image's `nftables` or using a
+base image aligned with the host kernel usually fixes it.

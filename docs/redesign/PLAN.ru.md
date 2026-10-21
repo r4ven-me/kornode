@@ -245,7 +245,7 @@ P0-03 с kill-switch (D-20, D-21).
 - [x] Компилятор `egress` → vmap + таблицы выходов, проверка мёртвых правил (на хабе — D-72: `HubNetInputs` компилирует политику из конфига, предупреждения о мёртвых правилах в `egress check`/`show`).
 - [ ] UI-редактор правил вместо разрозненных полей, `korctl egress`, API (parity). Первая форма готова (D-72): `korctl egress|source`, `/api/egress`, `/api/sources`, панель Network → Egress and sources (редактор JSON); упорядоченный список с перетаскиванием и inline-explain — впереди.
 - [x] Удаление `client_policy`/`host_policy`/`host_split`/per-profile host routing, `kornode.config.legacy` и кода «последняя метка выигрывает» — одним блоком (D-73, `1fdf819`), без слияния с `legacy_policy`; вместе с ними ушли URL-списки маршрутов/доменов и server-pushed маршруты.
-- [ ] `examples/` и документация переписаны в формате v2. `examples/` и `config.example.yaml` готовы (`tests/test_examples.py`); README, `docs/architecture.md`, `docs/networking.md` ещё описывают v1.
+- [x] `examples/` и документация переписаны в формате v2 (P5-05): `examples/`, `config.example.yaml`, README, `docs/architecture.md`, `docs/networking.md`; `tests/test_examples.py`, `tests/test_docs_v2.py`.
 - [ ] URL-источники наборов (`sets`) на хабе: `route_urls`/`domain_urls` пока отвергаются как `runtime_unsupported`.
 
 Готово, когда: все примеры из `examples/` — валидный конфиг v2 и проходят полный netlab и E2E, в `models.py` не осталось старых ключей маршрутизации, а обновление хаба и агента разных версий (E2E-06) по-прежнему работает.
@@ -409,8 +409,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    последний раз был `offline` (подключается, но брокер GitHub из VM отвечает медленно) — проверять
    `gh api repos/r4ven-me/kornode/actions/runners`, логи — `~/actions-runner/_diag/` на hub-VM.
 8. **Остаток фазы 5** (P5-01, P5-05): упорядоченный редактор правил egress в панели с перетаскиванием и
-   inline-explain (сейчас редактор JSON); README, `docs/architecture.md`, `docs/networking.md` в формате v2
-   (`examples/` и `config.example.yaml` уже v2); URL-источники `sets` на хабе (`route_urls`/`domain_urls`
+   inline-explain (сейчас редактор JSON); документация v2 готова (P5-05); URL-источники `sets` на хабе (`route_urls`/`domain_urls`
    сейчас `runtime_unsupported`). P5-02 и P5-04 сняты (D-70), P5-03 сделан (D-73).
 9. Известные мелочи: нестабильный по таймауту netlab-тест
    `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` (HTTP 2 с; если повторится в CI —

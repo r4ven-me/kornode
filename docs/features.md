@@ -132,9 +132,7 @@ Top-level navigation:
 
 - Dashboard.
 - Config, with sub-sections: System, Server, Certificates, Authentication,
-  Identity, Upstream (also covers server-side routing/split routes/domains
-  and per-profile targeted routing, formerly its own "Routing" tab),
-  Internal DNS, Web / API, Advanced -- plus a raw YAML editor with
+  Identity, Upstream (external OpenConnect profiles), Internal DNS, Web / API, Advanced -- plus a raw YAML editor with
   validation and diff.
 - Users (create/delete, enable/disable, password, certificate/PKCS#12,
   OTP enable/disable/QR are per-user actions here, not a separate page).
@@ -190,28 +188,16 @@ both CLI and GUI where dry-run is available.
 | List upstream profiles | `korctl upstream list` | Upstream / Profiles |
 | Switch upstream profile | `korctl upstream switch PROFILE` | Upstream / Switch |
 | Connect active upstream | `korctl upstream connect` | Upstream / Connect |
-| List routes | `korctl routes list` | Routing / Routes |
-| Add route | `korctl routes add CIDR_OR_IP` | Routing / Routes / Add |
-| Delete route | `korctl routes delete CIDR_OR_IP` | Routing / Routes / Delete |
-| Reload routes | `korctl routes reload` | Routing / nftables / Reload |
-| List domains | `korctl domains list` | Routing / Domains |
-| Add domain | `korctl domains add DOMAIN` | Routing / Domains / Add |
-| Delete domain | `korctl domains delete DOMAIN` | Routing / Domains / Delete |
-| Reload domains | `korctl domains reload` | Routing / nftables / Reload |
-| Apply firewall/NAT state | `korctl nft apply` | Dashboard or Routing / Apply firewall/NAT |
-| Show nftables state | `korctl nft show` | Routing / Show |
-| Cleanup nftables state | `korctl nft cleanup` | Routing / Cleanup |
 | Diagnostics | `korctl diagnose` | Diagnostics |
 | Logs | `korctl logs NAME --lines N` | Logs |
 | Runtime terminal | host `docker compose exec` or API terminal ticket | Terminal / Runtime shell |
 
 GUI diagnostics should classify expected not-yet-ready runtime state as a warning
 instead of a hard failure. Example: an `occtl` socket that is not ready while Korvus
-Server is still starting. Project-owned nftables tables/chains/sets are rendered and
-applied automatically during Korvus Node startup; `korctl nft apply` remains available
-for manual re-apply, dry-run checks and repair after runtime changes. It applies only
-Korvus Node firewall/NAT state from the rendered nftables file and does not flush
-unrelated host rules.
+Server is still starting. Project-owned nftables tables, rules and routes are converged
+by the reconciler at startup and on every change; `korctl net plan` shows what it
+would change and `korctl net apply` runs one pass. It touches only Korvus Node
+objects and does not flush unrelated host rules.
 
 ## CLI commands
 
@@ -248,17 +234,11 @@ korctl sessions kick USER
 korctl upstream status
 korctl upstream list
 korctl upstream switch PROFILE
-korctl routes list
-korctl routes add CIDR_OR_IP
-korctl routes delete CIDR_OR_IP
-korctl routes reload
-korctl domains list
-korctl domains add DOMAIN
-korctl domains delete DOMAIN
+korctl egress show
+korctl net plan
+korctl agent list
+korctl fabric show
 korctl domains reload
-korctl nft apply
-korctl nft show
-korctl nft cleanup
 korctl diagnose
 korctl logs
 ```

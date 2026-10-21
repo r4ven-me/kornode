@@ -132,7 +132,7 @@ Done when:
 | ~~P5-02~~ | **Removed (D-70):** no `korctl config migrate` — there are no v1 installations; legacy keys are deleted, not translated. |
 | P5-03 | **Done (D-73, `1fdf819`).** Remove legacy keys and code outright (D-70; together with P4-06 part 2): `routing.client_policy/host_policy/split/host_split`, per-profile route/host-route lists, `routing.fwmark/table_id`, `kornode.config.legacy`/`legacy_policy`, last-mark-wins, per-target static/dynamic set families, static/dynamic refresh templates (the `UpstreamService`/watchdog policy re-application already went in P2, D-29). Tests encoding v1 behaviour are deleted in the same PR. |
 | ~~P5-04~~ | **Removed (D-70):** no `korctl migrate-to-agent` — nodes are deployed as agents and enrolled. |
-| P5-05 | **`examples/` and `config.example.yaml` done (`tests/test_examples.py`); README, `docs/architecture.md`, `docs/networking.md` still describe v1.** Documentation rewrite: README, `docs/architecture.md`, `docs/networking.md`, `examples/` rewritten in the v2 format. |
+| P5-05 | **Done: `examples/`, `config.example.yaml`, README, `docs/architecture.md`, `docs/networking.md` are v2 (`tests/test_examples.py`, `tests/test_docs_v2.py`).** Documentation rewrite: README, `docs/architecture.md`, `docs/networking.md`, `examples/` rewritten in the v2 format. |
 
 Done when: every file in `examples/` is valid v2 config and passes the
 full netlab + e2e suites; no legacy routing key remains in `models.py`;
