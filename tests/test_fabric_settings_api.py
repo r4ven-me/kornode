@@ -37,7 +37,6 @@ def test_fabric_settings_saves_node_and_fabric_fields(tmp_path: Path) -> None:
         auth=("admin", "secret"),
         json={
             "node_id": 3,
-            "enabled": True,
             "cidr": "10.99.0.0/24",
             "client_pool": "10.100.{id}.0/24",
             "source_pool": "10.8.{id}.0/24",
@@ -54,7 +53,6 @@ def test_fabric_settings_saves_node_and_fabric_fields(tmp_path: Path) -> None:
     assert payload["internal_dns"]["listen"] == "10.100.3.1"
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["node"]["id"] == 3
-    assert saved["fabric"]["enabled"] is True
     assert saved["fabric"]["enroll_pool"] == "10.99.255.240/28"
     assert saved["fabric"]["reserved"] == ["10.200.0.0/16"]
 
@@ -67,7 +65,6 @@ def test_fabric_settings_rejects_invalid_template(tmp_path: Path) -> None:
         "/api/config/fabric-settings",
         auth=("admin", "secret"),
         json={
-            "enabled": True,
             "client_pool": "10.100.{node}.0/24",
             "write_rendered": False,
         },
@@ -87,7 +84,7 @@ def test_config_patch_reports_fabric_overlap_conflict(tmp_path: Path) -> None:
         json={
             "write_rendered": False,
             "patch": {
-                "fabric": {"enabled": True, "reserved": ["10.120.0.0/16"]},
+                "fabric": {"reserved": ["10.120.0.0/16"]},
                 "server": {"ipv4_network": "10.120.1.0/24"},
                 "internal_dns": {"listen": "10.120.1.1"},
             },

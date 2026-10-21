@@ -441,10 +441,6 @@ export function ConfigView({
             <h2>Fabric</h2>
             <p className="muted-line">Node identity, derived pools and reserved address space.</p>
           </div>
-          <label className="switch">
-            <input checked={fabricSettingsDraft.enabled} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, enabled: event.target.checked })} type="checkbox" />
-            <span>Enabled</span>
-          </label>
         </div>
 
         <SettingsTabs ariaLabel="Fabric settings">

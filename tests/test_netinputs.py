@@ -91,13 +91,12 @@ def test_facts_from_runtime(tmp_path: Path) -> None:
     assert [str(net) for net in facts.local_networks] == ["172.17.0.0/16", "192.168.1.0/24"]
     assert facts.uplink == "eth0"
     assert facts.all_rp_filter == "1"
-    assert facts.enroll is None
+    assert facts.enroll is not None
 
 
-def test_facts_include_enroll_guard_when_fabric_enabled(tmp_path: Path) -> None:
+def test_facts_include_enroll_guard(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
-        fabric={"enabled": True},
         auth={"password": {"enabled": True}},
     )
 
@@ -183,7 +182,7 @@ def test_session_routes_follow_connected_agents_and_exported_prefixes(tmp_path: 
     from kornode.registry.db import migrate, open_registry
     from kornode.registry.repository import Registry
 
-    config = _config(tmp_path, fabric={"enabled": True}, auth={"password": {"enabled": True}})
+    config = _config(tmp_path, auth={"password": {"enabled": True}})
     config.system.data_dir.mkdir(parents=True)
     registry = Registry(open_registry(config.system.data_dir / "registry.db"))
     migrate(registry.conn)

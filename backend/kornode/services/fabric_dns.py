@@ -178,12 +178,9 @@ class FabricDnsService:
             conn.close()
 
     def list(self) -> dict[str, Any]:
-        if not self.config.fabric.enabled:
-            return {"enabled": False, "domain": self.config.fabric.domain, "records": []}
         with self.agents.registry() as r:
             names = {node.id: node.name for node in r.list_nodes()}
             return {
-                "enabled": True,
                 "domain": self.config.fabric.domain,
                 "records": [self._view(item, names) for item in zone_records(self.config, r)],
             }
@@ -310,8 +307,6 @@ class FabricDnsService:
         restart makes a failed restart retried by the next sync (`korctl
         registry maintain`), although the file already matches.
         """
-        if not self.config.fabric.enabled:
-            return False
         from kornode.renderers import DnsmasqConfigRenderer
         from kornode.services.files import FileManager
 

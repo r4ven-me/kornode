@@ -687,7 +687,6 @@ export function saveGeneralSettings(
 
 export type FabricSettings = {
   node_id: number;
-  enabled: boolean;
   cidr: string;
   client_pool: string;
   source_pool: string;

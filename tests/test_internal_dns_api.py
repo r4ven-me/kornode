@@ -63,8 +63,8 @@ def test_internal_dns_status_defaults(tmp_path: Path) -> None:
     # The resolver is mandatory, not opt-in, while server.enabled (the
     # default) -- see AppConfig.dnsmasq_active_reasons().
     assert payload["effective"]["dnsmasq_active"] is True
-    assert payload["effective_reasons"] == ["server_enabled"]
-    assert payload["client_dns"] == ["10.10.10.1"]
+    assert payload["effective_reasons"] == ["server_enabled", "fabric_dns"]
+    assert payload["client_dns"] == ["10.100.1.1"]
     assert payload["total"] == 0
 
 
@@ -77,7 +77,7 @@ def test_internal_dns_settings_enable_switches_client_dns(tmp_path: Path) -> Non
         auth=("admin", "secret"),
         json={
             "server_dns": ["9.9.9.9"],
-            "listen": "10.10.10.2",
+            "listen": "10.100.1.2",
             "port": 5353,
             "blocklist_enabled": True,
             "local_records_enabled": False,
@@ -94,13 +94,14 @@ def test_internal_dns_settings_enable_switches_client_dns(tmp_path: Path) -> Non
     assert payload["internal_dns"]["effective_reasons"] == [
         "server_enabled",
         "blocklist_enabled",
+        "fabric_dns",
     ]
-    assert payload["internal_dns"]["client_dns"] == ["10.10.10.2"]
+    assert payload["internal_dns"]["client_dns"] == ["10.100.1.2"]
     assert payload["internal_dns"]["blocklist_domains"] == ["ads.example.com"]
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["server"]["dns"] == ["9.9.9.9"]
-    assert saved["internal_dns"]["listen"] == "10.10.10.2"
+    assert saved["internal_dns"]["listen"] == "10.100.1.2"
     assert saved["internal_dns"]["port"] == 5353
     assert saved["internal_dns"]["blocklist_enabled"] is True
     assert saved["internal_dns"]["blocklist_urls"] == ["https://lists.example.com/hosts.txt"]
@@ -112,7 +113,7 @@ def test_internal_dns_settings_enable_switches_client_dns(tmp_path: Path) -> Non
     assert "address=/ads.example.com/0.0.0.0" in blocklist_conf.read_text(encoding="utf-8")
 
     ocserv_conf = (tmp_path / "generated" / "ocserv.conf").read_text(encoding="utf-8")
-    assert "dns = 10.10.10.2" in ocserv_conf
+    assert "dns = 10.100.1.2" in ocserv_conf
 
 
 def test_internal_dns_settings_saves_cache_size_log_queries_and_local_records(
@@ -204,7 +205,11 @@ def test_forward_domains_change_reconnects_clients_and_feeds_split_dns(
     assert response.status_code == 200
     payload = response.json()
     assert payload["reconnect_required"] is True
-    assert payload["internal_dns"]["effective_reasons"] == ["server_enabled", "forward_domains"]
+    assert payload["internal_dns"]["effective_reasons"] == [
+        "server_enabled",
+        "forward_domains",
+        "fabric_dns",
+    ]
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["internal_dns"]["forward_upstreams"] == ["127.207.207.1"]

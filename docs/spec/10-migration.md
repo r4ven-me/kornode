@@ -58,8 +58,8 @@ from a v1 node.
 
 ## Fabric toggle
 
-`fabric.enabled` exists today because D-43 cannot combine client certificate
-or OIDC login with agents on one listener. Client certificate and OIDC login
-are required (D-70); spike S-07 (ocserv SNI virtual hosts) decides how. When
-it lands, `fabric.enabled` is removed and the hub always runs the fabric — a
-hub without agents is a plain client server.
+There is none. `fabric.enabled` existed only because D-43 could not combine client
+certificate or OIDC login with agents on one listener. Spike S-07 showed ocserv virtual
+hosts do (D-71): the hub always runs the fabric, a hub without agents is a plain client
+server, and the key is rejected as unknown. Addresses are always derived (client pool
+`10.100.<id>.0/24`, spec 01).

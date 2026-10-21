@@ -41,7 +41,7 @@ def test_delete_group_removes_config_policy_and_membership(tmp_path: Path) -> No
     save = client.put(
         "/api/groups/devops/config",
         auth=("admin", "secret"),
-        json={"dns": ["10.10.10.1"]},
+        json={"dns": ["10.100.1.1"]},
     )
     assert save.status_code == 200
 
@@ -65,7 +65,8 @@ def test_delete_group_removes_config_policy_and_membership(tmp_path: Path) -> No
 
     # Cleared from alice's membership, bob untouched.
     passwd_content = passwd.read_text(encoding="utf-8")
-    assert "alice:$5$hash" in passwd_content
+    # A user left without groups falls back to `clients` (the fabric hub always runs).
+    assert "alice:clients:$5$hash" in passwd_content
     assert "bob:sre:$5$hash" in passwd_content
 
     after = client.get("/api/groups", auth=("admin", "secret")).json()
@@ -89,3 +90,19 @@ def test_delete_group_rejects_invalid_name(tmp_path: Path) -> None:
     response = client.delete("/api/groups/bad!name", auth=("admin", "secret"))
 
     assert response.status_code == 400
+
+
+def test_generated_fabric_groups_are_not_listed_as_operator_groups(tmp_path: Path) -> None:
+    """The hub always renders config-per-group/agents and /enroll (D-71); listing the
+    directory must not trip over those reserved names."""
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+    group_dir = tmp_path / "generated" / "config-per-group"
+    group_dir.mkdir(parents=True)
+    for name in ("agents", "enroll", "devops"):
+        (group_dir / name).write_text("route = 10.1.0.0/16\n", encoding="utf-8")
+
+    response = client.get("/api/groups", auth=("admin", "secret"))
+
+    assert response.status_code == 200
+    assert [group["name"] for group in response.json()] == ["devops"]

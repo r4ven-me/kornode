@@ -121,11 +121,10 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
     <section className="panel" data-capability="control.status"><div className="panel-header"><h2>Agents</h2><span className="pill muted">Control API {control?.enabled ? "enabled" : "disabled"}</span></div>
       <p>{control?.agents ?? 0} registered · {control?.active ?? 0} enrolled · signing key {control?.signing_key_id ?? "not initialized"}</p>
       {control?.rotation && <p role="status">Rotation: {control.rotation.phase}; promotion {control.rotation.promotes_at}. {control.rotation.warning}</p>}
-      {control && !control.fabric_enabled && <p>Enable Fabric in Config → Fabric before creating agents.</p>}
-      <div className="panel-footer"><button className="action-button" type="button" disabled={busy} data-capability="agent.list" onClick={() => void refreshList().catch(reason => setError(String(reason)))}>Refresh agents</button><button className="action-button" type="button" disabled={busy || !control?.fabric_enabled} data-capability="control.rotate_key" onClick={() => void rotate()}>Rotate signing key{dryRun ? " (preview)" : ""}</button></div>
+      <div className="panel-footer"><button className="action-button" type="button" disabled={busy} data-capability="agent.list" onClick={() => void refreshList().catch(reason => setError(String(reason)))}>Refresh agents</button><button className="action-button" type="button" disabled={busy} data-capability="control.rotate_key" onClick={() => void rotate()}>Rotate signing key{dryRun ? " (preview)" : ""}</button></div>
     </section>
     {error && <section className="panel" role="alert">{error}</section>}{message && <p role="status">{message}</p>}
-    {control?.fabric_enabled && <FabricDns token={token} agents={agents} />}
+    <FabricDns token={token} agents={agents} />
     <section className="panel"><h2>Registered agents</h2>{loading ? <p>Loading agents…</p> : agents.length === 0 ? <p>No agents registered yet.</p> : <ul className="agent-list">{agents.map(a => <li key={a.id}><button className={selected === a.name ? "agent-summary active" : "agent-summary"} type="button" disabled={busy} aria-pressed={selected === a.name} onClick={() => { setSelected(a.name); setSection("settings"); }}><strong>{a.name} · node {a.id}</strong><span>{a.state} · {a.online ? "online" : "offline"}</span><span>desired {a.desired_version} / reported {a.applied_version}</span></button></li>)}</ul>}</section>
     <details className="panel"><summary>Add agent</summary><form onSubmit={e => {
       e.preventDefault();
@@ -137,13 +136,13 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
         else { const created = data.agent as Agent; setSelected(created.name); setSection("settings"); setName(""); setId(""); setDescription(""); setRoles([]); setForceReuse(false); }
         await refreshList();
       }).catch(reason => setError(String(reason instanceof Error ? reason.message : reason))).finally(() => setBusy(false));
-    }}><fieldset className="agent-fields" disabled={busy || !control?.fabric_enabled}>
+    }}><fieldset className="agent-fields" disabled={busy}>
       <label>Agent name<input value={name} onChange={e => setName(e.target.value)} required /></label>
       <label>Node ID (blank = automatic)<input type="number" value={id} onChange={e => setId(e.target.value)} /></label>
       <label>New agent description<input value={description} onChange={e => setDescription(e.target.value)} /></label>
       <div className="agent-checks">{["access", "exit"].map(role => <label key={role}><input type="checkbox" checked={roles.includes(role)} onChange={e => setRoles(e.target.checked ? [...roles, role] : roles.filter(r => r !== role))} /> {role} role</label>)}</div>
       <label className="agent-check"><input type="checkbox" checked={forceReuse} onChange={e => setForceReuse(e.target.checked)} /> Force ID reuse (bypass 30-day quarantine)</label>
-    </fieldset><div className="panel-footer"><button className="action-button primary" disabled={busy || !control?.fabric_enabled} data-capability="agent.create">{dryRun ? "Preview creation" : "Create agent and token"}</button></div></form></details>
+    </fieldset><div className="panel-footer"><button className="action-button primary" disabled={busy} data-capability="agent.create">{dryRun ? "Preview creation" : "Create agent and token"}</button></div></form></details>
     {selected && !detail && <p role="status">Loading agent details…</p>}
     {detail && <>
       <label className="agent-section">Agent section<select value={section} onChange={e => setSection(e.target.value as Section)}><option value="settings">Settings and enrollment</option><option value="networks">Networks and sources</option><option value="policy">Egress policy</option><option value="upstreams">Upstreams</option>{detail.agent.roles.includes("access") && <option value="users">Access listener and users</option>}<option value="activity">Reports, bundles and commands</option></select></label>

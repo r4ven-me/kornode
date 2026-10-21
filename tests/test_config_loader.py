@@ -12,7 +12,7 @@ from kornode.config.models import AddressOverlapError, AppConfig
 def test_internal_dns_listen_follows_a_customized_ipv4_network(tmp_path: Path) -> None:
     # internal_dns.listen must stay inside server.ipv4_network -- see
     # AppConfig.migrate_legacy_dns_keys. The hardcoded model default
-    # (10.10.10.1) only matches the default subnet, so a deployment that
+    # (10.100.1.1) only matches the default subnet, so a deployment that
     # only customizes ipv4_network must still get a reachable listen address
     # automatically, not a validation error for an unrelated-looking field.
     config = load_config(
@@ -53,7 +53,6 @@ def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     config = load_config(tmp_path / "missing.yaml", environ={})
 
     assert config.node.id == 1
-    assert config.fabric.enabled is False
     assert config.fabric.enroll_pool == "10.99.255.240/28"
     assert config.server.port == 443
     assert config.web.enabled is False
@@ -63,10 +62,9 @@ def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     assert config.certificates.letsencrypt.auto_renew_interval_unit == "days"
 
 
-def test_fabric_enabled_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
+def test_fabric_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
-        cli_overrides={"fabric": {"enabled": True}},
         environ={},
     )
 
@@ -78,7 +76,7 @@ def test_fabric_enabled_derives_server_network_and_dns_listen(tmp_path: Path) ->
 def test_fabric_uses_node_id_for_derived_addresses(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
-        cli_overrides={"node": {"id": 7}, "fabric": {"enabled": True}},
+        cli_overrides={"node": {"id": 7}},
         environ={},
     )
 
@@ -91,7 +89,6 @@ def test_fabric_env_overrides_work(tmp_path: Path) -> None:
         tmp_path / "missing.yaml",
         environ={
             "KORNODE_NODE__ID": "9",
-            "KORNODE_FABRIC__ENABLED": "true",
             "KORNODE_FABRIC__CLIENT_POOL": '"10.110.{id}.0/24"',
         },
     )
@@ -106,7 +103,6 @@ def test_explicit_server_network_overrides_fabric_derived_default(tmp_path: Path
     config = load_config(
         tmp_path / "missing.yaml",
         cli_overrides={
-            "fabric": {"enabled": True},
             "server": {"ipv4_network": "10.120.1.0/24"},
             "internal_dns": {"listen": "10.120.1.1"},
         },
@@ -122,7 +118,7 @@ def test_explicit_server_network_rejects_fabric_overlap(tmp_path: Path) -> None:
         load_config(
             tmp_path / "missing.yaml",
             cli_overrides={
-                "fabric": {"enabled": True, "reserved": ["10.120.0.0/16"]},
+                "fabric": {"reserved": ["10.120.0.0/16"]},
                 "server": {"ipv4_network": "10.120.1.0/24"},
                 "internal_dns": {"listen": "10.120.1.1"},
             },
@@ -142,7 +138,7 @@ def test_explicit_server_network_rejects_enroll_pool_overlap(tmp_path: Path) -> 
         load_config(
             tmp_path / "missing.yaml",
             cli_overrides={
-                "fabric": {"enabled": True, "enroll_pool": "10.120.1.0/24"},
+                "fabric": {"enroll_pool": "10.120.1.0/24"},
                 "server": {"ipv4_network": "10.120.1.0/24"},
                 "internal_dns": {"listen": "10.120.1.1"},
             },
@@ -169,37 +165,9 @@ def test_explicit_server_network_rejects_enroll_pool_overlap(tmp_path: Path) -> 
 def test_fabric_accepts_every_client_auth_method(auth: dict[str, object]) -> None:
     """D-70/D-71: agents log in on their own virtual host, so client login by
     certificate, OIDC or OTP no longer conflicts with the fabric (was D-43)."""
-    config = AppConfig.model_validate({"fabric": {"enabled": True}, "auth": auth})
+    config = AppConfig.model_validate({"auth": auth})
 
-    assert config.fabric.enabled is True
     assert config.fabric.server_name == "fabric.kornode.internal"
-
-
-def test_fabric_auth_accepts_password_only() -> None:
-    config = AppConfig.model_validate(
-        {
-            "fabric": {"enabled": True},
-            "auth": {"password": {"enabled": True}},
-        }
-    )
-
-    assert config.fabric.enabled is True
-
-
-def test_fabric_disabled_does_not_apply_d43_auth_restrictions() -> None:
-    config = AppConfig.model_validate(
-        {
-            "fabric": {"enabled": False},
-            "auth": {
-                "password": {"enabled": False},
-                "certificate": {"enabled": True},
-                "oidc": {"enabled": True},
-                "otp": {"enabled": True, "ocserv_oath_auth": True},
-            },
-        }
-    )
-
-    assert config.fabric.enabled is False
 
 
 def test_load_config_defaults_for_new_server_tuning_fields(tmp_path: Path) -> None:
@@ -310,21 +278,20 @@ def test_control_defaults_and_signing_key_follows_data_dir(tmp_path: Path) -> No
     assert config.control.signing_key == tmp_path / "data" / "control" / "signing.ed25519"
 
 
-def test_control_requires_fabric(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="control.enabled requires fabric.enabled"):
-        load_config(
-            tmp_path / "missing.yaml",
-            cli_overrides={"control": {"enabled": True}},
-            environ={},
-        )
-
-
-def test_control_enabled_with_fabric(tmp_path: Path) -> None:
+def test_control_enabled(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
-        cli_overrides={"fabric": {"enabled": True}, "control": {"enabled": True, "port": 9444}},
+        cli_overrides={"control": {"enabled": True, "port": 9444}},
         environ={},
     )
 
     assert config.control.enabled is True
     assert config.control.port == 9444
+
+
+def test_the_removed_fabric_enabled_flag_is_rejected(tmp_path: Path) -> None:
+    """D-70/D-71: the hub always runs the fabric; the old switch must not be silently ignored."""
+    with pytest.raises(ValueError, match="enabled"):
+        load_config(
+            tmp_path / "missing.yaml", cli_overrides={"fabric": {"enabled": True}}, environ={}
+        )

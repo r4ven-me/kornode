@@ -1024,7 +1024,7 @@ class UpstreamService:
         # Everything inside server.ipv4_network is exempt from host marking
         # (nftables output chain) and the internal DNS address sits on the
         # loopback -- an upstream using the same subnet (both default to
-        # 10.10.10.0/24) would be unreachable through the tunnel.
+        # 10.100.1.0/24) would be unreachable through the tunnel.
         own_network = ipaddress.ip_network(self.config.server.ipv4_network, strict=False)
         overlapping = [
             item for item in [*pushed.routes, *pushed.dns] if _overlaps(item, own_network)

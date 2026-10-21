@@ -174,7 +174,7 @@ class HubNetInputs:
             upstreams=tuple(upstreams),
             node_prefixes=self._node_prefixes(pool, view),
             fabric_ifaces=tuple(sorted(set(view.sessions.values()))),
-            fabric_guard=self.config.fabric.enabled,
+            fabric_guard=True,
             transit_exits=tuple(self._transit_exits(view)),
             session_routes=tuple(self._session_routes(view)),
             uplink=NetworkStatsService(config, runner=self.runner).resolve_interface(),
@@ -216,7 +216,7 @@ class HubNetInputs:
         """
         config = self.config
         db = config.system.data_dir / "registry.db"
-        if not config.fabric.enabled or not db.exists():
+        if not db.exists():
             return FabricView()
         result = self.runner.run(
             ["ip", "-j", "-4", "route", "show", "table", "main"], check=False, timeout=5
@@ -259,9 +259,7 @@ class HubNetInputs:
 
     def _node_prefixes(self, pool: Network, view: FabricView) -> dict[int, tuple[Network, ...]]:
         """Every active node's exported prefixes; the hub's are its pool and the fabric."""
-        hub: list[Network] = [pool]
-        if self.config.fabric.enabled:
-            hub.append(ipaddress.ip_network(self.config.fabric.cidr, strict=False))
+        hub: list[Network] = [pool, ipaddress.ip_network(self.config.fabric.cidr, strict=False)]
         result: dict[int, tuple[Network, ...]] = {1: tuple(hub)}
         active = {node.id for node in view.nodes}
         for item in view.prefixes:
@@ -384,8 +382,6 @@ class HubNetInputs:
         return self._hub_fabric_address()
 
     def _enroll_guard(self) -> EnrollGuard | None:
-        if not self.config.fabric.enabled:
-            return None
         return EnrollGuard(
             pool=ipaddress.IPv4Network(self.config.fabric.enroll_pool, strict=True),
             address=self._hub_fabric_address(),

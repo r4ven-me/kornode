@@ -244,7 +244,7 @@ def test_rendered_hub_compose_is_isolated_and_config_valid(worker: FakeWorker) -
     worker.deploy()
     config = json.loads((worker.directory / "config.json").read_text())
     model = AppConfig.model_validate(config)
-    assert model.fabric.enabled and model.control.enabled and not model.web.enabled
+    assert model.control.enabled and not model.web.enabled
     service = json.loads((worker.directory / "compose.json").read_text())["services"]["node"]
     assert "network_mode" not in service and "privileged" not in service
     assert not any("docker.sock" in json.dumps(value) for value in service["volumes"])
@@ -417,9 +417,10 @@ def test_agent_and_ext_compose_never_use_host_namespace(worker: FakeWorker, role
         assert any(v["target"] == "/var/lib/kornode-agent" for v in service["volumes"])
         assert worker.commands[-1][0][-2:] == ["create", "node"]
     else:
-        assert not AppConfig.model_validate(
-            json.loads((worker.directory / "config.json").read_text())
-        ).fabric.enabled
+        # ext is a plain upstream "office": no control plane, no web (the fabric itself
+        # is always part of a hub, D-71).
+        model = AppConfig.model_validate(json.loads((worker.directory / "config.json").read_text()))
+        assert not model.control.enabled
 
 
 def test_cleanup_failure_preserves_state_and_lease(

@@ -53,14 +53,14 @@ def test_client_only_deployment_does_not_require_check_host_outside_vpn_subnet()
                         "name": "office",
                         "server": "vpn.example.com",
                         "username": "user",
-                        "check_host": "10.10.10.5",
+                        "check_host": "10.100.1.5",
                     }
                 ],
             },
         }
     )
 
-    assert config.upstream.profiles[0].check_host == "10.10.10.5"
+    assert config.upstream.profiles[0].check_host == "10.100.1.5"
 
 
 def test_server_mode_still_requires_check_host_outside_vpn_subnet() -> None:
@@ -78,7 +78,7 @@ def test_server_mode_still_requires_check_host_outside_vpn_subnet() -> None:
                             "name": "office",
                             "server": "vpn.example.com",
                             "username": "user",
-                            "check_host": "10.10.10.5",
+                            "check_host": "10.100.1.5",
                         }
                     ],
                 },

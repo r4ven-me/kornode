@@ -70,7 +70,7 @@ def test_identity_api_saves_group_policy(tmp_path: Path) -> None:
             "name": "devops",
             "display_name": "DevOps",
             "routes": ["10.20.0.0/16"],
-            "dns": ["10.10.10.1"],
+            "dns": ["10.100.1.1"],
             "split_dns": ["corp.example.com"],
         },
     )

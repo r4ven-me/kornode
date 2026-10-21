@@ -86,7 +86,7 @@ def test_dry_run_changes_nothing(tmp_path: Path) -> None:
 
 
 def test_explain_uses_the_kernel_check(tmp_path: Path) -> None:
-    decision = _service(tmp_path).explain("10.10.10.5", "1.1.1.1")
+    decision = _service(tmp_path).explain("10.100.1.5", "1.1.1.1")
 
     assert decision["matched_rule"]["via"] == "upstream:main"
     assert decision["kernel_check"].endswith("-> dev oc-middle0")
@@ -114,7 +114,7 @@ def test_api_plan_apply_explain(client: TestClient) -> None:
     assert client.post("/api/net/apply", json={}, auth=auth).json()["via"] == "in-process"
     assert client.get("/api/net/plan", auth=auth).json()["ops"] == []
     explained = client.post(
-        "/api/net/explain", json={"src": "10.10.10.5", "dst": "1.1.1.1"}, auth=auth
+        "/api/net/explain", json={"src": "10.100.1.5", "dst": "1.1.1.1"}, auth=auth
     ).json()
     assert explained["from_class"] == "clients"
     bad = client.post("/api/net/explain", json={"src": "nope", "dst": "1.1.1.1"}, auth=auth)

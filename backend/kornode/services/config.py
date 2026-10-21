@@ -3,7 +3,6 @@ from __future__ import annotations
 import difflib
 import logging
 import sqlite3
-from contextlib import nullcontext
 from pathlib import Path
 
 from kornode.config.models import AppConfig
@@ -66,13 +65,10 @@ class ConfigService:
                     self.ocserv_renderer.render_group_policy(group),
                 )
             )
-        if config.fabric.enabled:
-            from kornode.services.fabric_groups import FabricGroupsService
+        from kornode.services.fabric_groups import FabricGroupsService
 
-            fabric_groups = FabricGroupsService(config, self.file_manager)
-            files.extend(
-                fabric_groups.render_files(fabric_groups.nodes(), fabric_groups.prefixes())
-            )
+        fabric_groups = FabricGroupsService(config, self.file_manager)
+        files.extend(fabric_groups.render_files(fabric_groups.nodes(), fabric_groups.prefixes()))
         return files
 
     def write_rendered_files(self, config: AppConfig) -> list[Path]:
@@ -83,28 +79,25 @@ class ConfigService:
             config.identity.config_per_group_dir
             or (config.system.generated_dir / "config-per-group")
         )
-        if config.fabric.enabled:
-            self.file_manager.ensure_dir(
-                config.identity.config_per_user_dir
-                or (config.system.generated_dir / "config-per-user")
-            )
-            from kornode.services.users import UserService
+        self.file_manager.ensure_dir(
+            config.identity.config_per_user_dir or (config.system.generated_dir / "config-per-user")
+        )
+        from kornode.services.users import UserService
 
-            UserService(config, files=self.file_manager).ensure_default_group()
-            self._ensure_fabric_crl(config)
+        UserService(config, files=self.file_manager).ensure_default_group()
+        self._ensure_fabric_crl(config)
         written: list[Path] = []
         from kornode.services.fabric_groups import FabricGroupsService
 
         groups = FabricGroupsService(config, self.file_manager)
-        with groups.locked() if config.fabric.enabled else nullcontext():
+        with groups.locked():
             rendered_files = self.render_files(config)
             for rendered in rendered_files:
                 self.file_manager.atomic_write_text(rendered.path, rendered.content, rendered.mode)
                 written.append(rendered.path)
-            if config.fabric.enabled:
-                for path in groups.stale_files(rendered_files):
-                    path.unlink()
-                    written.append(path)
+            for path in groups.stale_files(rendered_files):
+                path.unlink()
+                written.append(path)
         self._recompile_bundles(config)
         return written
 

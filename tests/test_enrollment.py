@@ -79,7 +79,6 @@ def _config(tmp_path: Path) -> AppConfig:
                 "log_dir": tmp_path / "logs",
                 "secrets_dir": tmp_path / "secrets",
             },
-            "fabric": {"enabled": True},
             "control": {"enabled": True},
             "auth": {"password": {"enabled": True}},
             "identity": {

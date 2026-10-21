@@ -363,7 +363,7 @@ def test_certificate_info_parses_subject_issuer_and_sans(tmp_path: Path) -> None
         "\t\tNot After: Wed Jan 01 00:00:00 UTC 2025\n"
         "\t\tX509v3 Subject Alternative Name (not critical):\n"
         "\t\t\tDNSname: vpn.example.com\n"
-        "\t\t\tIPAddress: 10.10.10.1\n"
+        "\t\t\tIPAddress: 10.100.1.1\n"
     )
 
     class Runner(CommandRunner):
@@ -392,7 +392,7 @@ def test_certificate_info_parses_subject_issuer_and_sans(tmp_path: Path) -> None
         "issuer": "CN=Korvus Node CA",
         "not_before": "Mon Jan 01 00:00:00 UTC 2024",
         "not_after": "Wed Jan 01 00:00:00 UTC 2025",
-        "sans": ["vpn.example.com", "10.10.10.1"],
+        "sans": ["vpn.example.com", "10.100.1.1"],
     }
 
 

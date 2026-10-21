@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Removed (`fabric.enabled`, D-71; branch `redesign/p4-fabric-always-on`)
+
+- `fabric.enabled` is gone: the hub always runs the fabric (vhost, registry, groups, enroll guard, hub DNS zone while `server.enabled`, registry snapshot program). The key is rejected as unknown. `control.enabled` no longer requires it.
+- Derived addresses are always on: client pool `10.100.<id>.0/24` and service address `10.100.<id>.1` replace the old `10.10.10.0/24` default (the cause-1 shared-subnet bug of the plan); a customized `server.ipv4_network` makes `internal_dns.listen` follow it. Explicit values stay valid when they do not overlap the fabric.
+- Panel/API: the Fabric settings lose the "Enabled" toggle (`POST /api/config/fabric-settings` has no `enabled`); `GET /api/control/status` loses `fabric_enabled`; agent and fabric-DNS list responses lose `enabled`.
+- Fix: `GET /api/groups` skips the generated `agents`/`enroll` files (it failed with "group 'agents' is reserved" once those exist on every hub).
+- Tests of the non-fabric mode deleted: `test_fabric_auth_accepts_password_only`, `test_fabric_disabled_does_not_apply_d43_auth_restrictions`, `test_control_requires_fabric`, `test_ocserv_render_without_fabric_has_no_vhost`, `test_connect_script_is_template_without_fabric`, `test_supervisor_render_omits_registry_snapshot_when_fabric_disabled`, `test_disabled_fabric_lists_nothing_and_refuses_changes`; `test_stale_files_and_sync_remove_generated_fabric_files` is rewritten for removed agents.
+
 ### Changed (S-07 passed, D-71; branch `redesign/p4-s07-vhosts`)
 
 - Agents and enrollment log in on an ocserv virtual host `fabric.<fabric.domain>` (selected by TLS SNI on the same 443/tcp); the client host keeps every `auth.*` method. The D-43 rejection of `auth.certificate`/`auth.oidc`/`ocserv_oath_auth` with `fabric.enabled` is gone.

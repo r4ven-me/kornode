@@ -124,7 +124,7 @@ class FabricGroupsService:
         group_dir = self.group_dir()
         if group_dir.is_dir():
             group_names = [AGENTS_GROUP, ENROLL_GROUP]
-            if not self.config.fabric.enabled or (group_dir / CLIENTS_GROUP) not in rendered_paths:
+            if (group_dir / CLIENTS_GROUP) not in rendered_paths:
                 group_names.append(CLIENTS_GROUP)
             for name in group_names:
                 path = group_dir / name
@@ -132,7 +132,7 @@ class FabricGroupsService:
                     continue
                 if name == CLIENTS_GROUP and not _has_generated_header(path):
                     continue
-                if not self.config.fabric.enabled or name == CLIENTS_GROUP:
+                if name == CLIENTS_GROUP:
                     stale.append(path)
         return stale
 
@@ -185,25 +185,20 @@ class FabricGroupsService:
             yield
 
     def _sync(self, *, dry_run: bool) -> list[Path]:
-        rendered = (
-            self.render_files(self.nodes(), self.prefixes()) if self.config.fabric.enabled else []
-        )
+        rendered = self.render_files(self.nodes(), self.prefixes())
         stale = self.stale_files(rendered)
         modified = False
         changed = [item.path for item in rendered] + stale
         if dry_run:
-            if self.config.fabric.enabled:
-                UserService(self.config, files=self.files).ensure_default_group(dry_run=True)
+            UserService(self.config, files=self.files).ensure_default_group(dry_run=True)
             return changed
-        if self.config.fabric.enabled:
-            UserService(self.config, files=self.files).ensure_default_group()
-            self.files.ensure_dir(self.group_dir())
-            self.files.ensure_dir(self.user_dir(), mode=0o700)
-            modified = False
-            for item in rendered:
-                if _differs(item.path, item.content):
-                    modified = modified or item.path.exists()
-                    self.files.atomic_write_text(item.path, item.content, item.mode)
+        UserService(self.config, files=self.files).ensure_default_group()
+        self.files.ensure_dir(self.group_dir())
+        self.files.ensure_dir(self.user_dir(), mode=0o700)
+        for item in rendered:
+            if _differs(item.path, item.content):
+                modified = modified or item.path.exists()
+                self.files.atomic_write_text(item.path, item.content, item.mode)
         for path in stale:
             path.unlink()
         if modified and self._reload_ocserv is not None:

@@ -51,8 +51,10 @@ auth:
     assert "dns = 10.77.0.1" in rendered
     assert "route = 192.168.1.0/24" in rendered
     assert 'auth = "certificate"' in rendered
-    assert "enable-auth" not in rendered
-    assert "cert-group-oid" not in rendered
+    # Agent login belongs to the fabric vhost only (D-71), not to the client host.
+    client_host = rendered.partition("[vhost:")[0]
+    assert "enable-auth" not in client_host
+    assert "cert-group-oid" not in client_host
     assert "log-level = 2" in rendered
 
 
@@ -144,7 +146,6 @@ def _fabric_config(tmp_path: Path, **overrides: object) -> AppConfig:
                 "generated_dir": str(tmp_path / "generated"),
                 "secrets_dir": str(tmp_path / "secrets"),
             },
-            "fabric": {"enabled": True},
             **overrides,
         },
         environ={},
@@ -189,41 +190,6 @@ def test_ocserv_render_vhost_repeats_udp_port(tmp_path: Path) -> None:
     _, _, vhost = OcservConfigRenderer().render(config).partition("[vhost:")
 
     assert f"udp-port = {config.server.port}" in vhost
-
-
-def test_ocserv_render_without_fabric_has_no_vhost(tmp_path: Path) -> None:
-    config = load_config(
-        tmp_path / "missing.yaml",
-        cli_overrides={
-            "system": {
-                "data_dir": str(tmp_path / "data"),
-                "generated_dir": str(tmp_path / "generated"),
-                "secrets_dir": str(tmp_path / "secrets"),
-            }
-        },
-        environ={},
-    )
-
-    assert "[vhost:" not in OcservConfigRenderer().render(config)
-
-
-def test_connect_script_is_template_without_fabric(tmp_path: Path) -> None:
-    config = load_config(
-        tmp_path / "missing.yaml",
-        cli_overrides={
-            "system": {
-                "data_dir": str(tmp_path / "data"),
-                "generated_dir": str(tmp_path / "generated"),
-                "secrets_dir": str(tmp_path / "secrets"),
-            },
-        },
-        environ={},
-    )
-
-    rendered = OcservConfigRenderer().render_connect_script(config)
-
-    assert "# Fabric guard" not in rendered
-    assert "failures here are deliberately swallowed" in rendered
 
 
 def test_connect_script_fabric_guard(tmp_path: Path) -> None:
@@ -409,7 +375,7 @@ identity:
       routes:
         - 10.20.0.0/16
       dns:
-        - 10.10.10.1
+        - 10.100.1.1
       split_dns:
         - corp.example.com
       max_same_clients: 4
@@ -427,7 +393,7 @@ identity:
     assert "select-group-by-url = true" in rendered
     assert "default-select-group = devops" in rendered
     assert "route = 10.20.0.0/16" in group_rendered
-    assert "dns = 10.10.10.1" in group_rendered
+    assert "dns = 10.100.1.1" in group_rendered
     assert "split-dns = corp.example.com" in group_rendered
 
 

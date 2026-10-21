@@ -47,7 +47,7 @@ def test_resolv_conf_mode_points_host_at_dnsmasq_and_keeps_a_backup(tmp_path: Pa
     result = service.apply()
 
     assert result.changed
-    assert "nameserver 10.10.10.1" in resolv.read_text()
+    assert "nameserver 10.100.1.1" in resolv.read_text()
     assert service.backup_path.read_text() == ORIGINAL
     assert service.apply().changed is False
 
@@ -59,7 +59,7 @@ def test_resolv_conf_is_reasserted_after_an_external_rewrite(tmp_path: Path) -> 
     resolv.write_text("nameserver 192.168.1.254\n")  # DHCP renewal
 
     assert service.apply().changed
-    assert "nameserver 10.10.10.1" in resolv.read_text()
+    assert "nameserver 10.100.1.1" in resolv.read_text()
     # The newest host configuration is what comes back on restore.
     assert service.backup_path.read_text() == "nameserver 192.168.1.254\n"
 
@@ -118,7 +118,7 @@ def test_resolved_mode_writes_a_dropin_and_off_removes_it(tmp_path: Path) -> Non
 
     content = (dropin_dir / "kornode.conf").read_text()
     assert result.changed and "systemctl restart systemd-resolved" in result.detail
-    assert MARK in content and "DNS=\nDNS=10.10.10.1:5353\nDomains=~.\n" in content
+    assert MARK in content and "DNS=\nDNS=10.100.1.1:5353\nDomains=~.\n" in content
 
     _service(tmp_path, _config(tmp_path, "off")).apply()
     assert not (dropin_dir / "kornode.conf").exists()
@@ -169,7 +169,7 @@ def test_restore_reports_both_when_resolv_conf_and_dropin_are_both_present(
     # undoes the OTHER mode's leftovers as part of switching (see its own
     # docstring), which would defeat the point of this test -- restore()
     # must not depend on that ever having run.
-    (dropin_dir / "kornode.conf").write_text(f"{MARK}: leftover\n[Resolve]\nDNS=10.10.10.1\n")
+    (dropin_dir / "kornode.conf").write_text(f"{MARK}: leftover\n[Resolve]\nDNS=10.100.1.1\n")
 
     result = service.restore()
 

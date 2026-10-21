@@ -63,10 +63,8 @@ class DnsmasqConfigRenderer(TemplateRenderer):
         return config.generated_path("dnsmasq.conf")
 
 
-def _fabric_zone(config: AppConfig) -> dict[str, Any] | None:
+def _fabric_zone(config: AppConfig) -> dict[str, Any]:
     """The hub answers the whole fabric zone from local data (D-66)."""
-    if not config.fabric.enabled:
-        return None
     from kornode.services.fabric_dns import FabricDnsService, dnsmasq_lines
 
     return {

@@ -854,7 +854,7 @@ def test_upstream_profile_saves_server_routing_fields(tmp_path: Path) -> None:
             "password": "secret",
             "route_host_enabled": True,
             "accept_server_routes": True,
-            "sync_url": "https://10.10.10.1:8443/",
+            "sync_url": "https://10.100.1.1:8443/",
             "sync_interval": 120,
             "sync_verify_tls": True,
             "enable": True,
@@ -864,7 +864,7 @@ def test_upstream_profile_saves_server_routing_fields(tmp_path: Path) -> None:
     assert response.status_code == 200
     profile = yaml.safe_load(config_path.read_text(encoding="utf-8"))["upstream"]["profiles"][0]
     assert profile["accept_server_routes"] is True
-    assert profile["sync_url"] == "https://10.10.10.1:8443"
+    assert profile["sync_url"] == "https://10.100.1.1:8443"
     assert profile["sync_interval"] == 120
     assert profile["sync_verify_tls"] is True
 

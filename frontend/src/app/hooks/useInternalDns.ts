@@ -10,7 +10,7 @@ import type { PanelCore } from "../core";
 export function useInternalDns(core: PanelCore, serverSettingsDraft: ServerSettingsDraft) {
   const { recordCommand, runAction, setNotice } = core;
   const [internalDnsDraft, setInternalDnsDraft] = useState<InternalDnsDraft>({
-    listen: "10.10.10.1",
+    listen: "10.100.1.1",
     port: 53,
     blocklistEnabled: false,
     localRecordsEnabled: false,

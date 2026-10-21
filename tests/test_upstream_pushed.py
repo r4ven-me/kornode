@@ -78,8 +78,8 @@ def _config(tmp_path: Path, **profile: object) -> AppConfig:
                 "secrets_dir": tmp_path / "secrets",
                 "log_dir": tmp_path / "logs",
             },
-            "server": {"ipv4_network": "10.99.0.0/24"},
-            "internal_dns": {"listen": "10.99.0.1"},
+            "server": {"ipv4_network": "10.77.0.0/24"},
+            "internal_dns": {"listen": "10.77.0.1"},
             "upstream": {
                 "enabled": True,
                 "profiles": [
@@ -308,7 +308,7 @@ def test_record_vpnc_event_ignores_other_events_and_interfaces(
 
 
 def test_sync_server_routes_uses_the_profile_tunnel(tmp_path: Path) -> None:
-    config = _config(tmp_path, sync_url="https://10.10.10.1:8443")
+    config = _config(tmp_path, sync_url="https://10.100.1.1:8443")
     body = json.dumps({"version": "v2", "routes": ["10.40.0.0/16"], "split_dns": ["intra.example"]})
     runner = FakeRunner({"curl": CommandResult(("curl",), 0, body, "")})
     service = UpstreamService(config, runner=runner)
@@ -320,7 +320,7 @@ def test_sync_server_routes_uses_the_profile_tunnel(tmp_path: Path) -> None:
     argv = runner.calls[0]
     assert argv[argv.index("--interface") + 1] == "oc-middle0"
     assert "--insecure" in argv
-    assert argv[-1] == "https://10.10.10.1:8443/api/client/routing"
+    assert argv[-1] == "https://10.100.1.1:8443/api/client/routing"
     assert synced.routes == ["10.40.0.0/16"]
     assert synced.domains == ["intra.example"]
     assert synced.dns == ["172.16.0.53"]  # kept from the handshake
@@ -337,7 +337,7 @@ def test_sync_server_routes_verifies_tls_when_asked(tmp_path: Path) -> None:
 
 
 def test_sync_failure_keeps_previous_lists_and_records_the_error(tmp_path: Path) -> None:
-    config = _config(tmp_path, sync_url="https://10.10.10.1:8443")
+    config = _config(tmp_path, sync_url="https://10.100.1.1:8443")
     runner = FakeRunner({"curl": CommandResult(("curl",), 22, "", "HTTP 403")})
     service = UpstreamService(config, runner=runner)
     profile = config.upstream.profiles[0]
@@ -353,7 +353,7 @@ def test_sync_failure_keeps_previous_lists_and_records_the_error(tmp_path: Path)
 def test_refresh_server_routes_skips_disconnected_and_recently_synced_profiles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = _config(tmp_path, sync_url="https://10.10.10.1:8443", sync_interval=60)
+    config = _config(tmp_path, sync_url="https://10.100.1.1:8443", sync_interval=60)
     runner = FakeRunner({"curl": CommandResult(("curl",), 0, "{}", "")})
     service = UpstreamService(config, runner=runner)
     profile = config.upstream.profiles[0]
@@ -402,13 +402,13 @@ def test_apply_server_routing_retries_after_a_failed_converge(tmp_path: Path) ->
 
 def test_status_warns_when_upstream_pushes_our_own_subnet(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    _store_pushed(config, routes=["10.99.0.0/24"], dns=["10.99.0.1"])
+    _store_pushed(config, routes=["10.77.0.0/24"], dns=["10.77.0.1"])
 
     status = UpstreamService(config, runner=FakeRunner()).server_routing_status(
         config.upstream.profiles[0]
     )
 
-    assert status["routes"] == ["10.99.0.0/24"]
+    assert status["routes"] == ["10.77.0.0/24"]
     warnings = status["warnings"]
     assert isinstance(warnings, list) and "server.ipv4_network" in warnings[0]
 

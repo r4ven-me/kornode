@@ -111,7 +111,7 @@ export function readServerSettingsDraft(config: Record<string, unknown>): Server
     device: readString(server.device, "vpns"),
     cn: readString(server.cn, "vpn.example.com"),
     realm: readString(server.realm, "Korvus VPN Server"),
-    ipv4Network: readString(server.ipv4_network, "10.10.10.0/24"),
+    ipv4Network: readString(server.ipv4_network, "10.100.1.0/24"),
     dns: readStringArray(server.dns).join("\n"),
     searchDomains: readStringArray(server.search_domains).join("\n"),
     routes: readStringArray(server.routes).join("\n"),
@@ -260,7 +260,6 @@ export type GeneralSettingsDraft = {
 
 export type FabricSettingsDraft = {
   nodeId: number;
-  enabled: boolean;
   cidr: string;
   clientPool: string;
   sourcePool: string;
@@ -274,7 +273,6 @@ export function readFabricSettingsDraft(config: Record<string, unknown>): Fabric
   const fabric = readRecord(config.fabric);
   return {
     nodeId: readNumber(node.id, 1),
-    enabled: readBoolean(fabric.enabled, false),
     cidr: readString(fabric.cidr, "10.99.0.0/24"),
     clientPool: readString(fabric.client_pool, "10.100.{id}.0/24"),
     sourcePool: readString(fabric.source_pool, "10.8.{id}.0/24"),

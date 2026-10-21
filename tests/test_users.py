@@ -95,7 +95,6 @@ def test_create_user_with_fabric_puts_user_in_clients(tmp_path: Path) -> None:
                 "generated_dir": tmp_path / "generated",
                 "secrets_dir": tmp_path / "secrets",
             },
-            "fabric": {"enabled": True},
             "auth": {"password": {"enabled": True}},
         }
     )

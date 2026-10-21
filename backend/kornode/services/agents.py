@@ -144,8 +144,6 @@ class AgentService:
 
     @contextmanager
     def exclusive(self) -> Iterator[None]:
-        if not self.config.fabric.enabled:
-            raise ManagementError(409, "disabled", "enable fabric before managing agents")
         path = self.config.system.data_dir / "control" / "management.lock"
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -217,10 +215,8 @@ class AgentService:
         return data
 
     def list(self) -> dict[str, Any]:
-        if not self.config.fabric.enabled:
-            return {"agents": [], "enabled": False}
         with self.registry() as r:
-            return {"agents": [self._view(n) for n in r.list_nodes() if n.id != 1], "enabled": True}
+            return {"agents": [self._view(n) for n in r.list_nodes() if n.id != 1]}
 
     def show(self, name: str) -> dict[str, Any]:
         with self.registry() as r:

@@ -111,7 +111,7 @@ def test_kernel_plan_reuses_one_net_plan_for_derived_checks(tmp_path: Path) -> N
 def test_overlapping_subnets_ignores_own_pool_route(tmp_path: Path) -> None:
     runner = FakeRunner(
         {
-            ("ip", "route", "show", "table", "all"): _ok("10.10.10.0/24 dev lo\n"),
+            ("ip", "route", "show", "table", "all"): _ok("10.100.1.0/24 dev lo\n"),
         }
     )
     service = DoctorService(_config(tmp_path), runner=runner, net=FakeNet())
@@ -124,7 +124,7 @@ def test_overlapping_subnets_ignores_own_pool_route(tmp_path: Path) -> None:
 def test_overlapping_subnets_detects_conflicting_route(tmp_path: Path) -> None:
     runner = FakeRunner(
         {
-            ("ip", "route", "show", "table", "all"): _ok("10.10.10.128/25 dev docker0\n"),
+            ("ip", "route", "show", "table", "all"): _ok("10.100.1.128/25 dev docker0\n"),
         }
     )
     service = DoctorService(_config(tmp_path), runner=runner, net=FakeNet())
@@ -132,7 +132,7 @@ def test_overlapping_subnets_detects_conflicting_route(tmp_path: Path) -> None:
     results = service.run()
 
     assert not results["overlapping-subnets"].ok
-    assert "10.10.10.128/25" in results["overlapping-subnets"].stderr
+    assert "10.100.1.128/25" in results["overlapping-subnets"].stderr
 
 
 def test_overlapping_subnets_detects_pushed_route_conflict(tmp_path: Path) -> None:
@@ -151,7 +151,7 @@ def test_overlapping_subnets_detects_pushed_route_conflict(tmp_path: Path) -> No
         },
     )
     profile = config.upstream.profiles[0]
-    PushedRoutingStore(config).save(profile, PushedRouting(routes=["10.10.10.64/28"]))
+    PushedRoutingStore(config).save(profile, PushedRouting(routes=["10.100.1.64/28"]))
     runner = FakeRunner(
         {
             ("ip", "route", "show", "table", "all"): _ok(""),
@@ -162,7 +162,7 @@ def test_overlapping_subnets_detects_pushed_route_conflict(tmp_path: Path) -> No
     results = service.run()
 
     assert not results["overlapping-subnets"].ok
-    assert "10.10.10.64/28" in results["overlapping-subnets"].stderr
+    assert "10.100.1.64/28" in results["overlapping-subnets"].stderr
 
 
 def test_nft_version_reports_both_versions(tmp_path: Path) -> None:

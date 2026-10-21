@@ -44,12 +44,12 @@ def test_group_config_service_writes_config_per_group(tmp_path: Path) -> None:
 
     result = GroupConfigService(config).save_group_config(
         "devops",
-        UserConfig(dns=["10.10.10.1"], routes=["10.20.0.0/16"], tunnel_all_dns=True),
+        UserConfig(dns=["10.100.1.1"], routes=["10.20.0.0/16"], tunnel_all_dns=True),
     )
 
     assert result.returncode == 0
     rendered = (tmp_path / "generated" / "groups" / "devops").read_text(encoding="utf-8")
-    assert "dns = 10.10.10.1" in rendered
+    assert "dns = 10.100.1.1" in rendered
     assert "route = 10.20.0.0/16" in rendered
     assert "tunnel-all-dns = true" in rendered
 

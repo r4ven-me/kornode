@@ -212,19 +212,6 @@ def test_node_records_go_with_the_node(world: World) -> None:
     assert world.env.registry.dns_records() == []
 
 
-def test_disabled_fabric_lists_nothing_and_refuses_changes(tmp_path: Path) -> None:
-    from kornode.config.models import AppConfig
-
-    config = AppConfig.model_validate({"system": {"data_dir": tmp_path / "data"}})
-    service = FabricDnsService(config)
-    assert service.list()["records"] == []
-    assert service.sync() is False
-    assert "fabric_dns" not in config.dnsmasq_active_reasons()
-    with pytest.raises(ManagementError) as raised:
-        service.add(record(name="web", type="A", value="10.0.0.1"))
-    assert raised.value.error == "disabled"
-
-
 def test_fabric_enables_hub_dnsmasq(world: World) -> None:
     assert "fabric_dns" in world.env.config.dnsmasq_active_reasons()
 

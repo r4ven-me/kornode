@@ -133,7 +133,7 @@ class DoctorService:
         because clients pin them and an expired one fails without any signal."""
         argv = ("registry", "access-certificates")
         path = self.config.system.data_dir / "registry.db"
-        if not self.config.fabric.enabled or not path.exists():
+        if not path.exists():
             return CommandResult(argv, 0, "no agent access listeners", "", False)
         from datetime import UTC, datetime, timedelta
 

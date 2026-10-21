@@ -29,7 +29,6 @@ class Env:
                     "log_dir": tmp_path / "logs",
                     "secrets_dir": tmp_path / "secrets",
                 },
-                "fabric": {"enabled": True},
                 "auth": {"password": {"enabled": True}},
             }
         )
