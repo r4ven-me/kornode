@@ -1,20 +1,22 @@
 # Prompt for the next session — P4-06 часть 2 + P5-03, P4-07, `e2e.yml`
 
-> **Состояние на 2026-10-21 (конец четвёртой сессии).** В `main` влиты PR #1…#3, P4-05, P4-06 часть 1,
-> фикс CI (`vite` 8.3.x) и **S-07 / D-71** (vhost фабрики по SNI, `main` = `999b06b`, CI зелёный: backend, frontend,
-> netlab). **Удаление `fabric.enabled`** лежит на ветке `redesign/p4-fabric-always-on` (коммит `b5a17e8` + правка
-> CRL): хаб всегда запускает фабрику, адреса всегда выводятся (пул клиентов `10.100.<id>.0/24`), ключ `fabric.enabled`
-> отвергается как неизвестный. Слияние локальным `git merge --no-ff`/fast-forward + `git push origin main` (CI на `main`
-> идёт по push; `gh` не работает, см. память `gh-keyring-blocks-cli`).
+> **Состояние на 2026-10-21 (конец четвёртой сессии).** В `main` влиты PR #1…#3, P4-05, P4-06
+> часть 1, фикс CI (`vite` 8.3.x), **S-07 / D-71** (vhost фабрики по SNI) и **удаление `fabric.enabled`** (хаб всегда
+> запускает фабрику). Всё слито локальным `git merge --no-ff`/fast-forward + `git push origin main` (`gh` не работает,
+> см. память `gh-keyring-blocks-cli`). **CI на `main` (`3366c2e`) зелёный: backend, frontend, netlab**; после него
+> коммитились только docs.
 >
-> Доказательства: S-07 — netlab `test_spike_p4_vhosts.py` 12 passed (ocserv 1.3.0), `make check` 1227 passed / 91
-> skipped, netlab на hub-VM 68 passed (A) и 67 passed + 1 флак `test_suppress_rule_…` (B; отдельно 2/2 passed), E2E
-> `routed` (A): 6 passed, 7 skipped. **Флаг-день D-71:** хаб и агенты обновляются вместе; образы базы для E2E-06 надо
-> пересобрать из слияния этой ветки (как при любом несовместимом контракте пакета).
+> Доказательства: spike S-07 — netlab `test_spike_p4_vhosts.py` 12 passed (ocserv 1.3.0 на hub-VM); `make lint
+> typecheck test render parity` зелёные на Python 3.13 и 3.12 (1223 passed / 91 skipped); netlab на hub-VM 68 passed
+> (на шаге «без флага» один тест — `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` — упал по таймауту
+> HTTP 2 с под нагрузкой, отдельно 2/2 passed; в CI-netlab зелёный); E2E `routed` (оба шага): 6 passed, 7 skipped —
+> NL-01, NL-02, NL-03, NL-04, NL-06, E2E-07. **Флаг-день D-71:** хаб и агенты обновляются вместе (новый хаб не пускает
+> агента, который идёт на хост клиентов); образы базы E2E-06 и переменные `E2E_PREVIOUS_*_IMAGE` надо пересобрать/
+> обновить из текущего `main` (см. пункт 5).
 >
 > **Не сделано:** P4-06 часть 2 вместе с P5-03 (модель egress хаба, удаление legacy-ключей), P4-07 (раздел Fabric в
 > панели/CLI/API), NL-05, NL-07…NL-09, прогон `e2e.yml` на GitHub Actions, `examples/` и README в формате v2 (P5-05;
-> они ещё используют явный пул `10.10.10.0/24`, это валидно).
+> они ещё используют явный пул `10.10.10.0/24`, это валидно), пересборка образов E2E-06.
 >
 > **Важно для продолжения:**
 > 1. Хост перезагружался: VM `debian13-kornode1..4` были выключены, их запускают `virsh -c qemu:///system start
@@ -46,7 +48,7 @@
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык — русский, обращайся ко мне «Ivan».
 Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (фаза P4), раздел «Дальнейшие
-действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-70, S-07), `docs/spec/07-fabric.md`,
+действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-71, S-07), `docs/spec/07-fabric.md`,
 `docs/runbooks/vm-e2e.md`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Что уже сделано (не переделывай)
@@ -87,7 +89,27 @@
   публикуется у agent-a, 9100 — у хаба в кейсе `routed`); VPN-клиент agent-b живёт в отдельном compose-сервисе
   `client`, иначе его внешний TLS попадает под политику `kornode.net` агента-b.
 - **P4-05** (D-68, источники агентов): doctor `foreign_nat_on_source` (nft + legacy iptables, читается только при уже загруженной таблице `nat`), один `missing_source`, `docs/sources.md`, E2E NL-06 (docker-сеть `source` 10.8.3.0/24 между контейнерами `node` и `client` agent-b: клиент ↔ хаб ↔ agent-a без NAT). Источники хаба и NL-05 не сделаны.
-- **P4-06 часть 1** (D-69, ветка `redesign/p4-06-exit-via-node`): `via: exit:<n>` для трафика агентов (`to: any`,
+- **S-07 / D-71 + удаление `fabric.enabled`** (четвёртая сессия): ocserv хаба имеет два хоста на одном 443/tcp,
+  выбор по TLS SNI. **Хост клиентов** (по умолчанию) сохраняет все методы входа из `auth.*` (пароль, сертификат,
+  OIDC, OTP); ограничение D-43 снято. **Vhost** `[vhost:fabric.<fabric.domain>]` (`FabricConfig.server_name`) —
+  агенты и enroll: свой сертификат `certs/fabric.crt` (CA хаба, SAN = имя, ключ сохраняется при перевыпуске →
+  стабильный pin; `CertificateService.ensure_fabric_certificate`, вызывается в `initialize_runtime`), `ca-cert` = CA
+  хаба, `crl`, `auth = plain[passwd=ocpasswd-enroll]` + `enable-auth = certificate`, `cert-user-oid 2.5.4.3`,
+  `cert-group-oid 2.5.4.11`, **`udp-port` повторяется в секции** (иначе нет DTLS), секция — последняя в файле. Guard
+  connect-script по `$VHOST` (`renderers/ocserv.py`): на vhost пускает только `agents`/`agent-<id>` из реестра и
+  `enroll`/`enroll-*`; на хосте клиентов не пускает в эти группы, пустая группа (OIDC) — норма. Enroll-аккаунты пишутся
+  в `secrets/ocpasswd-enroll` (`UserService.create_enroll_user`). Контракт: токен `sni`, пакет `hubs[].server_name`
+  (схема `bundle.v1.schema.json`), `HubConfig.server_name`, `DialSpec.server_name` → `--resolve=<имя>:<адрес хаба>
+  <имя>:<порт>`; `pin` в токене и пакете — pin `fabric.crt`. **`fabric.enabled` удалён** (ключ отвергается как
+  неизвестный): реестр, группы, enroll guard, DNS-зона фабрики (при `server.enabled`), программа
+  `registry-snapshot` — всегда; адреса выводятся всегда (пул клиентов `10.100.<id>.0/24` вместо `10.10.10.0/24`,
+  при явном `server.ipv4_network` `internal_dns.listen` следует за ним; `derive_fabric_defaults` больше не проверяет
+  DNS — это делает общий валидатор). API/панель: из Fabric settings убран переключатель, из ответов
+  `/api/control/status`, списков агентов и DNS — поля `enabled`/`fabric_enabled`. Найденные по дороге ошибки:
+  `GET /api/groups` падал на файле группы `agents` (теперь `RESERVED_GROUPS` пропускаются), `initialize_runtime`
+  не создавал CRL, нужный ocserv. Тесты нефабричного режима удалены (список — в CHANGELOG). Решение — D-71 в
+  `DECISIONS.md`, спека — `07-fabric.md`, `05-control-plane.md`, `01-addressing.md`, `10-migration.md`.
+- **P4-06 часть 1** (D-69, влита в `main`): `via: exit:<n>` для трафика агентов (`to: any`,
   `from` clients/sources, источник экспортирован; `host` и set/доменные назначения запрещены валидатором).
   Хаб выводит транзитные выходы из политик агентов в реестре (`HubNetInputs._transit_exits`), метит пакеты по
   **префиксу источника** (именованный набор `transit<n>_v4`, скрипт не зависит от подключений) в таблицу узла n
@@ -108,6 +130,11 @@
 ## Окружение
 - Используй `.venv`: `.venv/bin/python -m pytest`, `.venv/bin/python -m mypy --strict backend`,
   `.venv/bin/python -m ruff check backend tests` (не `ruff format` по всему репо). Системный python не годится.
+  **Перед пушем в `main` гонять все шаги CI backend:** `make lint typecheck test render parity PYTHON=.venv/bin/python`
+  (`make check` не включает `render` и `parity`; `typecheck` ещё проверяет `tests/e2e`). CI использует Python 3.12:
+  `uv venv --python 3.12 /tmp/v312 && VIRTUAL_ENV=/tmp/v312 uv pip install -e '.[dev]'`. Список шагов упавшего
+  джоба читается без токена: `GET https://api.github.com/repos/r4ven-me/kornode/actions/runs/<run>/jobs`.
+- Фронтенд: системный npm 9.2 падает на `vite` 8 (`edgesOut`); обновлять lock через `npx -y npm@11 update <пакет>`.
 - Shell пользователя — zsh: переменные с аргументами `ssh` не разбиваются. Используй функцию
   `vm() { ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 lans@192.168.122.123 "$@"; }`.
 - `gh` (аккаунт `r4ven-me`) сейчас **не работает** (заблокирован keyring, см. начало файла); `git push` по SSH работает.
@@ -117,7 +144,7 @@
   `rsync -a --delete` с исключением `/artifacts`, `.git`, `.venv`, `node_modules` в `~/kornode/`.
   Старый netlab-стенд `.30` недоступен; **netlab гоняется на hub-VM** (там поставлены `ocserv openconnect
   nftables gnutls-bin`, есть `tcpdump iproute2`): `sudo -n .venv/bin/python -m pytest -m netlab -q`
-  из `~/kornode` (полный набор ≈ 6,5 мин, 55 passed).
+  из `~/kornode` (полный набор ≈ 7 мин, 68 passed). В фоне: `(nohup sudo -n ... > /var/tmp/x.out 2>&1 < /dev/null &)`.
 - **E2E на hub:** `. ~/.e2e/env.sh; export TMPDIR=/var/tmp`, затем `.venv/bin/python -m tests.e2e preflight`
   и `.venv/bin/python -m pytest tests/e2e/test_routed_fabric.py --e2e-run -q --tb=short` (кейс `routed` целиком ≈ 25 мин, один сценарий 3–9 мин). Запускай в фоне (`nohup ... > /var/tmp/x.out`) и жди по `grep` в файле вывода,
   а не по `pgrep -f` (он находит собственную команду). После падения:
@@ -130,7 +157,7 @@
 ## Что делать дальше (по порядку)
 1. ~~Проверить CI на `main`~~ — сделано (vite 8.3.x, `main` зелёный).
 2. ~~Spike S-07~~ — сделано (D-71): vhost `fabric.<fabric.domain>`, отдельный сертификат `fabric.crt`, `ocpasswd-enroll`,
-   guard по `$VHOST`, токен `sni`, пакет `hubs[].server_name`; `fabric.enabled` удалён (ветка выше, влить после зелёного E2E).
+   guard по `$VHOST`, токен `sni`, пакет `hubs[].server_name`; `fabric.enabled` удалён и влит в `main`.
 2a. **P4-06 часть 2 вместе с P5-03** (D-69, D-70): модель egress хаба. Ключи `egress`/`sources`/`sets` в `config/models.py`
    **заменяют** старые ключи — `legacy_policy` и `kornode.config.legacy` удаляются, тесты v1-поведения тоже (списком в PR), валидация против ролей реестра, parity-поверхности
    `egress.hub`/`sources.hub` (CLI `egress show/edit/set/check`, `GET/PUT /api/egress`, `source add/del/list`,
@@ -160,21 +187,25 @@
 4. **Прогон `e2e.yml` на GitHub Actions**: настроено (см. начало файла). Нужно, чтобы владелец разблокировал keyring, затем
    `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрение деплоя (required reviewer — владелец).
    Раннер должен быть `online`; иначе смотреть `~/actions-runner/_diag/` на hub-VM.
-5. Известные нерешённые мелочи: E2E NL-04 один раз упал в полном прогоне (дамп маршрутов был полным, в одиночку и в
+5. **Пересобрать базу E2E-06 (флаг-день D-71):** образы «предыдущей версии» в registry-контейнере на hub-VM собраны до
+   vhost'ов и теперь несовместимы; собрать новые из текущего `main` тем же способом, что при слиянии PR #1, и обновить
+   `E2E_PREVIOUS_HUB_IMAGE`/`E2E_PREVIOUS_AGENT_IMAGE` (без работающего `gh` — только владелец).
+6. Известные нерешённые мелочи: нестабильный по таймауту `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table`
+   (netlab, HTTP 2 с; при повторе в одиночку проходит — если повторится в CI, поднять таймаут); E2E NL-04 один раз упал в полном прогоне (дамп маршрутов был полным, в одиночку и в
    повторе проходит); E2E-04 в цикле из 5 прогонов — 5 passed (если вернётся, снять `audit.jsonl` хаба по ходу
    прогона); сертификат слушателя access живёт 825 дней, обновление — `korctl agent access set <имя> --hostname H
    --reissue`, doctor хаба предупреждает за 30 дней; первый apply после рестарта *процесса* агента перезапускает ocserv
    (принято, D-67); E2E-06 использует образы из слияния PR #1 (registry-контейнер на hub-VM) — когда контракт пакета
    изменится несовместимо, собрать новые так же.
-6. Обновлять `PLAN.ru.md`, `ROADMAP.md`, `CHANGELOG.md` и этот файл вместе с изменениями; отчёт — по формату
+7. Обновлять `PLAN.ru.md`, `ROADMAP.md`, `CHANGELOG.md` и этот файл вместе с изменениями; отчёт — по формату
    из `CLAUDE.md` (что изменилось, ID задач, доказательства тестами, записи в `DECISIONS.md`).
 
 ## Что нужно от меня (напомни заранее)
 Разблокировать gnome-keyring (чтобы `gh` снова работал: PR, `gh workflow run`), одобрить деплой окружения
-`kornode-e2e` для первого прогона `e2e.yml`; решить, нужен ли `E2E_HUB_ADDRESS` (сейчас — адрес hub-VM). Push и слияние
+`kornode-e2e` для первого прогона `e2e.yml`; решить, нужен ли `E2E_HUB_ADDRESS` (сейчас — адрес hub-VM); обновить `E2E_PREVIOUS_*_IMAGE` после пересборки базы E2E-06. Push и слияние
 по задачам P4 мне разрешены (2026-10-20) — после зелёных проверок.
 
 ## Правила
-Каждая задача — по `CLAUDE.md`: spec → тесты → код → docs → `make check` → netlab. Тесты не ослаблять; если
+Каждая задача — по `CLAUDE.md`: spec → тесты → код → docs → `make lint typecheck test render parity` → netlab. Тесты не ослаблять; если
 тест кодирует убираемое поведение — удалить/обновить в том же PR и сказать об этом. Значимые изменения —
 локальным коммитом, `--no-verify` не использовать. Ядро трогает только `kornode.net`.
