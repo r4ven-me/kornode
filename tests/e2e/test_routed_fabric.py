@@ -14,7 +14,8 @@ from tests.e2e.inventory import E2EError
 pytestmark = pytest.mark.e2e
 
 BLOCKED = {
-    "E2E-07": "needs hub-attached sources and domain-set exits (hub egress model, P4-06 part 2)",
+    "E2E-07": "the domain/subnet-list half needs set exits (D-78); the full-tunnel half of a "
+    "hub source is test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_gone",
     "NL-05": "source client through upstream:office needs a source client and the ext upstream "
     "in one case (kill switch itself: client netlab suite); wg-easy image/kernel module absent",
     "NL-07": "P4 local delivery with the new egress model",
@@ -299,3 +300,59 @@ def test_e2e_07_client_of_agent_a_leaves_through_agent_b_and_fails_closed_when_i
         assert cluster.tcp_peer("ext", "agent-b", ext, client=True) == agent_b
     finally:
         cluster.call("agent-b", "access_client_stop")
+
+
+HUB_SOURCE_CLIENT = "10.8.1.20"
+
+
+@pytest.mark.e2e_case("routed")
+def test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_gone(
+    cluster: Cluster,
+) -> None:
+    """Spec E2E-07, full-tunnel half: a source attached to the hub (a docker network standing
+    in for wg-easy) has the hub rule `source -> any via exit:3`. Its internet traffic crosses
+    the fabric and agent-b (role exit) masquerades it; the hub's own uplink never carries it,
+    and with agent-b gone it gets nowhere."""
+    inventory = cluster.fleet.inventory
+    agent_b, ext = inventory.host("agent-b").address, inventory.host("ext").address
+    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
+    before = {role: cluster.status(role)["applied_version"] for role in ("agent-b",)}
+    cluster.call("hub", "exit_role")
+    interface = cluster.call("hub", "source_iface")["interface"]
+    cluster.call("hub", "hub_source_add", interface=interface)
+    cluster.call("hub", "hub_source_policy", interface=interface)
+    wait_for(
+        lambda: cluster.status("agent-b")["applied_version"] > before["agent-b"],
+        60,
+        "agent-b did not apply the bundle with the exit role and the hub source prefix",
+    )
+    cluster.call("hub", "client_route", routes=[f"{ext}/32"])
+
+    # Out through agent-b: ext sees agent-b's address, not the hub's and not the source's.
+    wait_for(
+        lambda: _peer_or_none(cluster, "ext", "hub", ext) == agent_b,
+        60,
+        "hub source traffic did not leave through agent-b",
+    )
+
+    cluster.call("agent-b", "stop")
+    time.sleep(15)  # the hub notices the session going away
+    try:
+        assert cluster.tcp_unreachable("ext", "hub", ext, client=True), (
+            "hub source traffic reached the internet while the exit node was down"
+        )
+    finally:
+        cluster.call("agent-b", "restart")
+    wait_for(lambda: cluster.ping("agent-b") == 204, 120, "agent-b did not reconnect")
+    wait_for(
+        lambda: _peer_or_none(cluster, "ext", "hub", ext) == agent_b,
+        60,
+        "hub source traffic did not recover through agent-b",
+    )
+
+
+def _peer_or_none(cluster: Cluster, listener: str, connector: str, host: str) -> str | None:
+    try:
+        return cluster.tcp_peer(listener, connector, host, client=True)
+    except E2EError:
+        return None
