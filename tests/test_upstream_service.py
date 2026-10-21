@@ -18,7 +18,6 @@ from kornode.services import upstream as upstream_module
 from kornode.services.command import CommandError, CommandResult
 from kornode.services.net import NetApplyError
 from kornode.services.upstream import UpstreamService
-from kornode.services.upstream_pushed import PushedRouting
 
 
 class FakeRunner:
@@ -141,7 +140,6 @@ def _upstream_config(tmp_path: Path, **upstream: object) -> dict[str, object]:
             "generated_dir": tmp_path / "generated",
             "secrets_dir": tmp_path / "secrets",
         },
-        "routing": {"fwmark": "0x0c01", "table_id": 1201},
         "upstream": {"enabled": True, **upstream},
     }
 
@@ -191,97 +189,6 @@ def test_upstream_profile_name_rejects_path_traversal_characters(tmp_path: Path)
         )
 
 
-def test_upstream_profile_host_routes_and_domains_are_validated(tmp_path: Path) -> None:
-    # host_routes/host_domains reuse the same _validate_cidr/_validate_domain
-    # helpers as routes/domains -- a malformed entry must be rejected the
-    # same way.
-    with pytest.raises(ValidationError):
-        AppConfig.model_validate(
-            _upstream_config(
-                tmp_path,
-                profiles=[
-                    {
-                        "name": "finance",
-                        "server": "vpn.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "route_host_enabled": True,
-                        "host_routes": ["not-a-cidr"],
-                    }
-                ],
-            )
-        )
-
-
-def test_upstream_profile_route_clients_enabled_defaults_true(tmp_path: Path) -> None:
-    # Compatibility default: existing configs that already populate
-    # routes/domains without ever having heard of route_clients_enabled must
-    # keep behaving as before (routes/domains active) after upgrading.
-    config = AppConfig.model_validate(
-        _upstream_config(
-            tmp_path,
-            profiles=[
-                {
-                    "name": "finance",
-                    "server": "vpn.example.com",
-                    "auth_type": "password",
-                    "username": "user",
-                    "routes": ["10.50.0.0/16"],
-                }
-            ],
-        )
-    )
-
-    assert config.upstream.profiles[0].route_clients_enabled is True
-    assert config.upstream.profiles[0].route_host_enabled is False
-
-
-def test_upstream_profile_relay_source_fields_are_validated_and_deduplicated(
-    tmp_path: Path,
-) -> None:
-    profile = AppConfig.model_validate(
-        _upstream_config(
-            tmp_path,
-            profiles=[
-                {
-                    "name": "finance",
-                    "server": "vpn.example.com",
-                    "auth_type": "password",
-                    "username": "user",
-                    # routes_files/domains_files are removed -- see
-                    # UpstreamProfileConfig.drop_legacy_static_files --
-                    # and are ignored rather than rejected.
-                    "routes_files": ["/lists/routes.txt", "/lists/routes.txt"],
-                    "domains_files": ["/lists/domains.txt", "/lists/domains.txt"],
-                    "routes_urls": ["https://lists.example.com/routes.txt"],
-                    "domains_urls": ["http://lists.example.com/domains.txt"],
-                }
-            ],
-        )
-    ).upstream.profiles[0]
-
-    assert not hasattr(profile, "routes_files")
-    assert not hasattr(profile, "domains_files")
-    assert profile.routes_urls == ["https://lists.example.com/routes.txt"]
-    assert profile.domains_urls == ["http://lists.example.com/domains.txt"]
-
-    with pytest.raises(ValidationError, match="HTTP"):
-        AppConfig.model_validate(
-            _upstream_config(
-                tmp_path,
-                profiles=[
-                    {
-                        "name": "finance",
-                        "server": "vpn.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "routes_urls": ["file:///lists/routes.txt"],
-                    }
-                ],
-            )
-        )
-
-
 def test_upstream_profiles_with_colliding_safe_names_are_rejected(tmp_path: Path) -> None:
     # "My-VPN" and "my_vpn" both normalize to the same generated target
     # name, which would collide in the reconciler's policy inputs.
@@ -296,7 +203,6 @@ def test_upstream_profiles_with_colliding_safe_names_are_rejected(tmp_path: Path
                         "auth_type": "password",
                         "username": "user",
                         "interface": "oc-a",
-                        "routes": ["10.1.0.0/16"],
                     },
                     {
                         "name": "my_vpn",
@@ -304,92 +210,9 @@ def test_upstream_profiles_with_colliding_safe_names_are_rejected(tmp_path: Path
                         "auth_type": "password",
                         "username": "user",
                         "interface": "oc-b",
-                        "routes": ["10.2.0.0/16"],
                     },
                 ],
             )
-        )
-
-
-def test_upstream_profiles_with_colliding_routing_offsets_are_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ValidationError, match="routing_offset"):
-        AppConfig.model_validate(
-            _upstream_config(
-                tmp_path,
-                profiles=[
-                    {
-                        "name": "a",
-                        "server": "a.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "interface": "oc-a",
-                        "routing_offset": 5,
-                    },
-                    {
-                        "name": "b",
-                        "server": "b.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "interface": "oc-b",
-                        "routing_offset": 5,
-                    },
-                ],
-            )
-        )
-
-
-def test_routing_fwmark_zero_is_rejected(tmp_path: Path) -> None:
-    # fwmark 0 is an unmarked packet's implicit mark -- using it would make
-    # the forward kill-switch's "oifname != <tunnel> drop" rule match
-    # virtually all forwarded traffic, not just what kornode marked.
-    with pytest.raises(ValidationError, match="must not be 0"):
-        AppConfig.model_validate(
-            {
-                "system": {
-                    "data_dir": tmp_path / "data",
-                    "generated_dir": tmp_path / "generated",
-                    "secrets_dir": tmp_path / "secrets",
-                },
-                "routing": {"fwmark": "0x0"},
-            }
-        )
-
-
-@pytest.mark.parametrize("table_id", [253, 254, 255])
-def test_routing_table_id_rejects_kernel_reserved_values(tmp_path: Path, table_id: int) -> None:
-    with pytest.raises(ValidationError, match="reserved"):
-        AppConfig.model_validate(
-            {
-                "system": {
-                    "data_dir": tmp_path / "data",
-                    "generated_dir": tmp_path / "generated",
-                    "secrets_dir": tmp_path / "secrets",
-                },
-                "routing": {"table_id": table_id},
-            }
-        )
-
-
-def test_derived_per_profile_table_id_rejects_kernel_reserved_values(tmp_path: Path) -> None:
-    # routing.table_id (252) + this profile's offset (1, the only profile)
-    # lands on 253, a kernel-reserved table -- must be rejected even though
-    # the top-level table_id itself is fine on its own.
-    with pytest.raises(ValidationError, match="reserved"):
-        AppConfig.model_validate(
-            _upstream_config(
-                tmp_path,
-                profiles=[
-                    {
-                        "name": "a",
-                        "server": "a.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "interface": "oc-a",
-                        "routes": ["10.1.0.0/16"],
-                    },
-                ],
-            )
-            | {"routing": {"fwmark": "0x0c01", "table_id": 252}}
         )
 
 
@@ -401,7 +224,6 @@ def test_openconnect_argv_always_uses_minimal_vpnc_script(tmp_path: Path) -> Non
                 "generated_dir": tmp_path / "generated",
                 "secrets_dir": tmp_path / "secrets",
             },
-            "routing": {"mode": "split"},
         }
     )
     profile = UpstreamProfileConfig(
@@ -946,7 +768,6 @@ def test_connect_active_converges_before_dialing_when_mode_not_direct(
     config = _config(tmp_path)
     config.upstream.profiles.append(_profile())
     config.upstream.active_profile = "primary"
-    assert config.routing.client_policy == "full"
     runner = FakeRunner(tmp_path)
     net = FakeNet()
     service = UpstreamService(config, runner=runner, net=net)
@@ -974,34 +795,6 @@ def test_connect_active_converges_after_successful_connect(
         runner.close()
 
     assert net.calls == ["converge", "converge"]
-
-
-def test_connect_restores_persisted_pushed_host_routes_after_restart(tmp_path: Path) -> None:
-    """A persisted fingerprint describes a previous process' runtime state.
-
-    After a restart it must not suppress the post-connect NFT restore once
-    the tunnel exists again.
-    """
-    config = _config(tmp_path)
-    profile = _profile()
-    profile.route_host_enabled = True
-    profile.accept_server_routes = True
-    config.upstream.profiles.append(profile)
-    config.upstream.enabled = True
-    config.upstream.active_profile = profile.name
-    runner = FakeRunner(tmp_path)
-    net = FakeNet()
-    service = UpstreamService(config, runner=runner, net=net)
-    service.pushed.save(profile, PushedRouting(routes=["10.90.0.0/16"]))
-    service.pushed.mark_applied(service.pushed.fingerprint())
-
-    try:
-        service.connect_active()
-    finally:
-        runner.close()
-
-    assert net.calls == ["converge", "converge", "converge"]
-    assert service.pushed.applied_fingerprint() == service.pushed.fingerprint()
 
 
 def test_disconnect_converges_after_tunnel_is_gone(tmp_path: Path) -> None:
@@ -1035,7 +828,6 @@ def test_connect_converges_for_a_named_target_even_when_not_active(
             auth_type="password",
             username="user",
             interface="oc-finance",
-            routes=["10.50.0.0/16"],
         )
     )
     config.upstream.enabled = True
@@ -1065,7 +857,6 @@ def test_disconnect_converges_for_a_named_target(tmp_path: Path) -> None:
             auth_type="password",
             username="user",
             interface="oc-finance",
-            routes=["10.50.0.0/16"],
         )
     )
     config.upstream.enabled = True
@@ -1822,8 +1613,7 @@ def test_watchdog_logs_every_failed_healthcheck_with_streak(
                 "secrets_dir": tmp_path / "secrets",
                 "log_dir": tmp_path / "logs",
             },
-            "routing": {"fwmark": "0x0c01", "table_id": 1201},
-            "upstream": {
+                "upstream": {
                 "enabled": True,
                 "check_interval": 1,
                 "check_threshold": 2,
@@ -1854,7 +1644,6 @@ def test_watchdog_logs_every_failed_healthcheck_with_streak(
 
     monkeypatch.setattr(UpstreamService, "recover", _fake_recover)
     monkeypatch.setattr(UpstreamService, "enforce_profile_enablement", lambda self: [])
-    monkeypatch.setattr(UpstreamService, "refresh_server_routes", lambda self: None)
 
     class _StopLoop(Exception):
         pass
@@ -1927,7 +1716,6 @@ def test_watchdog_respects_connect_on_boot_until_first_connection(
         lambda self: recover_calls.append(None) or True,
     )
     monkeypatch.setattr(UpstreamService, "enforce_profile_enablement", lambda self: [])
-    monkeypatch.setattr(UpstreamService, "refresh_server_routes", lambda self: None)
 
     class _StopLoop(Exception):
         pass
@@ -2124,43 +1912,6 @@ def test_external_interface_profile_does_not_require_server_or_auth(tmp_path: Pa
     profile = config.upstream.profiles[0]
     assert profile.server is None
     assert profile.interface == "wg0"
-
-
-def test_external_interface_profile_forbids_accept_server_routes(tmp_path: Path) -> None:
-    # No vpnc-script handshake exists for a plain externally-managed
-    # interface, so there's nothing to receive pushed routes/domains from.
-    with pytest.raises(ValidationError, match="require kind='openconnect'"):
-        AppConfig.model_validate(
-            _upstream_config(
-                tmp_path,
-                profiles=[
-                    {
-                        "name": "wg",
-                        "kind": "external_interface",
-                        "interface": "wg0",
-                        "route_host_enabled": True,
-                        "accept_server_routes": True,
-                    }
-                ],
-            )
-        )
-
-
-def test_external_interface_profile_forbids_sync_url(tmp_path: Path) -> None:
-    with pytest.raises(ValidationError, match="require kind='openconnect'"):
-        AppConfig.model_validate(
-            _upstream_config(
-                tmp_path,
-                profiles=[
-                    {
-                        "name": "wg",
-                        "kind": "external_interface",
-                        "interface": "wg0",
-                        "sync_url": "https://10.100.1.1:8443",
-                    }
-                ],
-            )
-        )
 
 
 def test_openconnect_profile_still_requires_server(tmp_path: Path) -> None:

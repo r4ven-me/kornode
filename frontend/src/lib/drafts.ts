@@ -9,34 +9,16 @@ export function splitLines(value: string): string[] {
     .filter((item) => item.length > 0);
 }
 
-export function readRoutingDraft(config: Record<string, unknown>): {
-  clientPolicy: string;
-  hostPolicy: string;
+export type RoutingDraft = {
   hostDns: string;
   mainInterface: string;
-  fwmark: string;
-  tableId: number;
-  nftPrefix: string;
-  routesUrlsText: string;
-  domainsUrlsText: string;
-  hostRoutesUrlsText: string;
-  hostDomainsUrlsText: string;
-} {
+};
+
+export function readRoutingDraft(config: Record<string, unknown>): RoutingDraft {
   const routing = readRecord(config.routing);
-  const split = readRecord(routing.split);
-  const hostSplit = readRecord(routing.host_split);
   return {
-    clientPolicy: readString(routing.client_policy, "full"),
-    hostPolicy: readString(routing.host_policy, "off"),
     hostDns: readString(routing.host_dns, "off"),
-    mainInterface: readString(routing.main_interface, "auto"),
-    fwmark: readString(routing.fwmark, "0x0c01"),
-    tableId: readNumber(routing.table_id, 1201),
-    nftPrefix: readString(routing.nft_prefix, "kornode"),
-    routesUrlsText: readStringArray(split.routes_urls).join("\n"),
-    domainsUrlsText: readStringArray(split.domains_urls).join("\n"),
-    hostRoutesUrlsText: readStringArray(hostSplit.routes_urls).join("\n"),
-    hostDomainsUrlsText: readStringArray(hostSplit.domains_urls).join("\n")
+    mainInterface: readString(routing.main_interface, "auto")
   };
 }
 

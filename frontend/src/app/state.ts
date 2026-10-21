@@ -1,5 +1,4 @@
 import { Activity, FileSliders, type LucideIcon, Network, ScrollText, Server, ShieldCheck, Terminal, Users } from "lucide-react";
-import { listText } from "../lib/userConfig";
 import type { UpstreamProfile, UpstreamProfileDraft, UserConfig } from "../api";
 import type { AppState, Tab } from "./types";
 
@@ -13,14 +12,6 @@ export const emptyState: AppState = {
   groups: [],
   otpRecords: [],
   sessions: [],
-  routes: [],
-  domains: [],
-  routesStatus: null,
-  domainsStatus: null,
-  hostRoutes: [],
-  hostDomains: [],
-  hostRoutesStatus: null,
-  hostDomainsStatus: null,
   upstream: null,
   upstreamProfiles: [],
   identity: null,
@@ -86,19 +77,6 @@ export const emptyUpstreamProfileDraft: UpstreamProfileDraft = {
   server_cert_pin: "",
   check_host: "",
   camouflage_secret: "",
-  route_clients_enabled: false,
-  routes: "",
-  domains: "",
-  routesUrlsText: "",
-  domainsUrlsText: "",
-  route_host_enabled: false,
-  host_routes: "",
-  host_domains: "",
-  accept_server_routes: false,
-  sync_url: "",
-  sync_interval: "60",
-  sync_verify_tls: false,
-  routing_offset: "",
   enabled: false
 };
 
@@ -123,19 +101,6 @@ export function upstreamProfileToDraft(profile: UpstreamProfile): UpstreamProfil
     // write-only, never sent back by the API (same as password/cert_pass);
     // leaving it blank on save keeps whatever secret is already stored.
     camouflage_secret: "",
-    route_clients_enabled: profile.route_clients_enabled ?? true,
-    routes: listText(profile.routes ?? []),
-    domains: listText(profile.domains ?? []),
-    routesUrlsText: listText(profile.routes_urls ?? []),
-    domainsUrlsText: listText(profile.domains_urls ?? []),
-    route_host_enabled: profile.route_host_enabled ?? false,
-    host_routes: listText(profile.host_routes ?? []),
-    host_domains: listText(profile.host_domains ?? []),
-    accept_server_routes: profile.accept_server_routes ?? false,
-    sync_url: profile.sync_url ?? "",
-    sync_interval: String(profile.sync_interval ?? 60),
-    sync_verify_tls: profile.sync_verify_tls ?? false,
-    routing_offset: profile.routing_offset != null ? String(profile.routing_offset) : "",
     enabled: profile.enabled
   };
 }

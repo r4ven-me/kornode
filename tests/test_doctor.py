@@ -12,7 +12,6 @@ from kornode.api.auth import require_admin
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult
 from kornode.services.doctor import DoctorService
-from kornode.services.upstream_pushed import PushedRouting, PushedRoutingStore
 
 
 class FakeRunner:
@@ -135,36 +134,6 @@ def test_overlapping_subnets_detects_conflicting_route(tmp_path: Path) -> None:
     assert "10.100.1.128/25" in results["overlapping-subnets"].stderr
 
 
-def test_overlapping_subnets_detects_pushed_route_conflict(tmp_path: Path) -> None:
-    config = _config(
-        tmp_path,
-        upstream={
-            "enabled": True,
-            "profiles": [
-                {
-                    "name": "primary",
-                    "server": "vpn.example.com",
-                    "auth_type": "password",
-                    "username": "user",
-                }
-            ],
-        },
-    )
-    profile = config.upstream.profiles[0]
-    PushedRoutingStore(config).save(profile, PushedRouting(routes=["10.100.1.64/28"]))
-    runner = FakeRunner(
-        {
-            ("ip", "route", "show", "table", "all"): _ok(""),
-        }
-    )
-    service = DoctorService(config, runner=runner, net=FakeNet())
-
-    results = service.run()
-
-    assert not results["overlapping-subnets"].ok
-    assert "10.100.1.64/28" in results["overlapping-subnets"].stderr
-
-
 def test_nft_version_reports_both_versions(tmp_path: Path) -> None:
     runner = FakeRunner(
         {
@@ -200,7 +169,6 @@ def test_nft_version_fails_when_nft_missing(tmp_path: Path) -> None:
 def _connected_profile_config(tmp_path: Path, server: str = "203.0.113.10") -> AppConfig:
     config = _config(
         tmp_path,
-        routing={"fwmark": "0x0c01", "table_id": 1201},
         upstream={
             "enabled": True,
             "active_profile": "primary",

@@ -28,15 +28,15 @@ def test_dnsmasq_render_forward_domains_with_multiple_upstreams(tmp_path: Path) 
     assert rendered.count("server=/github.com/") == 2
 
 
-def test_dnsmasq_render_does_not_mention_split_routing_domains(tmp_path: Path) -> None:
-    # routing.split.domains are resolved into their nftables set by
-    # DomainResolverService now (see tests/test_domain_resolver.py), not by
-    # dnsmasq answering a live query -- dnsmasq doesn't need to know about
-    # them at all any more.
+def test_dnsmasq_render_does_not_mention_policy_domains(tmp_path: Path) -> None:
+    # The policy's domains are resolved into their nftables set by
+    # DomainResolverService (see tests/test_domain_resolver.py), not by dnsmasq
+    # answering a live query -- dnsmasq doesn't need to know about them.
     config = load_config(
         tmp_path / "missing.yaml",
         cli_overrides={
-            "routing": {"client_policy": "split", "split": {"domains": ["example.com"]}}
+            "sets": {"corp": {"domains": ["example.com"]}},
+            "egress": [{"from": ["clients"], "to": {"set": "corp"}, "via": "local"}],
         },
         environ={},
     )
@@ -108,41 +108,3 @@ def test_dnsmasq_render_includes_local_records(tmp_path: Path) -> None:
     assert "address=/printer/10.11.11.6" in rendered
 
 
-def test_dnsmasq_render_does_not_mention_named_target_or_host_split_domains(
-    tmp_path: Path,
-) -> None:
-    # A profile's own domains/host_domains and routing.host_split's domains
-    # are all resolved by DomainResolverService now -- none of them need
-    # anything from dnsmasq (unlike a profile's server-pushed domains, see
-    # test_upstream_pushed.py, which still need a server=/domain/... answer
-    # override).
-    config = load_config(
-        tmp_path / "missing.yaml",
-        cli_overrides={
-            "routing": {
-                "host_policy": "split",
-                "host_split": {"domains": ["intranet.example"]},
-            },
-            "upstream": {
-                "enabled": True,
-                "profiles": [
-                    {
-                        "name": "finance",
-                        "server": "finance.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "domains": ["finance-internal.corp"],
-                        "route_host_enabled": True,
-                        "host_domains": ["finance-host.corp"],
-                    }
-                ],
-            },
-        },
-        environ={},
-    )
-
-    rendered = DnsmasqConfigRenderer().render(config)
-
-    assert "intranet.example" not in rendered
-    assert "finance-internal.corp" not in rendered
-    assert "finance-host.corp" not in rendered

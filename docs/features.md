@@ -106,42 +106,25 @@ Required:
 - trusted cert option;
 - cert/password/p12 auth support;
 - secret masking;
-- per-profile HOST routing (`route_host_enabled`/`host_routes`/`host_domains`),
-  independent of client-side targeting and of the global `routing.host_policy`;
-- accept server-pushed routes and split-DNS domains (`accept_server_routes`),
-  merged into the per-profile host routing above;
-- mid-session sync of those pushed lists on the live tunnel (`sync_url`/
-  `sync_interval`, `korctl upstream sync`), without reconnecting;
 - optional client-only deployment (`server.enabled: false`): upstream/host
   routing with no VPN server of its own.
 
 ## Routing
 
-Required modes (only meaningful with upstream enabled -- otherwise clients always get
-plain NAT through the host):
+What leaves the hub and where is one declarative policy: `egress` rules (first match wins),
+named `sources` (wg-easy, Amnezia) and destination `sets` of routes and domains
+(`docs/spec/02-egress-and-sources.md`). A rule says `from` (clients, host, fabric, a source),
+`to` (any, a set, inline routes/domains, a node) and `via` (local, fabric, drop,
+`upstream:<profile>`, `exit:<node>`). Traffic of clients and sources that no rule matches
+is dropped; without an `egress` key clients leave through the uplink (D-72).
 
-- full;
-- split.
+Supported:
 
-Split mode supports:
-
-- static subnets;
-- static IPs;
-- domains from YAML;
-- domains from file;
-- dnsmasq integration;
-- nftables sets for resolved domain IPs;
-- fwmark-based policy routing;
-- dedicated route table;
-- reload without full container restart where possible.
-
-Also supported:
-
-- host-traffic routing (full/split), independent of client_policy;
-- per-upstream-profile targeted routes/domains, each with its own fwmark/table/kill-switch,
-  regardless of which profile is active;
-- host DNS handoff to the built-in dnsmasq (`routing.host_dns`: `resolv_conf`/`resolved`),
-  so domain-based host routing applies to the host's own lookups too.
+- static subnets and IPs, domains (resolved by the service into nftables sets);
+- policy routing and kill switch per exit, allocated by the compiler (marks and tables are
+  not configuration);
+- editing through `korctl egress|source`, `/api/egress`, `/api/sources` and the Network page;
+- host DNS handoff to the built-in dnsmasq (`routing.host_dns`: `resolv_conf`/`resolved`).
 
 ## GUI pages
 

@@ -52,7 +52,7 @@ export function DashboardView({
       <section className="metric-grid">
         <Metric label="Users" value={state.users.length.toString()} />
         <Metric label="Sessions" value={state.sessions.length.toString()} />
-        <Metric label="Routes" value={state.routes.length.toString()} />
+        <Metric label="Upstream profiles" value={state.upstreamProfiles.length.toString()} />
         <Metric label="Diagnostics" value={`${diagnosticScore.ok}/${diagnosticScore.total}`} />
         <Metric
           label="Processes"

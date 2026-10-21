@@ -6,7 +6,7 @@ from kornode.services.diagnostics import DiagnosticProbe, DiagnosticsService
 
 
 def test_missing_nft_table_warns_when_routing_needs_nftables() -> None:
-    config = AppConfig.model_validate({"routing": {"mode": "split"}})
+    config = AppConfig.model_validate({})
     probe = DiagnosticProbe("nft nat table", ("nft", "list", "table", "ip", "kornode_nat"))
     result = CommandResult(probe.argv, 1, "", "Error: No such file or directory")
 

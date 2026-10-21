@@ -46,7 +46,7 @@ def _config(tmp_path: Path) -> AppConfig:
                 "enabled": True,
                 "profiles": [{"name": "main", "server": "203.0.113.2", "username": "u"}],
             },
-            "routing": {"client_policy": "full"},
+            "egress": [{"from": ["clients"], "to": "any", "via": "upstream:main"}],
         }
     )
 

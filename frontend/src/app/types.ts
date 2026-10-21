@@ -1,4 +1,4 @@
-import type { CertificateInfo, CertificateStatus, CommandResult, ConfigSource, DiagnosticResult, DoctorResult, GroupConfigRecord, Health, IdentityStatus, InternalDnsStatus, LogFile, OtpRecord, ProcessStatus, RevokedCertificate, RoutingListStatus, SessionRecord, SoftwareVersion, UpstreamProfile, UpstreamStatus, UserConfig, UserRecord } from "../api";
+import type { CertificateInfo, CertificateStatus, CommandResult, ConfigSource, DiagnosticResult, DoctorResult, GroupConfigRecord, Health, IdentityStatus, InternalDnsStatus, LogFile, OtpRecord, ProcessStatus, RevokedCertificate, SessionRecord, SoftwareVersion, UpstreamProfile, UpstreamStatus, UserConfig, UserRecord } from "../api";
 
 export type Tab =
   | "dashboard"
@@ -25,10 +25,8 @@ export type ConfigSection =
   | "web"
   | "advanced";
 
-// "routing" is no longer its own nav section (its settings live inside the
-// "upstream" section's Profiles/Routing tabs, see views/upstream/UpstreamView.tsx)
-// but is kept as a distinct command-output/busy key so its network/route
-// actions don't clobber the Profiles tab's own last-command panel.
+// "routing" is not a nav section (host DNS / main interface live in the
+// Upstream settings dialog) but is kept as a distinct command-output key.
 export type CommandOutputKey = Tab | ConfigSection | "routing";
 
 export const configSections: Array<{ id: ConfigSection; label: string }> = [
@@ -136,14 +134,6 @@ export type AppState = {
   groups: GroupConfigRecord[];
   otpRecords: OtpRecord[];
   sessions: SessionRecord[];
-  routes: string[];
-  domains: string[];
-  routesStatus: RoutingListStatus | null;
-  domainsStatus: RoutingListStatus | null;
-  hostRoutes: string[];
-  hostDomains: string[];
-  hostRoutesStatus: RoutingListStatus | null;
-  hostDomainsStatus: RoutingListStatus | null;
   upstream: UpstreamStatus | null;
   upstreamProfiles: UpstreamProfile[];
   identity: IdentityStatus | null;

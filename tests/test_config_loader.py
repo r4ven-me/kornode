@@ -56,7 +56,7 @@ def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     assert config.fabric.enroll_pool == "10.99.255.240/28"
     assert config.server.port == 443
     assert config.web.enabled is False
-    assert config.routing.client_policy == "full"
+    assert config.egress[0].via == "local"  # D-72: clients reach the internet by default
     assert config.system.log_rotation.enabled is False
     assert config.certificates.letsencrypt.auto_renew_interval == 7
     assert config.certificates.letsencrypt.auto_renew_interval_unit == "days"

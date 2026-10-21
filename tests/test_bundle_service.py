@@ -12,6 +12,7 @@ from kornode.bundle.sealing import public_bytes, walk_sealed
 from kornode.bundle.signing import key_id
 from kornode.bundle.validator import validate
 from kornode.config.models import AppConfig
+from kornode.net.model import Source
 from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.repository import Registry
 from kornode.services.bundle import BundleService
@@ -238,3 +239,20 @@ def test_rotated_seal_key_produces_new_version(env: Env) -> None:
 
     assert second.version == first.version + 1
     env.check(second)
+
+
+def test_exported_hub_sources_are_fabric_prefixes_of_node_1(env: Env) -> None:
+    env.service.config = env.config.model_copy(
+        update={
+            "sources": (
+                Source(name="wg", interface="wg0", cidr="10.8.1.0/24"),
+                Source(name="hidden", interface="wg1", cidr="10.8.2.0/24", export=False),
+            )
+        }
+    )
+    env.add(3)
+
+    result = env.check(env.compile(3))
+
+    hub = {(p.prefix, p.kind) for p in result.bundle.fabric.prefixes if p.node_id == 1}
+    assert hub == {("10.99.0.0/24", "fabric"), ("10.100.1.0/24", "pool"), ("10.8.1.0/24", "source")}

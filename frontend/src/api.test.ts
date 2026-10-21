@@ -86,19 +86,6 @@ const upstreamProfileDraft: UpstreamProfileDraft = {
   server_cert_pin: "",
   check_host: "",
   camouflage_secret: "",
-  route_clients_enabled: false,
-  routes: "",
-  domains: "",
-  routesUrlsText: "",
-  domainsUrlsText: "",
-  route_host_enabled: false,
-  host_routes: "",
-  host_domains: "",
-  accept_server_routes: false,
-  sync_url: "",
-  sync_interval: "60",
-  sync_verify_tls: false,
-  routing_offset: "",
   enabled: true
 };
 
@@ -179,101 +166,8 @@ describe("saveFabricSettings", () => {
   });
 });
 
-describe("saveUpstreamProfile server routing fields", () => {
-  it("sends the sync settings normalized, a blank sync URL as null", async () => {
-    const fetchMock = vi.fn().mockImplementation(
-      async () =>
-        new Response(JSON.stringify({ status: "saved" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await saveUpstreamProfile("session", {
-      ...upstreamProfileDraft,
-      accept_server_routes: true,
-      sync_url: " https://10.10.10.1:8443 ",
-      sync_interval: "120",
-      sync_verify_tls: true
-    });
-    await saveUpstreamProfile("session", { ...upstreamProfileDraft, sync_interval: "" });
-
-    const withSync = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
-    expect(withSync.accept_server_routes).toBe(true);
-    expect(withSync.sync_url).toBe("https://10.10.10.1:8443");
-    expect(withSync.sync_interval).toBe(120);
-    expect(withSync.sync_verify_tls).toBe(true);
-    const blank = JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body));
-    expect(blank.sync_url).toBeNull();
-    expect(blank.sync_interval).toBe(60);
-  });
-});
-
 describe("saveUpstreamProfile", () => {
-  it("splits the newline/comma-separated routes and domains textareas into arrays", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ status: "saved" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await saveUpstreamProfile("session", {
-      ...upstreamProfileDraft,
-      routes: "10.50.0.0/16, 10.60.0.0/16\n10.70.0.0/16",
-      domains: "internal.example.com,\ncorp.example.com"
-    });
-
-    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(path).toBe("/api/upstream/profiles");
-    const sent = JSON.parse(String(init.body));
-    expect(sent.routes).toEqual(["10.50.0.0/16", "10.60.0.0/16", "10.70.0.0/16"]);
-    expect(sent.domains).toEqual(["internal.example.com", "corp.example.com"]);
-  });
-
-  it("splits the host routes/domains textareas the same way as the client ones", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ status: "saved" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await saveUpstreamProfile("session", {
-      ...upstreamProfileDraft,
-      route_host_enabled: true,
-      host_routes: "10.90.0.0/16, 10.91.0.0/16",
-      host_domains: "finance-internal.corp"
-    });
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const sent = JSON.parse(String(init.body));
-    expect(sent.host_routes).toEqual(["10.90.0.0/16", "10.91.0.0/16"]);
-    expect(sent.host_domains).toEqual(["finance-internal.corp"]);
-  });
-
-  it("sends routing_offset as a number, or null when left blank", async () => {
-    const fetchMock = vi.fn().mockImplementation(
-      async () =>
-        new Response(JSON.stringify({ status: "saved" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        })
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await saveUpstreamProfile("session", { ...upstreamProfileDraft, routing_offset: "5" });
-    await saveUpstreamProfile("session", { ...upstreamProfileDraft, routing_offset: " " });
-
-    const sent = fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)));
-    expect(sent[0].routing_offset).toBe(5);
-    expect(sent[1].routing_offset).toBeNull();
-  });
-
-  it("sends an empty array, not a list with a blank string, for an empty textarea", async () => {
+  it("sends no v1 routing fields", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "saved" }), {
         status: 200,
@@ -284,10 +178,16 @@ describe("saveUpstreamProfile", () => {
 
     await saveUpstreamProfile("session", upstreamProfileDraft);
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe("/api/upstream/profiles");
     const sent = JSON.parse(String(init.body));
-    expect(sent.routes).toEqual([]);
-    expect(sent.domains).toEqual([]);
+    for (const key of [
+      "route_clients_enabled", "routes", "domains", "routes_urls", "domains_urls",
+      "route_host_enabled", "host_routes", "host_domains", "accept_server_routes",
+      "sync_url", "sync_interval", "sync_verify_tls", "routing_offset"
+    ]) {
+      expect(sent).not.toHaveProperty(key);
+    }
   });
 });
 
@@ -347,7 +247,7 @@ describe("internal DNS settings API", () => {
 });
 
 describe("saveRoutingSettings", () => {
-  it("sends host_policy alongside the rest of the routing payload", async () => {
+  it("sends only host_dns and main_interface", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "saved" }), {
         status: 200,
@@ -356,25 +256,14 @@ describe("saveRoutingSettings", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await saveRoutingSettings("session", {
-      client_policy: "split",
-      host_policy: "split",
-      host_dns: "resolv_conf",
-      main_interface: "auto",
-      fwmark: "0x0c01",
-      table_id: 1201,
-      nft_prefix: "kornode",
-      routes_urls: [],
-      domains_urls: [],
-      host_routes_urls: [],
-      host_domains_urls: []
-    });
+    await saveRoutingSettings("session", { host_dns: "resolv_conf", main_interface: "auto" });
 
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(path).toBe("/api/routing/settings");
-    const sent = JSON.parse(String(init.body));
-    expect(sent.host_policy).toBe("split");
-    expect(sent.host_dns).toBe("resolv_conf");
+    expect(JSON.parse(String(init.body))).toEqual({
+      host_dns: "resolv_conf",
+      main_interface: "auto"
+    });
   });
 });
 

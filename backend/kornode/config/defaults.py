@@ -120,27 +120,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "profiles": [],
     },
     "routing": {
-        # client_policy/host_policy keep their model defaults here on purpose:
-        # a default in this dict would be deep-merged under legacy YAML keys
-        # and shadow the migration in RoutingConfig.
         "host_dns": "off",
         "main_interface": "auto",
-        "fwmark": "0x0c01",
-        "table_id": 1201,
-        "nft_prefix": "kornode",
-        "split": {
-            "routes_file": "/var/lib/kornode/routes.txt",
-            "domains_file": "/var/lib/kornode/domains.txt",
-            "routes": [],
-            "domains": [],
-        },
     },
     "internal_dns": {
         # listen and upstreams keep their model defaults here on purpose:
         # AppConfig.migrate_legacy_dns_keys needs "listen" absent to tell
         # "not set" from "set to the default", so it can recompute listen
-        # from a customized server.ipv4_network. Same reasoning as
-        # client_policy/host_policy in routing above for upstreams.
+        # from a customized server.ipv4_network.
         "port": 53,
         "blocklist_enabled": False,
         "local_records_enabled": False,

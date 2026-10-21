@@ -12,6 +12,7 @@ import typer
 import yaml
 
 from kornode.cli_agents import register as register_agent_commands
+from kornode.cli_egress import register as register_egress_commands
 from kornode.cli_hub import register as register_hub_commands
 from kornode.config.defaults import DEFAULT_CONFIG
 from kornode.config.env import combined_environment, env_overrides_from_mapping
@@ -39,7 +40,6 @@ from kornode.services.logs import LogRotationService, LogService
 from kornode.services.net import NetApplyError, NetService, run_reconciler
 from kornode.services.otp import OtpService
 from kornode.services.password_hash import hash_password
-from kornode.services.routing import RoutingService
 from kornode.services.secrets import collect_config_secrets, mask_text
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificateService
@@ -60,8 +60,7 @@ user_p12_app = typer.Typer(help="Export user PKCS#12 bundles")
 user_otp_app = typer.Typer(help="Manage user OTP")
 sessions_app = typer.Typer(help="Inspect and disconnect sessions")
 upstream_app = typer.Typer(help="Manage upstream OpenConnect profiles")
-routes_app = typer.Typer(help="Manage split routes")
-domains_app = typer.Typer(help="Manage split domains")
+domains_app = typer.Typer(help="Resolve the domains of the egress policy")
 internal_dns_app = typer.Typer(help="Manage the Internal DNS server and its blocklist")
 identity_app = typer.Typer(help="Manage identity providers and group policies")
 identity_oidc_app = typer.Typer(help="Manage OIDC connector settings")
@@ -612,66 +611,6 @@ def upstream_disconnect(
     echo_result(UpstreamService(get_config()).disconnect(profile or None, dry_run=dry_run))
 
 
-@upstream_app.command("hook")
-def upstream_hook(
-    reason: str = typer.Argument(help="vpnc-script event: connect/reconnect/disconnect/..."),
-) -> None:
-    """Internal: called by vpnc-script-kornode on tunnel events.
-
-    Stores the routes/split-DNS domains the upstream server pushed in the
-    handshake (openconnect's CISCO_SPLIT_INC_*/CISCO_SPLIT_DNS environment)
-    for the profile owning $TUNDEV. Never fails: it runs inside
-    openconnect's own connect sequence.
-    """
-    try:
-        config = get_config()
-        profile = UpstreamService(config).record_vpnc_event(reason)
-        if profile is not None:
-            NetService(config).wake()
-    except Exception as exc:  # noqa: BLE001 - must never break the tunnel
-        typer.echo(f"upstream hook failed: {exc}", err=True)
-        return
-    if profile is not None:
-        typer.echo(f"stored server-pushed routing for profile '{profile.name}'")
-
-
-@upstream_app.command("server-routes")
-def upstream_server_routes(
-    profile: str = typer.Argument(None, help="Profile (default: all)."),
-) -> None:
-    """Show the routes/split-DNS domains each upstream server pushed."""
-    service = UpstreamService(get_config())
-    payload = {
-        item.name: service.server_routing_status(item)
-        for item in service.list_profiles()
-        if profile is None or item.name == profile
-    }
-    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
-
-
-@upstream_app.command("sync")
-def upstream_sync(
-    profile: str = typer.Argument(..., help="Profile with sync_url to refresh now."),
-) -> None:
-    """Pull a profile's routes/split-DNS from its upstream panel and apply them."""
-    config = get_config()
-    service = UpstreamService(config)
-    target = next((item for item in config.upstream.profiles if item.name == profile), None)
-    if target is None:
-        typer.echo(f"unknown upstream profile: {profile}", err=True)
-        raise typer.Exit(1)
-    synced = service.sync_server_routes(target)
-    if synced.sync_error:
-        typer.echo(f"sync failed: {synced.sync_error}", err=True)
-        raise typer.Exit(1)
-    for result in service.apply_server_routing_if_changed():
-        echo_result(result)
-    typer.echo(
-        f"{len(synced.routes)} routes, {len(synced.domains)} split-DNS domains "
-        f"(version {synced.version or '-'})"
-    )
-
-
 @upstream_app.command("watch")
 def upstream_watch(
     once: bool = typer.Option(
@@ -762,13 +701,6 @@ def upstream_watch(
             # selected_profile() return None, and that profile (now just
             # another disabled one) still needs to be torn down.
             service.enforce_profile_enablement()
-            # Server-pushed routing: pick up lists stored by the vpnc-script
-            # hook after openconnect's own internal reconnects, and poll
-            # sync_url profiles. Never allowed to kill the watchdog.
-            try:
-                service.refresh_server_routes()
-            except Exception as exc:  # noqa: BLE001
-                typer.echo(f"server-pushed routing refresh failed: {exc}", err=True)
         else:
             consecutive_failures = 0
         if once:
@@ -830,50 +762,6 @@ def host_dns_guard(
     typer.echo(HostDnsService(get_config()).restore().detail)
 
 
-@routes_app.command("list")
-def routes_list() -> None:
-    for route in RoutingService(get_config()).list_routes():
-        typer.echo(route)
-
-
-@routes_app.command("add")
-def routes_add(route: str) -> None:
-    RoutingService(get_config()).add_route(route)
-    typer.echo(f"added {route}")
-
-
-@routes_app.command("delete")
-def routes_delete(route: str) -> None:
-    RoutingService(get_config()).delete_route(route)
-    typer.echo(f"deleted {route}")
-
-
-@routes_app.command("reload")
-def routes_reload(
-    dry_run: bool = typer.Option(False, "--dry-run"),
-) -> None:
-    """Converge the kernel with the route lists (same as `net apply`)."""
-    _echo_net_apply(NetService(get_config()).apply(dry_run=dry_run), dry_run=dry_run)
-
-
-@domains_app.command("list")
-def domains_list() -> None:
-    for domain in RoutingService(get_config()).list_domains():
-        typer.echo(domain)
-
-
-@domains_app.command("add")
-def domains_add(domain: str) -> None:
-    RoutingService(get_config()).add_domain(domain)
-    typer.echo(f"added {domain}")
-
-
-@domains_app.command("delete")
-def domains_delete(domain: str) -> None:
-    RoutingService(get_config()).delete_domain(domain)
-    typer.echo(f"deleted {domain}")
-
-
 @domains_app.command("reload")
 def domains_reload(
     dry_run: bool = typer.Option(False, "--dry-run"),
@@ -888,7 +776,7 @@ def domains_reload(
 def domains_resolve(
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    """One-shot: resolve every configured split/profile/host domain and
+    """One-shot: resolve every domain of the egress policy and
     record the addresses for the reconciler. See DomainResolverService."""
     outcome = DomainResolverService(get_config()).refresh(dry_run=dry_run)
     if not outcome.resolved:
@@ -899,8 +787,8 @@ def domains_resolve(
 
 @domains_app.command("watch")
 def domains_watch() -> None:
-    """Supervisor entrypoint: periodically resolve configured split/profile/
-    host domains for the reconciler's dynamic sets, independent of which
+    """Supervisor entrypoint: periodically resolve the egress policy's
+    domains for the reconciler's dynamic sets, independent of which
     resolver VPN clients or the host actually use for their own lookups
     (see services/domain_resolver.py). Reloads config every cycle, like
     host-dns guard / upstream watch. The interval follows the lowest TTL
@@ -1370,7 +1258,6 @@ app.add_typer(user_app, name="user")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(identity_app, name="identity")
 app.add_typer(upstream_app, name="upstream")
-app.add_typer(routes_app, name="routes")
 app.add_typer(domains_app, name="domains")
 app.add_typer(internal_dns_app, name="internal-dns")
 app.add_typer(net_app, name="net")
@@ -1380,6 +1267,7 @@ app.add_typer(registry_app, name="registry")
 
 register_agent_commands(app, get_config)
 register_hub_commands(app, get_config)
+register_egress_commands(app, get_config, lambda: STATE.get("config_path"))
 
 
 if __name__ == "__main__":

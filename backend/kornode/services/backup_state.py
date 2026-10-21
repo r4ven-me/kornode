@@ -261,10 +261,6 @@ class Collector:
             absolute(self.config.web.static_dir),
         }
         optional = {
-            absolute(self.config.routing.split.routes_file),
-            absolute(self.config.routing.split.domains_file),
-            absolute(self.config.routing.host_split.routes_file),
-            absolute(self.config.routing.host_split.domains_file),
             absolute(self.config.auth.oidc.radius.config_file),
         }
         managed_hook = absolute(self.config.generated_path("ocserv-connect-script-kornode"))
