@@ -43,6 +43,10 @@ ACCESS_PORT = 8443  # published by agent-a in case `routed`
 SOURCE_CIDR = "10.8.3.0/24"
 SOURCE_NODE_ADDRESS = "10.8.3.2"
 SOURCE_CLIENT_ADDRESS = "10.8.3.20"
+# E2E-07 (spec edition): the same shape on the hub, standing in for an attached wg-easy.
+HUB_SOURCE_CIDR = "10.8.9.0/24"
+HUB_SOURCE_NODE_ADDRESS = "10.8.9.2"
+HUB_SOURCE_CLIENT_ADDRESS = "10.8.9.20"
 IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(?:@sha256:[0-9a-f]{64})?$")
 
 PROXY = """import select, socket, socketserver
@@ -552,9 +556,10 @@ class Worker:
                 service["ports"].append("9100:9100/tcp")
         services = {"node": service}
         compose: dict[str, Any] = {"services": services}
-        if self.role == "agent-b" and self.case == "routed":
-            # Throwaway VPN client of NL-03 and client behind a source of NL-06: same
+        if self.role in {"agent-b", "hub"} and self.case == "routed":
+            # Throwaway VPN client of NL-03 and client behind a source of NL-06 / E2E-07: same
             # image, own network namespace, no kornode.
+            source_cidr, node_address, client_address = self.source_network()
             services["client"] = {
                 "image": image,
                 "init": True,
@@ -565,14 +570,14 @@ class Worker:
             }
             services["node"]["networks"] = {
                 "default": {},
-                "source": {"ipv4_address": SOURCE_NODE_ADDRESS},
+                "source": {"ipv4_address": node_address},
             }
             services["client"]["networks"] = {
                 "default": {},
-                "source": {"ipv4_address": SOURCE_CLIENT_ADDRESS},
+                "source": {"ipv4_address": client_address},
             }
             compose["networks"] = {
-                "source": {"ipam": {"config": [{"subnet": SOURCE_CIDR}]}},
+                "source": {"ipam": {"config": [{"subnet": source_cidr}]}},
             }
         atomic(self.directory / "compose.json", compose)
         self.compose("create" if agent else "up", *([] if agent else ["-d"]), "node")
@@ -707,13 +712,22 @@ class Worker:
         cidr = str(ipaddress.ip_network(self.payload["cidr"]))
         return self.cli("agent", "prefix", "add", self.payload["name"], cidr, "--kind", "lan")
 
+    def source_network(self) -> tuple[str, str, str]:
+        """CIDR, node and client addresses of the source network of this role."""
+        if self.role == "agent-b":
+            return SOURCE_CIDR, SOURCE_NODE_ADDRESS, SOURCE_CLIENT_ADDRESS
+        if self.role == "hub":
+            return HUB_SOURCE_CIDR, HUB_SOURCE_NODE_ADDRESS, HUB_SOURCE_CLIENT_ADDRESS
+        raise ValueError("source network: hub and agent-b only")
+
     def source_iface(self) -> Any:
-        """The interface of agent-b's node container on the source network (docker names it)."""
-        if self.role != "agent-b" or self.case != "routed":
-            raise ValueError("routed case, agent-b only")
+        """The interface of the node container on the source network (docker names it)."""
+        if self.role not in {"agent-b", "hub"} or self.case != "routed":
+            raise ValueError("routed case, hub and agent-b only")
+        node_address = self.source_network()[1]
         out = self.execute(["ip", "-4", "-j", "addr", "show"])[1]
         for link in json.loads(out):
-            if any(a.get("local") == SOURCE_NODE_ADDRESS for a in link.get("addr_info", [])):
+            if any(a.get("local") == node_address for a in link.get("addr_info", [])):
                 return {"interface": link["ifname"]}
         raise ValueError("source network interface not found")
 
@@ -731,17 +745,44 @@ class Worker:
         finally:
             path.unlink(missing_ok=True)
 
+    def hub_source_add(self) -> Any:
+        """Declare the hub's own source (hub only), exported, standing in for wg-easy."""
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        interface = self.payload["interface"]
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", interface):
+            raise ValueError("invalid interface")
+        path = self.directory / "hub-source.json"
+        atomic(path, {"interface": interface, "cidr": HUB_SOURCE_CIDR, "export": True})
+        try:
+            return self.cli("source", "add", "e2e-hub-source", "--file", str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def hub_source_policy(self) -> Any:
+        """The hub source leaves through agent-b (node 3, role exit) with a full tunnel."""
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        path = self.directory / "hub-egress.json"
+        rules = [{"id": "src-out", "from": ["e2e-hub-source"], "to": "any", "via": "exit:3"}]
+        atomic(path, {"egress": rules})
+        try:
+            return self.cli("egress", "set", "--file", str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
     def client_route(self) -> Any:
-        """Routes of the client container through agent-b's source address."""
-        if self.role != "agent-b" or self.case != "routed":
-            raise ValueError("routed case, agent-b only")
+        """Routes of the client container through the node's source address."""
+        if self.role not in {"agent-b", "hub"} or self.case != "routed":
+            raise ValueError("routed case, hub and agent-b only")
+        node_address = self.source_network()[1]
         self.compose("up", "-d", "client")
         for route in self.payload["routes"]:
             network = str(ipaddress.ip_network(route))
             self.run(
                 [
                     "docker", "exec", self.container("client"),
-                    "ip", "route", "replace", network, "via", SOURCE_NODE_ADDRESS,
+                    "ip", "route", "replace", network, "via", node_address,
                 ],
                 timeout=20,
             )  # fmt: skip
@@ -895,8 +936,8 @@ class Worker:
             raise ValueError("invalid window")
         data = json.dumps({"port": 9100, "seconds": seconds}).encode()
         if self.payload.get("client"):
-            if self.role != "agent-b":
-                raise ValueError("the client container belongs to agent-b")
+            if self.role not in {"agent-b", "hub"}:
+                raise ValueError("the client container belongs to agent-b or the hub")
             argv = ["docker", "exec", "-i", self.container("client"), "python", "-c", LISTEN]
             return json.loads(self.run(argv, data=data, timeout=seconds + 20)[1])
         return json.loads(
@@ -912,8 +953,8 @@ class Worker:
             source = str(ipaddress.ip_address(source))
         data = json.dumps({"host": host, "port": 9100, "source": source}).encode()
         if self.payload.get("client"):
-            if self.role != "agent-b":
-                raise ValueError("the VPN client runs on agent-b")
+            if self.role not in {"agent-b", "hub"}:
+                raise ValueError("the client container runs on agent-b or the hub")
             argv = ["docker", "exec", "-i", self.container("client"), "python", "-c", CONNECT]
             return json.loads(self.run(argv, data=data, timeout=20)[1])
         return json.loads(self.execute(["python", "-c", CONNECT], data=data, timeout=20)[1])
@@ -1219,6 +1260,8 @@ class Worker:
             "dns_resolve",
             "source_iface",
             "source_add",
+            "hub_source_add",
+            "hub_source_policy",
             "client_route",
             "exit_role",
             "access_setup",
