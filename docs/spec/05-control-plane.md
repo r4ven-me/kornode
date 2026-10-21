@@ -178,8 +178,9 @@ Downloaded data is not extracted by the hub. CLI publication is private, atomic
 and no-clobber. The queue is not proof of execution or successful application.
 
 Domain and URL sets are resolved by the node itself (D-78); node-to-node exit routing is
-delivered for `to: any` (D-69). The P3 agent still lacks p12 upstreams, pushed routes and
-set/domain exits via another node. Operator validation refuses these inputs rather than
+delivered for `to: any` (D-69) and for sets and inline destinations (D-79: the agent
+reports the addresses it resolved for them in `exit_sets`, the hub matches the same
+ones). The P3 agent still lacks p12 upstreams and pushed routes. Operator validation refuses these inputs rather than
 silently delivering nonworking policies; exported
 prefixes report their runtime boundary; access roles/users are delivered since P4-04.
 

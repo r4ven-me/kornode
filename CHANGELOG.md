@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (set and domain exits via another node, D-79; branch `redesign/p4-06d-set-exits`)
+
+- `via: exit:<n>` now accepts a set or an inline destination (not `fabric`/`node`) in hub and agent policies. The agent sends the addresses it resolved for such destinations in its report (`exit_sets`, validated, a change wakes the hub reconciler); the hub marks transit traffic by source prefix and destination (static routes + reported addresses) in the order of the agent's policy, unmatched flows fall to the fabric guard (fail closed). `TransitExit.dest`, `kornode.net.lists.parse_exit_sets`, golden `hub_transit_set`. The bundle format is unchanged. Tests that encoded the old `runtime_unsupported` refusal now cover the accepted forms.
+
 ### Fixed (connect race, branch `redesign/netlab-connect-race`)
 
 - `upstream connect` waited only for the tunnel device to exist, but the reconciler counts an exit as up only with the `UP` flag, which openconnect's script sets a moment later: the final pass could leave the exit down (kill-switch route in place) until the next pass. `_verify_backgrounded` now also waits for the flag. The netlab helper waited for any `default` in the exit table, which the kill-switch `unreachable default` satisfies; it now waits for `default dev <tunnel>`. Found as a CI flake in `test_kernel_after_connect_matches_the_plan`.

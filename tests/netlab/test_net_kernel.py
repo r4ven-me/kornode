@@ -114,7 +114,16 @@ GOLDEN = Path(__file__).resolve().parents[1] / "golden"
 
 @pytest.mark.netlab
 @pytest.mark.parametrize(
-    "name", ["hub", "node3", "hub_transit", "hub_egress_exit", "agent_exit", "exit_node"]
+    "name",
+    [
+        "hub",
+        "node3",
+        "hub_transit",
+        "hub_egress_exit",
+        "hub_transit_set",
+        "agent_exit",
+        "exit_node",
+    ],
 )
 def test_golden_rulesets_load_into_a_real_kernel(lab: Lab, name: str) -> None:
     # `nft -c` only checks syntax; it accepted `reject` in postrouting, which

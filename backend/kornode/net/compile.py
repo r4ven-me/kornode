@@ -78,6 +78,9 @@ class TransitExit:
     node: int
     sources: tuple[Network, ...]
     exit_iface: str | None
+    # Set/domain exits (D-79): only these destinations of `sources` leave through the
+    # node (routes plus the addresses the agent reported); None means `to: any`.
+    dest: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +194,7 @@ def _dest_name(rule: Rule, index: int) -> str | None:
     return f"rule{index}"
 
 
-def _dest_members(
+def dest_members(
     rule: Rule, index: int, policy: EgressPolicy, facts: NodeFacts
 ) -> tuple[frozenset[str], bool]:
     """Destination elements (routes + resolved domain addresses) and whether
@@ -320,7 +323,7 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
         dest = _dest_name(rule, index)
         to_sets: tuple[str, ...] = ()
         if dest is not None:
-            members, _ = _dest_members(rule, index, policy, facts)
+            members, _ = dest_members(rule, index, policy, facts)
             for family in (4, 6):
                 set_name = f"{dest}_v{family}"
                 sets.setdefault(set_name, DestSetDecl(set_name, family))
@@ -431,26 +434,49 @@ def _transit_head(
             label="agents: fabric destinations are routed",
         )
     )
-    by_node: dict[int, set[str]] = {}
-    for transit in facts.transit_exits:
-        by_node.setdefault(transit.node, set()).update(
-            str(net) for net in transit.sources if net.version == 4
-        )
-    for node, nets in sorted(by_node.items()):
+    # Rules are emitted in the order of the agent's policy, first match wins, exactly as
+    # the agent classified the traffic it sent into the tunnel. Only adjacent `to: any`
+    # entries of one node share a source set (merging across other rules would change
+    # which rule a flow matches).
+    used: set[str] = set()
+    merged: tuple[int, str, set[str]] | None = None  # (node, set name, its elements)
+    for index, transit in enumerate(facts.transit_exits):
+        nets = {str(net) for net in transit.sources if net.version == 4}
         if not nets:
             # The hub's own exit (egress.hub): only here for the answers' reverse path.
             continue
-        name = f"transit{node}_v4"
+        if transit.dest is None and merged is not None and merged[0] == transit.node:
+            merged[2].update(nets)
+            elements[merged[1]].update(nets)
+            continue
+        name = f"transit{transit.node}_v4"
+        if name in used:
+            name = f"transit{transit.node}_{index}_v4"
+        used.add(name)
         sets.setdefault(name, DestSetDecl(name, 4))
         elements.setdefault(name, set()).update(nets)
+        match = ("iifname @fabric_ifaces", f"ip saddr @{name}")
+        to_sets: tuple[str, ...] = ()
+        if transit.dest is None:
+            merged = (transit.node, name, set(nets))
+        else:
+            merged = None
+            dest = f"transit{transit.node}_{index}_d"
+            sets.setdefault(f"{dest}4", DestSetDecl(f"{dest}4", 4))
+            elements.setdefault(f"{dest}4", set()).update(
+                item
+                for item in transit.dest
+                if ipaddress.ip_network(item, strict=False).version == 4
+            )
+            to_sets = (f"{dest}4", f"{dest}6")
         head.append(
             ClassifyRule(
                 -1,
                 "transit",
-                ("iifname @fabric_ifaces", f"ip saddr @{name}"),
-                (),
-                exits[f"exit:{node}"],
-                label=f"transit exit:{node}",
+                match,
+                to_sets,
+                exits[f"exit:{transit.node}"],
+                label=f"transit exit:{transit.node}",
             )
         )
     return head

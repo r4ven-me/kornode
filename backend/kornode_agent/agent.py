@@ -25,6 +25,7 @@ from cryptography.x509.oid import NameOID
 from kornode.net.compile import compile_policy
 from kornode.net.explain import explain
 from kornode.net.kernel import Kernel
+from kornode.net.model import InlineDest, SetRef
 from kornode.net.reconciler import Reconciler, watch_netlink
 from kornode_agent import __version__
 from kornode_agent.access import AccessServer
@@ -183,7 +184,7 @@ class Agent:
             self.reconciler.run_forever,
             lambda: watch_netlink(self.reconciler, self._thread_stop),
             self._tunnel_loop,
-            lambda: self.set_resolver.run(self._thread_stop, self.reconciler.wake),
+            lambda: self.set_resolver.run(self._thread_stop, self._resolved_changed),
         ):
             thread = threading.Thread(target=target, daemon=True)
             self._threads.append(thread)
@@ -584,6 +585,33 @@ class Agent:
 
     # --------------------------------------------------------------- report
 
+    def _resolved_changed(self) -> None:
+        """Re-resolved sets: converge, and tell the hub when an exit rule's destination
+        changed, because it marks the transit traffic by the same addresses (D-79)."""
+        self.reconciler.wake()
+        if self._exit_sets():
+            self.loop.call_soon_threadsafe(self._report_now.set)
+
+    def _exit_sets(self) -> dict[str, list[str]]:
+        """Addresses behind the set/domain destinations of this node's `exit:<n>` rules,
+        keyed like `NodeFacts.resolved`; static routes stay with the policy."""
+        active = self.inputs.active
+        if active is None:
+            return {}
+        resolved = self.set_resolver.read()
+        found: dict[str, list[str]] = {}
+        for index, rule in enumerate(active.bundle.policy.egress):
+            if rule.parsed_via.kind != "exit":
+                continue
+            if isinstance(rule.to, SetRef):
+                key = rule.to.set
+            elif isinstance(rule.to, InlineDest):
+                key = f"rule{index}"
+            else:
+                continue
+            found[key] = sorted(resolved.get(key, frozenset()))
+        return found
+
     def build_report(self) -> dict[str, Any]:
         state = self.store.load_state()
         active = self.inputs.active
@@ -621,6 +649,7 @@ class Agent:
                     "failed_versions": dict(state.failed),
                     "tunnels": tunnels,
                     "sources": sources,
+                    "exit_sets": self._exit_sets(),
                     "local_networks": [str(n) for n in self.probes.local_networks(set(links))],
                     "reconciler": {
                         "last_apply": status["last_apply_at"],

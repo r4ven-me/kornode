@@ -264,9 +264,80 @@ def hub_egress_exit_case() -> tuple[EgressPolicy, NodeFacts]:
     return policy, facts
 
 
+def hub_transit_set_case() -> tuple[EgressPolicy, NodeFacts]:
+    """D-79: one agent exits a set (static routes + reported addresses) and the rest via node 3."""
+    facts = hub_facts()
+    sources = (n("10.100.2.0/24"),)
+    return EgressPolicy(), dataclasses.replace(
+        facts,
+        transit_exits=(
+            TransitExit(3, sources, "vpns1", dest=frozenset({"198.51.100.0/24", "203.0.113.9/32"})),
+            TransitExit(3, sources, "vpns1"),
+        ),
+    )
+
+
 def agent_exit_case() -> tuple[EgressPolicy, NodeFacts]:
     return agent_policy(), agent_facts()
 
 
 def exit_node_case() -> tuple[EgressPolicy, NodeFacts]:
     return exit_node_policy(), exit_node_facts()
+
+
+def test_hub_transit_matches_set_exits_by_source_and_destination_in_policy_order() -> None:
+    """D-79: an agent's `to: <set> via exit:3` followed by `to: any via exit:3` is marked
+    by source+destination first, then by source alone — the order the agent classified in."""
+    sources = (n("10.100.2.0/24"),)
+    facts = dataclasses.replace(
+        hub_facts(),
+        transit_exits=(
+            TransitExit(3, sources, "vpns1", dest=frozenset({"203.0.113.0/24", "198.51.100.7"})),
+            TransitExit(3, sources, "vpns1"),
+        ),
+    )
+
+    compiled = compile_policy(EgressPolicy(), facts)
+
+    lines = lines_of(compiled.script)
+    specific = next(
+        i for i, line in enumerate(lines) if "transit3_0_d4" in line and "daddr" in line
+    )
+    plain = next(
+        i for i, line in enumerate(lines) if "@transit3_1_v4" in line and "daddr" not in line
+    )
+    assert specific < plain
+    assert elements(compiled, "transit3_0_d4") == {"203.0.113.0/24", "198.51.100.7/32"}
+    assert elements(compiled, "transit3_v4") == {"10.100.2.0/24"}
+
+
+def test_hub_transit_set_exit_without_addresses_matches_nothing() -> None:
+    """Before the agent has reported any address the destination set is empty: the flow
+    falls to the fabric guard (dropped), never to the hub's uplink."""
+    facts = dataclasses.replace(
+        hub_facts(),
+        transit_exits=(TransitExit(3, (n("10.100.2.0/24"),), "vpns1", dest=frozenset()),),
+    )
+
+    compiled = compile_policy(EgressPolicy(), facts)
+
+    assert elements(compiled, "transit3_0_d4") == frozenset()
+    assert 'comment "agents: no exit declared"' in compiled.script
+
+
+def test_hub_transit_merges_only_adjacent_any_entries_of_a_node() -> None:
+    first, second = (n("10.100.2.0/24"),), (n("10.8.2.0/24"),)
+    facts = dataclasses.replace(
+        hub_facts(),
+        transit_exits=(
+            TransitExit(3, first, "vpns1"),
+            TransitExit(3, second, "vpns1"),
+            TransitExit(3, first, "vpns1", dest=frozenset({"203.0.113.0/24"})),
+            TransitExit(3, second, "vpns1"),
+        ),
+    )
+
+    compiled = compile_policy(EgressPolicy(), facts)
+
+    assert elements(compiled, "transit3_v4") == {"10.100.2.0/24", "10.8.2.0/24"}
+    assert elements(compiled, "transit3_3_v4") == {"10.8.2.0/24"}

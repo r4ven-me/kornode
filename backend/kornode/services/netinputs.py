@@ -23,8 +23,10 @@ from kornode.net.compile import (
     TransitExit,
     TunnelFact,
     compile_policy,
+    dest_members,
 )
-from kornode.net.model import EgressPolicy
+from kornode.net.lists import parse_exit_sets
+from kornode.net.model import EgressPolicy, InlineDest, SetRef
 from kornode.net.state import DesiredState
 from kornode.registry.db import migrate, open_registry
 from kornode.registry.models import Node, NodePrefix
@@ -74,6 +76,8 @@ class FabricView:
     prefixes: list[NodePrefix] = field(default_factory=list)
     # node id -> ocserv session device while the node is connected
     sessions: dict[int, str] = field(default_factory=dict)
+    # node id -> addresses the agent resolved for the destinations of its exit rules (D-79)
+    exit_sets: dict[int, dict[str, frozenset[str]]] = field(default_factory=dict)
 
 
 class HubNetInputs:
@@ -195,6 +199,11 @@ class HubNetInputs:
             registry = Registry(conn)
             nodes = [node for node in registry.list_nodes() if node.state == "active"]
             prefixes = registry.list_prefixes()
+            exit_sets = {}
+            for node in nodes:
+                reports = registry.list_reports(node.id, 1) if node.id != 1 else []
+                if reports:
+                    exit_sets[node.id] = parse_exit_sets(reports[0].body.get("exit_sets"))
         finally:
             conn.close()
         sessions: dict[int, str] = {}
@@ -202,7 +211,7 @@ class HubNetInputs:
             device = device_of.get(str(self._fabric_address(node.id)))
             if device is not None and node.id != 1:
                 sessions[node.id] = device
-        return FabricView(nodes=nodes, prefixes=prefixes, sessions=sessions)
+        return FabricView(nodes=nodes, prefixes=prefixes, sessions=sessions, exit_sets=exit_sets)
 
     def _fabric_address(self, node_id: int) -> ipaddress.IPv4Address:
         fabric = self.config.fabric
@@ -265,9 +274,12 @@ class HubNetInputs:
             cidrs = {
                 item.name: ipaddress.ip_network(item.cidr, strict=False) for item in policy.sources
             }
-            for rule in policy.egress:
+            for index, rule in enumerate(policy.egress):
                 via = rule.parsed_via
-                if via.kind != "exit" or rule.to != "any":
+                if via.kind != "exit":
+                    continue
+                is_dest = isinstance(rule.to, SetRef | InlineDest)
+                if rule.to != "any" and not is_dest:
                     continue
                 target = int(via.target or 0)
                 if "exit" not in roles.get(target, []) or target == node.id:
@@ -278,8 +290,19 @@ class HubNetInputs:
                         sources.append(addresses.client_pool)
                     elif name in cidrs:
                         sources.append(cidrs[name])
-                if sources:
-                    found.append(TransitExit(target, tuple(sources), view.sessions.get(target)))
+                if not sources:
+                    continue
+                dest: frozenset[str] | None = None
+                if is_dest:
+                    # The agent classified by the addresses it resolved itself: the hub
+                    # matches the same ones (static routes come from the policy).
+                    reported = NodeFacts(
+                        node_id=node.id,
+                        client_pool=None,
+                        resolved=view.exit_sets.get(node.id, {}),
+                    )
+                    dest, _ = dest_members(rule, index, policy, reported)
+                found.append(TransitExit(target, tuple(sources), view.sessions.get(target), dest))
         return found
 
     def _session_routes(self, view: FabricView) -> list[tuple[Network, str]]:

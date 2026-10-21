@@ -267,6 +267,29 @@ def test_report_is_validated(hub: Hub) -> None:
     assert hub.env.registry.list_reports(3) == []
 
 
+def test_report_carries_the_resolved_addresses_of_exit_rules_and_wakes_the_reconciler(
+    hub: Hub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-79: only a changed `exit_sets` wakes the hub reconciler; malformed ones are refused."""
+    wakes: list[int] = []
+    monkeypatch.setattr(
+        "kornode.control.service.NetService.wake", lambda self: wakes.append(1) or True
+    )
+    agent = hub.enroll()
+
+    first = _report(applied_version=1) | {"exit_sets": {"web": ["203.0.113.9"]}}
+    assert agent.json("POST", "/agent/v1/report", first)[0] == 204
+    assert agent.json("POST", "/agent/v1/report", first)[0] == 204
+    assert wakes == [1]
+    again = _report(applied_version=2) | {"exit_sets": {"web": ["203.0.113.9", "198.51.100.1"]}}
+    assert agent.json("POST", "/agent/v1/report", again)[0] == 204
+    assert wakes == [1, 1]
+
+    for bad in ({"web": ["nope"]}, {"web": "203.0.113.9"}, ["web"]):
+        status, body = agent.json("POST", "/agent/v1/report", _report() | {"exit_sets": bad})
+        assert (status, body["error"]) == (400, "invalid"), bad
+
+
 def test_commands_are_delivered_once_and_finished_by_their_node_only(hub: Hub) -> None:
     agent = hub.enroll()
     command = hub.env.registry.enqueue_command(3, "reconnect", {"tunnel": "fabric"})

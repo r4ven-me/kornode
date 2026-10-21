@@ -1,0 +1,3 @@
+Route(table=12001, dst='default', type='unicast', dev='vpns1', gateway=None, metric=0, family=4, proto=0)
+Route(table=12001, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=4, proto=0)
+Route(table=12001, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=6, proto=0)

@@ -36,7 +36,7 @@ from kornode.net.compile import (
     node_exit_tunnels,
 )
 from kornode.net.errors import NetError
-from kornode.net.model import NAME_PATTERN, EgressPolicy, Source
+from kornode.net.model import NAME_PATTERN, EgressPolicy, InlineDest, SetRef, Source
 from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.models import Node, iso_time
 from kornode.registry.repository import Registry, RegistryConflict, RegistryNotFound
@@ -87,12 +87,9 @@ def _valid_diag_archive(raw: bytes) -> bool:
             members = archive.getmembers()
     except (OSError, EOFError, tarfile.TarError):
         return False
-    return (
-        0 < len(members) <= DIAG_MAX_MEMBERS
-        and all(
-            member.isreg() and ".." not in member.name and DIAG_MEMBER_RE.match(member.name)
-            for member in members
-        )
+    return 0 < len(members) <= DIAG_MAX_MEMBERS and all(
+        member.isreg() and ".." not in member.name and DIAG_MEMBER_RE.match(member.name)
+        for member in members
     )
 
 
@@ -922,12 +919,12 @@ class AgentService:
                 raise ManagementError(
                     409, "role_required", f"agent {other.name} lacks the exit role"
                 )
-            if rule.to != "any":
+            if not (rule.to == "any" or isinstance(rule.to, SetRef | InlineDest)):
                 raise ManagementError(
                     409,
                     "runtime_unsupported",
-                    "exit via another node supports `to: any` only; "
-                    "set/domain exits need identical sets on the hub and the node (D-78)",
+                    "exit via another node supports `to: any`, a set or an inline "
+                    "destination, not `fabric` or a node",
                 )
             if "host" in rule.from_:
                 raise ManagementError(
