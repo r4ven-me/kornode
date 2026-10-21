@@ -318,15 +318,29 @@ PR #1 был большим (≈90 коммитов); его промежуто�
   `hub_egress_exit` загружается в ядро; harness E2E переведён на `egress: []`.
 - **P4-07** (D-74, `5f3a6d8`): `FabricService` (`show`, `set`), `korctl fabric show|set`,
   `GET/PATCH /api/fabric`, вкладка Fabric (Topology, Fabric settings, Fabric DNS — перенесена из Agents),
-  parity `fabric.show`/`fabric.settings`. Ядро не тронуто, netlab/E2E не гонялись. Открыто:
-  `POST /api/config/fabric-settings` (ещё задаёт `node.id`) не свёрнут в `FabricService`; префиксы и источники
-  хаба во вкладке Fabric только читаются.
+  parity `fabric.show`/`fabric.settings`. Ядро не тронуто, netlab/E2E не гонялись. `POST
+  /api/config/fabric-settings` удалён (D-77, `d0f412c`): `FabricService.set` принимает `node_id`, обе панели
+  (вкладка Fabric и Config → Fabric) идут через один писатель, неверный шаблон — 422 `invalid`. Открыто: префиксы
+  и источники хаба во вкладке Fabric только читаются.
 - **P5-05** (`421c465`, документация v2): README, `docs/architecture.md`, `docs/networking.md` переписаны под
   v2 (hub + agents, fabric, egress, sources, reconciler); разделы «Routing/Split Routes» и «Middle-Server Mode»
   заменены на «Fabric, Agents and Egress» и «Upstreams», справочник конфигурации в README — ссылка на
   `examples/config.full.yaml`; устаревшие строки убраны из `docs/features.md` и `docs/configuration.md`.
   `tests/test_docs_v2.py` падает, если в этих документах снова появятся удалённые v1-термины. Команды `korctl`
   в README сверены с `--help` выборочно.
+- **URL-источники `sets` на хабе** (D-75, `770af49`): `route_urls`/`domain_urls` скачивает `DomainResolverService`
+  раз в час, кэш в `generated_dir/url-lists/`; неудачная или пустая загрузка оставляет последнюю копию (набор не
+  пустеет из-за недоступного хоста). Писатель ядра по-прежнему один — reconciler.
+- **P5-01, редактор правил egress** (D-76, `d904975`): Network → Egress and sources редактирует правила
+  упорядоченным списком (форма на правило, drag и Up/Down), JSON — вкладка advanced; `egress show|check|set` и
+  `/api/egress*` дополнительно отдают `dead_rules: [{rule, shadowed_by}]`, черновик проверяется в фоне;
+  inline-explain через `POST /api/net/explain` — только для сохранённой политики. UI проверен тестами, в браузере
+  не открывался. `AgentPolicy.tsx` (политика агента) — ещё сырой JSON.
+- **Домены и URL-наборы на агентах** (D-78, `65fde1d`): формат пакета не менялся (флаг-дня нет); узел сам
+  резолвит доменные наборы активной политики (`kornode_agent/resolver.py`) через DNS хаба из
+  `dns.forward_zones` (запасной — `/etc/resolv.conf`), URL-списки качает общий `kornode.net.lists`; результат —
+  `<root>/resolved/<set>.txt` → `NodeFacts.resolved`, старт из кэша сохраняет последний результат, неразрешённый
+  набор пуст (fail closed). `exit:<n>` к set/доменам остаётся `runtime_unsupported`.
 
 Что реализовано в P3-07…P3-10:
 
@@ -365,7 +379,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
 Хвосты P2 закрыты (D-60, пункт 2 ниже). `Dockerfile.agent` собран: 396 МБ; цель spec 06
 пересмотрена до ≤400 МБ (D-61).
 
-Фактические проверки (2026-10-21, после модели egress хаба, удаления v1, P4-07 и P5-05):
+Фактические проверки (2026-10-21, после модели egress хаба, удаления v1, P4-07, P5-05 и шестой сессии D-75…D-78):
 
 - dev-машина (`.venv`): `make lint typecheck test render parity` зелёные на Python 3.13 и 3.12 —
   **1150 passed / 92 skipped** после `95b0b62` (число упало из-за удаления тестов v1, список — в CHANGELOG),
@@ -380,7 +394,10 @@ PR #1 был большим (≈90 коммитов); его промежуто�
   слияния PR #1 (registry-контейнер на hub-VM), после D-71 они несовместимы — см. пункт 5 ниже.
 - P5-05 (только документация и `tests/test_docs_v2.py`): `make lint typecheck test render parity` на
   Python 3.13 — код 0; Python 3.12, netlab и E2E не гонялись (код не менялся).
-- CI на `main` (`95b0b62`): backend, frontend, netlab — зелёные. На `421c465` — тоже все три.
+- Шестая сессия (D-75…D-78): `make lint typecheck test render parity` — **1177 passed / 92 skipped**; фронтенд
+  41 тест + сборка; netlab на hub-VM — **70 passed**. E2E после неё не гонялся.
+- CI на `main` (`95b0b62`): backend, frontend, netlab — зелёные. На `421c465` — тоже все три; на `65fde1d` —
+  backend, frontend, netlab, publish.
 
 **Порядок дальнейших работ:**
 
@@ -394,7 +411,8 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    фабрику, пул клиентов всегда `10.100.<id>.0/24`. Флаг-день: хаб и агенты обновляются вместе, образы E2E-06 пересобрать.
 3. ~~**P4-06 часть 2 + P5-03**~~ — сделано (D-72, D-73, `95b0b62`): модель egress хаба, источники хаба, выход хаба
    через `exit:<n>`, v1-маршрутизация удалена одним блоком. **Остаток:** доменные/set-выходы агентов и хаба через
-   `exit:<n>` (нужны одинаковые наборы на хабе и узле), netlab NL-17/NL-18, E2E-07 в редакции спецификации, NL-05,
+   `exit:<n>` (нужны одинаковые наборы на хабе и узле; D-78 называет два пути — хаб резолвит и кладёт адреса в
+   пакет (смена формата и частые версии) или отдельный подписанный канал разрешённых наборов), netlab NL-17/NL-18, E2E-07 в редакции спецификации, NL-05,
    doctor-проверки источников хаба (из D-68). Перед пушем в `main` гонять **все** шаги CI backend:
    `make lint typecheck test render parity` (`make check` не включает `render` и `parity`, `typecheck` ещё
    проверяет `tests/e2e`).
@@ -414,9 +432,9 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    последний раз был `offline` (подключается, но брокер GitHub из VM отвечает медленно) — проверять
    `gh api repos/r4ven-me/kornode/actions/runners`, логи — `~/actions-runner/_diag/` на hub-VM.
 8. **Фаза 5 закрыта по коду:** P5-01 (D-76), URL-источники `sets` на хабе (D-75), домены/URL на агентах (D-78), документация v2 (P5-05); P5-02 и P5-04 сняты (D-70), P5-03 сделан (D-73).
-9. Известные мелочи: нестабильный по таймауту netlab-тест
-   `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` (HTTP 2 с; если повторится в CI —
-   поднять таймаут); NL-04 однажды упал в полном прогоне (дамп маршрутов был полным, в одиночку и в
+9. Известные мелочи: netlab-тест `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` падал по
+   HTTP-таймауту (2 с, затем 3 с на CI-раннере) — таймаут первого GET через туннель поднят до 10 с (`a2cac74`);
+   NL-04 однажды упал в полном прогоне (дамп маршрутов был полным, в одиночку и в
    повторе проходит); E2E-04 в цикле из 5 прогонов — 5 passed (если вернётся, снять `audit.jsonl` хаба
    по ходу прогона); сертификат слушателя access живёт 825 дней — обновление `korctl agent access set
    <имя> --hostname H --reissue`, doctor хаба предупреждает за 30 дней; первый apply после рестарта
@@ -504,7 +522,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    - `Dockerfile.agent` (пакет ставится с `--no-deps` плюс пять библиотек), `compose.agent.yaml`, `agent/supervisord.conf`; версия агента своя — `2.0.0`;
    - netlab `tests/netlab/test_p3_agent.py`: настоящий `kornode-agent enroll` + `run` против хаба — пакет подтверждён, отчёт дошёл, при остановленном control API агент перезапускается из кэша.
 
-   **Пробелы агента (D-54):** наборы `resolved` по доменам, `accept_server_routes`, upstream с p12 и находки `doctor` на агенте пока не реализованы.
+   **Пробелы агента (D-54):** наборы `resolved` по доменам, `accept_server_routes`, upstream с p12 и находки `doctor` на агенте пока не реализованы. (Доменные и URL-наборы на агенте закрыты 2026-10-21, D-78.)
 
    **До пуша — закрыто:** clock-зависимые тесты `tests/test_enrollment.py` исправлены (D-59); `Dockerfile.agent` собран, 396 МБ, цель spec 06 пересмотрена до ≤400 МБ (D-61).
 
@@ -514,7 +532,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
 
 **5. Что нужно от владельца.** Разблокировать gnome-keyring, чтобы `gh` снова работал (PR, `gh workflow run`); одобрить деплой окружения `kornode-e2e` для первого прогона `e2e.yml`; решить, нужен ли отдельный `E2E_HUB_ADDRESS` (сейчас — адрес hub-VM); обновить `E2E_PREVIOUS_*_IMAGE` после пересборки базы E2E-06 (флаг-день D-71). GitHub настроен 2026-10-20: environment `kornode-e2e` (required reviewer — владелец, только protected-ветки), секреты `E2E_SSH_KEY`/`E2E_SSH_KNOWN_HOSTS` (отдельный ключ из `~/.e2e` на hub-VM), переменные `E2E_*_HOST`, `E2E_SSH_USER/PORT`, `E2E_PREVIOUS_*_IMAGE`, `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true`, self-hosted runner `kornode-e2e-hub` (метка `kornode-e2e`); `main` защищена от force-push и удаления. Раннер на hub включать **только** пока workflow без `pull_request` (сейчас — только `workflow_dispatch`).
 
-**6. После P3.** «Готово, когда» фазы 3 закрыто четырёхмашинным E2E (D-62). Фаза 4: P4-01…P4-05, P4-06 части 1–2 (без доменных/set-выходов), P4-07 и S-07 (D-71) готовы; в `tests/e2e/test_routed_fabric.py` остаются 7 skip с причинами: E2E-07 в редакции спецификации (хаб-источник и доменные выходы; реальный сценарий выхода агентов — `test_e2e_07_client_of_agent_a_...` — проходит), NL-05, NL-07…NL-09, NL-13-forwarding и E2E-06-clients (клиентский трафик); фаза 5 — P5-03 (D-73) и P5-05 сделаны, остальное по плану выше.
+**6. После P3.** «Готово, когда» фазы 3 закрыто четырёхмашинным E2E (D-62). Фаза 4: P4-01…P4-05, P4-06 части 1–2 (без доменных/set-выходов), P4-07 и S-07 (D-71) готовы; в `tests/e2e/test_routed_fabric.py` остаются 7 skip с причинами: E2E-07 в редакции спецификации (хаб-источник и доменные выходы; реальный сценарий выхода агентов — `test_e2e_07_client_of_agent_a_...` — проходит), NL-05, NL-07…NL-09, NL-13-forwarding и E2E-06-clients (клиентский трафик); фаза 5 закрыта по коду (P5-01 D-76, P5-03 D-73, P5-05, D-75, D-78); её «Готово, когда» ещё требует полного netlab/E2E на `examples/` и рабочего E2E-06 (пункт 5).
 
 ## Тестирование
 
