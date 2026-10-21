@@ -246,7 +246,7 @@ P0-03 с kill-switch (D-20, D-21).
 - [x] UI-редактор правил, `korctl egress`, API (parity): `korctl egress|source`, `/api/egress`, `/api/sources`, панель Network → Egress and sources (D-72); упорядоченный список с перетаскиванием, мёртвые правила и inline-explain сохранённой политики (D-76), JSON — вкладка «advanced».
 - [x] Удаление `client_policy`/`host_policy`/`host_split`/per-profile host routing, `kornode.config.legacy` и кода «последняя метка выигрывает» — одним блоком (D-73, `1fdf819`), без слияния с `legacy_policy`; вместе с ними ушли URL-списки маршрутов/доменов и server-pushed маршруты.
 - [x] `examples/` и документация переписаны в формате v2 (P5-05): `examples/`, `config.example.yaml`, README, `docs/architecture.md`, `docs/networking.md`; `tests/test_examples.py`, `tests/test_docs_v2.py`.
-- [x] URL-источники наборов (`sets`) на хабе (D-75): `DomainResolverService` скачивает `route_urls`/`domain_urls` раз в час, кэширует, при сбое остаётся последний кэш; агенты по-прежнему отвергают URL-наборы.
+- [x] URL-источники наборов (`sets`) на хабе (D-75): `DomainResolverService` скачивает `route_urls`/`domain_urls` раз в час, кэширует, при сбое остаётся последний кэш; агенты резолвят домены и URL-наборы сами через DNS хаба (D-78); `exit:<n>` к set/доменам по-прежнему запрещён.
 
 Готово, когда: все примеры из `examples/` — валидный конфиг v2 и проходят полный netlab и E2E, в `models.py` не осталось старых ключей маршрутизации, а обновление хаба и агента разных версий (E2E-06) по-прежнему работает.
 

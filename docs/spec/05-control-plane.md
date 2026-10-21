@@ -177,9 +177,10 @@ node ownership, completed collect_diag type, valid base64 and a 5 MiB byte limit
 Downloaded data is not extracted by the hub. CLI publication is private, atomic
 and no-clobber. The queue is not proof of execution or successful application.
 
-The P3 agent still lacks domain/URL resolution, p12 upstreams, pushed routes
-and node-to-node exit routing. Operator validation refuses these inputs rather
-than silently delivering nonworking policies; exported
+Domain and URL sets are resolved by the node itself (D-78); node-to-node exit routing is
+delivered for `to: any` (D-69). The P3 agent still lacks p12 upstreams, pushed routes and
+set/domain exits via another node. Operator validation refuses these inputs rather than
+silently delivering nonworking policies; exported
 prefixes report their runtime boundary; access roles/users are delivered since P4-04.
 
 ## Enrollment

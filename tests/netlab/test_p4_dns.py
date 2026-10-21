@@ -8,6 +8,7 @@ tunnel itself is covered by the P3/P4 suites).
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -142,3 +143,21 @@ def test_agent_zone_keeps_resolving_with_the_hub_resolver_down(dns_lab: DnsLab) 
     agent = dns_lab.agent
     assert _resolve(agent, "nas.node3.kornode.internal", AGENT_RESOLVER) == "192.168.3.10"
     assert _no_answer(agent, "monitoring.kornode.internal", AGENT_RESOLVER)
+
+
+def test_agent_set_resolver_asks_the_hub_resolver_over_the_fabric(dns_lab: DnsLab) -> None:
+    """D-78: the node pre-resolves its domain sets through the hub resolver (stdlib client)."""
+    dns_lab.start("hub")
+    dns_lab.fabric_up()
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]);"
+        "from kornode_agent.resolver import TYPE_A, udp_lookup;"
+        f"print(udp_lookup('monitoring.kornode.internal', ['{HUB_RESOLVER}'], TYPE_A)[0][0])"
+    )
+    backend = str(Path(__file__).resolve().parents[2] / "backend")
+    deadline = time.monotonic() + 10
+    answer = ""
+    while time.monotonic() < deadline and not answer.strip():
+        answer = dns_lab.agent.run([sys.executable, "-I", "-c", code, backend], check=False).stdout
+        time.sleep(0.2)
+    assert answer.strip() == "10.100.1.20"

@@ -111,11 +111,15 @@ egress:
 
 ## Domain-based sets
 
-`DomainResolverService` stays, retargeted: it resolves every domain listed in
-compiled sets and adds results to the set with timeout. Domains coming from an
-`upstream:<profile>` with `accept_server_routes` resolve through that
-upstream's DNS (unchanged behaviour). Interval: 5 min default; TTL-aware
-(min(ttl, 1h)).
+Every node resolves the domain sets of its own policy and records the addresses
+per set (`NodeFacts.resolved`, D-25; no nft element timeouts). On the hub
+`DomainResolverService` does it (internal DNS upstreams, `domain_urls` /
+`route_urls` downloaded hourly and cached, D-75); on an agent `kornode_agent.resolver`
+does it from the bundle's policy (D-78): it queries the hub resolver the node's
+dnsmasq forwards the fabric zone to (else `/etc/resolv.conf`) and downloads the
+lists itself. Interval: TTL-aware, 30 s to 1 h. An unresolved set is empty
+(traffic assigned to it matches nothing). `exit:<n>` with a set or domain
+destination stays refused: the hub's and the node's sets are resolved separately.
 
 Consistency rule: when a source or client class is routed by domain sets,
 its clients should use the node's dnsmasq (service address) as their DNS, so

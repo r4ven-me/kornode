@@ -144,9 +144,7 @@ class DomainResolverService:
         self.lookup = lookup or DnsLookup()
         self.files = files or FileManager()
         self.net = net or NetService(config)
-        self.url_lists = url_lists or UrlListCache(
-            config.system.generated_dir / "url-lists", self.files
-        )
+        self.url_lists = url_lists or UrlListCache(config.system.generated_dir / "url-lists")
 
     def state_dir(self) -> Path:
         return resolved_state_dir(self.config)

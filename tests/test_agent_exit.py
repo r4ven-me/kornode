@@ -69,11 +69,17 @@ def test_an_operators_own_fabric_rule_is_not_duplicated(world: Any) -> None:  # 
         ([{"from": ["clients"], "to": "any", "via": "exit:2"}], "exit_node"),
         ([{"from": ["host"], "to": "any", "via": "exit:3"}], "runtime_unsupported"),
         ([{"from": ["clients"], "to": "fabric", "via": "exit:3"}], "runtime_unsupported"),
+        # Sets resolve on each node separately: not identical to the hub's (D-78).
+        ([{"from": ["clients"], "to": {"set": "web"}, "via": "exit:3"}], "runtime_unsupported"),
+        (
+            [{"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "exit:3"}],
+            "runtime_unsupported",
+        ),
     ],
 )
 def test_bad_exit_rules_are_refused(world: Any, rules: list[dict[str, Any]], code: str) -> None:  # type: ignore[no-untyped-def]
     _, service = make(world)
-    assert refused(service, "node2", rules) == code
+    assert refused(service, "node2", rules, sets={"web": {"domains": ["example.org"]}}) == code
 
 
 def test_a_node_without_the_exit_role_or_not_active_is_no_exit(world: Any) -> None:  # type: ignore[no-untyped-def]
