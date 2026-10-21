@@ -234,7 +234,7 @@ P0-03 с kill-switch (D-20, D-21).
 - [ ] Выход через другую ноду (`via: exit:<node>`). Часть 1 (трафик агентов, D-69) готова и проверена E2E-07: хаб метит транзит по префиксу источника в таблицу узла-выхода, узел с ролью `exit` маскарадит, при его отсутствии трафик не уходит никуда. Часть 2 (D-72, `95b0b62`): модель egress хаба, источники хаба, выход хаба через `exit:<n>` для клиентов и источников (`to: any`) готовы; доменные/set-назначения выхода, NL-17/NL-18, E2E-07 по спеке и NL-05 — впереди.
 - [x] Панель/CLI/API фабрики: топология, префиксы узлов, записи DNS, источники (P4-07, parity).
 
-> Статус (2026-10-21): spike S-07 прошёл (D-71) — vhost фабрики по SNI на том же 443/tcp, хост клиентов сохраняет вход по сертификату/OIDC, `fabric.enabled` удалён, хаб всегда запускает фабрику. Флаг-день: хаб и агенты обновляются вместе.
+> Статус (2026-10-21): spike S-07 прошёл (D-71) — vhost фабрики по SNI на том же 443/tcp, хост клиентов сохраняет вход по сертификату/OIDC, `fabric.enabled` удалён, хаб всегда запускает фабрику. Флаг-день: хаб и агенты обновляются вместе. P4-07 готов (D-74): `FabricService` (`show`, `set`), `korctl fabric show|set`, `GET/PATCH /api/fabric`, вкладка Fabric в панели (Topology, Fabric settings, Fabric DNS — перенесена из Agents), parity `fabric.show`/`fabric.settings`. Открыто: `POST /api/config/fabric-settings` (ещё задаёт `node.id`) не свёрнут в `FabricService`; префиксы и источники хаба во вкладке Fabric только читаются.
 
 Готово, когда: Prometheus на центре опрашивает агента за нодой 3 по реальному адресу, клиент ноды 3 видит сервис в LAN ноды 2, клиент Amnezia на ноде 3 выходит через `upstream:office`, а после разрыва канала на 60 с связь восстанавливается без действий оператора.
 
@@ -246,27 +246,32 @@ P0-03 с kill-switch (D-20, D-21).
 - [ ] UI-редактор правил вместо разрозненных полей, `korctl egress`, API (parity). Первая форма готова (D-72): `korctl egress|source`, `/api/egress`, `/api/sources`, панель Network → Egress and sources (редактор JSON); упорядоченный список с перетаскиванием и inline-explain — впереди.
 - [x] Удаление `client_policy`/`host_policy`/`host_split`/per-profile host routing, `kornode.config.legacy` и кода «последняя метка выигрывает» — одним блоком (D-73, `1fdf819`), без слияния с `legacy_policy`; вместе с ними ушли URL-списки маршрутов/доменов и server-pushed маршруты.
 - [ ] `examples/` и документация переписаны в формате v2. `examples/` и `config.example.yaml` готовы (`tests/test_examples.py`); README, `docs/architecture.md`, `docs/networking.md` ещё описывают v1.
+- [ ] URL-источники наборов (`sets`) на хабе: `route_urls`/`domain_urls` пока отвергаются как `runtime_unsupported`.
 
 Готово, когда: все примеры из `examples/` — валидный конфиг v2 и проходят полный netlab и E2E, в `models.py` не осталось старых ключей маршрутизации, а обновление хаба и агента разных версий (E2E-06) по-прежнему работает.
 
 ## Дальнейшие действия
 
-**Состояние на 2026-10-21 (конец четвёртой сессии).** В `main` влиты PR #1 (P2…P4-02), PR #2 (P4-03,
+**Состояние на 2026-10-21 (конец пятой сессии).** В `main` влиты PR #1 (P2…P4-02), PR #2 (P4-03,
 D-66), PR #3 (P4-04, D-67), а также P4-05 (источники агентов, D-68), P4-06 часть 1 (`via: exit:<n>` для
-трафика агентов, D-69), фикс CI (`vite` 8.3.x), **S-07 / D-71** (vhost фабрики по SNI) и **удаление
-`fabric.enabled`** (хаб всегда запускает фабрику). Всё после PR #3 слито локальным `git merge --no-ff`/
-fast-forward и запушено: `gh` не работает, пока заблокирован gnome-keyring, поэтому PR-объектов у этих
-слияний нет. **CI на `main` (`3366c2e`) зелёный: backend, frontend, netlab**; после него коммитились только
-docs. Push и слияние задач P4 владелец разрешил 2026-10-20 (после зелёных проверок, без обхода).
+трафика агентов, D-69), фикс CI (`vite` 8.3.x), **S-07 / D-71** (vhost фабрики по SNI), **удаление
+`fabric.enabled`** (хаб всегда запускает фабрику), ветка `redesign/p4-06b-hub-egress` (`95b0b62`: модель
+egress хаба D-72 и удаление v1-маршрутизации D-73, P4-06 часть 2 + P5-03) и ветка `redesign/p4-07-fabric`
+(`5f3a6d8`: раздел Fabric, D-74). Всё после PR #3 слито локальным `git merge --no-ff`/fast-forward и запушено:
+`gh` не работает, пока заблокирован gnome-keyring, поэтому PR-объектов у этих слияний нет. **CI на `main`
+(`95b0b62`) зелёный: backend, frontend, netlab.** Push и слияние задач P4 владелец разрешил 2026-10-20 (после
+зелёных проверок, без обхода).
 
 **Флаг-день D-71:** хаб и агенты обновляются вместе — новый хаб не пускает агента, который идёт на хост
 клиентов. Образы базы E2E-06 и переменные `E2E_PREVIOUS_*_IMAGE` надо пересобрать/обновить из текущего `main`.
 
-**Не сделано:** P4-06 часть 2 вместе с P5-03 (модель egress хаба, удаление legacy-ключей), P4-07
-(панель/CLI/API фабрики), сценарии NL-05, NL-07…NL-09, прогон `e2e.yml` через GitHub Actions, `examples/`
-и README в формате v2 (P5-05; они ещё используют явный пул `10.10.10.0/24`, это валидно), пересборка
-образов E2E-06. Накопительная передача — [CLAUDE-HANDOFF.md](CLAUDE-HANDOFF.md), детали P3 — [P3-07](P3-07-REVIEW.md),
-[P3-08](P3-08-REVIEW.md), [P3-09](P3-09-REVIEW.md), [P3-10](P3-10-REVIEW.md); решения — D-55…D-71;
+**Не сделано:** set/доменные выходы через `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05,
+NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спецификации, упорядоченный редактор правил с перетаскиванием и
+inline-explain (P5-01, сейчас JSON), URL-источники `sets` на хабе (`route_urls`/`domain_urls` →
+`runtime_unsupported`), README / `docs/architecture.md` / `docs/networking.md` в формате v2 (P5-05), свёртка
+`POST /api/config/fabric-settings` в `FabricService`, прогон `e2e.yml` через GitHub Actions, пересборка образов
+E2E-06. Накопительная передача — [CLAUDE-HANDOFF.md](CLAUDE-HANDOFF.md), детали P3 — [P3-07](P3-07-REVIEW.md),
+[P3-08](P3-08-REVIEW.md), [P3-09](P3-09-REVIEW.md), [P3-10](P3-10-REVIEW.md); решения — D-55…D-74;
 промпт следующей сессии — [NEXT_SESSION.md](NEXT_SESSION.md); эксплуатация —
 `docs/runbooks/hub-recovery.md` и `docs/runbooks/vm-e2e.md`.
 
@@ -306,6 +311,19 @@ PR #1 был большим (≈90 коммитов); его промежуто�
   `registry-snapshot` работают всегда, пул клиентов по умолчанию `10.100.<id>.0/24`. По дороге исправлены
   `GET /api/groups` (падал на группе `agents`) и отсутствие CRL после `initialize_runtime`. Тесты нефабричного
   режима удалены (список — в CHANGELOG). Netlab `test_spike_p4_vhosts.py` — 12 passed (ocserv 1.3.0).
+- **P4-06 часть 2 + P5-03** (D-72, D-73, `95b0b62`, три среза + удаление v1): модель egress хаба и
+  `HubEgressService` (`korctl egress|source`, `/api/egress`, `/api/sources`, панель Network → Egress and
+  sources, parity), источники хаба, выход хаба через `exit:<n>` для клиентов и источников (`to: any`).
+  **v1-маршрутизация удалена одним блоком:** `config/legacy.py`, `RoutingService`, `external_lists`,
+  `upstream_pushed`, ключи `routing.client_policy|host_policy|split|host_split|fwmark|table_id`,
+  per-profile маршруты/host-маршруты/pushed-маршруты, `korctl routes|upstream hook|sync`, вкладка Routing.
+  `examples/` и `config.example.yaml` — формат v2 (`tests/test_examples.py`). Netlab golden
+  `hub_egress_exit` загружается в ядро; harness E2E переведён на `egress: []`.
+- **P4-07** (D-74, `5f3a6d8`): `FabricService` (`show`, `set`), `korctl fabric show|set`,
+  `GET/PATCH /api/fabric`, вкладка Fabric (Topology, Fabric settings, Fabric DNS — перенесена из Agents),
+  parity `fabric.show`/`fabric.settings`. Ядро не тронуто, netlab/E2E не гонялись. Открыто:
+  `POST /api/config/fabric-settings` (ещё задаёт `node.id`) не свёрнут в `FabricService`; префиксы и источники
+  хаба во вкладке Fabric только читаются.
 
 Что реализовано в P3-07…P3-10:
 
@@ -344,19 +362,20 @@ PR #1 был большим (≈90 коммитов); его промежуто�
 Хвосты P2 закрыты (D-60, пункт 2 ниже). `Dockerfile.agent` собран: 396 МБ; цель spec 06
 пересмотрена до ≤400 МБ (D-61).
 
-Фактические проверки (2026-10-21, после S-07 и удаления `fabric.enabled`):
+Фактические проверки (2026-10-21, после модели egress хаба, удаления v1 и P4-07):
 
 - dev-машина (`.venv`): `make lint typecheck test render parity` зелёные на Python 3.13 и 3.12 —
-  **1223 passed / 91 skipped**.
-- Привилегированный netlab на hub-VM `192.168.122.123`: **68 passed** (включая загрузку golden-наборов
-  в ядро и spike S-07). На шаге «без флага» один тест —
-  `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` — упал по таймауту HTTP 2 с под
+  **1150 passed / 92 skipped** после `95b0b62` (число упало из-за удаления тестов v1, список — в CHANGELOG),
+  **1155 passed / 92 skipped** после P4-07. Фронтенд: 34 теста + сборка.
+- Привилегированный netlab на hub-VM `192.168.122.123`: **69 passed** (включая загрузку golden-наборов
+  в ядро, `hub_egress_exit` и spike S-07). Ранее тест
+  `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` однажды падал по таймауту HTTP 2 с под
   нагрузкой; отдельно 2/2 passed, в CI-netlab зелёный.
-- Четырёхмашинный E2E, кейс `routed` (оба шага): **6 passed, 7 skipped** — NL-01, NL-02, NL-03, NL-04,
-  NL-06, E2E-07. Остальной набор (NL-10/11/12, E2E-01…05, NL-13) в последний раз зелёный на 2026-10-19
-  (D-62); E2E-04 в цикле из 5 прогонов — 5 passed. E2E-06 работает на образах из слияния PR #1
-  (registry-контейнер на hub-VM), после D-71 они несовместимы — см. пункт 5 ниже.
-- CI на `main` (`3366c2e`): backend, frontend, netlab — зелёные.
+- Четырёхмашинный E2E, кейс `routed` (оба шага, после `95b0b62`): **6 passed, 7 skipped** — NL-01, NL-02,
+  NL-03, NL-04, NL-06, E2E-07 (как до изменений). Остальной набор (NL-10/11/12, E2E-01…05, NL-13) в последний
+  раз зелёный на 2026-10-19 (D-62); E2E-04 в цикле из 5 прогонов — 5 passed. E2E-06 работает на образах из
+  слияния PR #1 (registry-контейнер на hub-VM), после D-71 они несовместимы — см. пункт 5 ниже.
+- CI на `main` (`95b0b62`): backend, frontend, netlab — зелёные.
 
 **Порядок дальнейших работ:**
 
@@ -368,37 +387,15 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    `udp-port`, иначе DTLS не предлагается. Токен несёт `sni`, пакет — `hubs[].server_name`, агент ходит на адрес хаба под
    именем vhost (`--resolve`). **`fabric.enabled` удалён** (ветка `redesign/p4-fabric-always-on`): хаб всегда запускает
    фабрику, пул клиентов всегда `10.100.<id>.0/24`. Флаг-день: хаб и агенты обновляются вместе, образы E2E-06 пересобрать.
-3. **P4-06 часть 2 + P5-03 одним блоком** (D-69, D-70): модель egress хаба — ключи
-   `egress`/`sources`/`sets` в `config/models.py` **вместо** старых ключей (`legacy_policy` и
-   `kornode.config.legacy` удаляются, тесты старого поведения — тоже, со списком в PR), валидация
-   против ролей реестра, parity-поверхности `egress.hub`/`sources.hub` (CLI `egress show/edit/set/check`,
-   `GET/PUT /api/egress`, `source add/del/list`, панель Network → Egress/Sources, `parity.yaml`);
-   источники хаба в `HubNetInputs.facts()` и их экспорт агентам; выход хаба через `exit:<n>` (клиенты,
-   источники и хост хаба) с обратным маршрутом на узле n для источников с `export: false`;
-   доменные/set-выходы агентов; netlab NL-17/NL-18, E2E-07 в редакции спецификации, NL-05;
-   doctor-проверки источников хаба (из D-68).
-
-   **Карта legacy-ключей** (снята 2026-10-21 grep'ом по `backend frontend tests docs/spec parity.yaml`):
-   ключи `client_policy`/`host_policy`/`host_split`/`legacy_policy`/`routing.split`/`fwmark`/`table_id`
-   живут в `config/models.py` (RoutingConfig и миграции), `config/legacy.py` (175 строк, удаляется
-   целиком), `config/defaults.py`, `services/routing.py` (550 строк), `services/netinputs.py`
-   (`legacy_policy`), `services/upstream.py`, `services/host_dns.py`, `services/backup_state.py`,
-   `services/apply.py`, `renderers/dnsmasq.py` (split-домены), `api/routes_routing.py`,
-   `api/routes_upstream.py`, `tunnels/vpnc-script-kornode`; фронтенд — `lib/drafts.ts`,
-   `app/hooks/useRouting.ts`, `api.ts`, `views/upstream/*` (RoutingListSourcesPanel, профили). Тесты v1:
-   `test_config_legacy.py`, `test_routing_policy_migration.py`, `test_routing_api.py`,
-   `test_routing_service.py`, `test_domain_resolver.py`, `test_dnsmasq_render.py`, часть `test_upstream_*`,
-   `test_net_service.py`, `test_netinputs.py`, netlab `test_p0_upstream.py`/`kornode_nodes.py`/
-   `tests/golden/hub.rules`. **Остаётся** общая инфраструктура: `net/` (kernel, compile, diff, state;
-   `fwmark` и таблицы выходов — внутренняя деталь компилятора), reconciler, kill switch.
-
-   Делать вертикальными срезами: модель `egress`/`sources`/`sets` + валидатор → компилятор хаба поверх
-   `kornode.net` → CLI/API/панель + parity → удаление legacy одним блоком → netlab NL-17/NL-18. Перед
-   пушем в `main` гонять **все** шаги CI backend: `make lint typecheck test render parity` (`make check`
-   не включает `render` и `parity`, `typecheck` ещё проверяет `tests/e2e`) — иначе красный `main` из-за
-   `config.example.yaml` повторится.
-4. **P4-07:** панель/CLI/API фабрики — раздел `Fabric` (топология, префиксы узлов, записи DNS — сейчас
-   на странице Agents → Fabric DNS —, источники), parity.
+3. ~~**P4-06 часть 2 + P5-03**~~ — сделано (D-72, D-73, `95b0b62`): модель egress хаба, источники хаба, выход хаба
+   через `exit:<n>`, v1-маршрутизация удалена одним блоком. **Остаток:** доменные/set-выходы агентов и хаба через
+   `exit:<n>` (нужны одинаковые наборы на хабе и узле), netlab NL-17/NL-18, E2E-07 в редакции спецификации, NL-05,
+   doctor-проверки источников хаба (из D-68). Перед пушем в `main` гонять **все** шаги CI backend:
+   `make lint typecheck test render parity` (`make check` не включает `render` и `parity`, `typecheck` ещё
+   проверяет `tests/e2e`).
+4. ~~**P4-07**~~ — сделано (D-74, `5f3a6d8`): `FabricService`, `korctl fabric`, `/api/fabric`, вкладка Fabric.
+   **Остаток:** свернуть `POST /api/config/fabric-settings` (задаёт `node.id`) в `FabricService`; редактирование
+   префиксов и источников хаба во вкладке Fabric (сейчас только чтение).
 5. **Пересобрать базу E2E-06 (флаг-день D-71):** образы «предыдущей версии» в registry-контейнере на
    hub-VM собраны до vhost'ов и теперь несовместимы. Собрать новые из текущего `main` так же, как при
    слиянии PR #1, и обновить `E2E_PREVIOUS_HUB_IMAGE`/`E2E_PREVIOUS_AGENT_IMAGE` (без работающего `gh` —
@@ -411,8 +408,10 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрение деплоя. Раннер в
    последний раз был `offline` (подключается, но брокер GitHub из VM отвечает медленно) — проверять
    `gh api repos/r4ven-me/kornode/actions/runners`, логи — `~/actions-runner/_diag/` на hub-VM.
-8. **Остаток фазы 5** (P5-01, P5-05): редактор egress в панели, `examples/` и README в формате v2.
-   P5-02 и P5-04 сняты (D-70).
+8. **Остаток фазы 5** (P5-01, P5-05): упорядоченный редактор правил egress в панели с перетаскиванием и
+   inline-explain (сейчас редактор JSON); README, `docs/architecture.md`, `docs/networking.md` в формате v2
+   (`examples/` и `config.example.yaml` уже v2); URL-источники `sets` на хабе (`route_urls`/`domain_urls`
+   сейчас `runtime_unsupported`). P5-02 и P5-04 сняты (D-70), P5-03 сделан (D-73).
 9. Известные мелочи: нестабильный по таймауту netlab-тест
    `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` (HTTP 2 с; если повторится в CI —
    поднять таймаут); NL-04 однажды упал в полном прогоне (дамп маршрутов был полным, в одиночку и в
@@ -513,7 +512,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
 
 **5. Что нужно от владельца.** Разблокировать gnome-keyring, чтобы `gh` снова работал (PR, `gh workflow run`); одобрить деплой окружения `kornode-e2e` для первого прогона `e2e.yml`; решить, нужен ли отдельный `E2E_HUB_ADDRESS` (сейчас — адрес hub-VM); обновить `E2E_PREVIOUS_*_IMAGE` после пересборки базы E2E-06 (флаг-день D-71). GitHub настроен 2026-10-20: environment `kornode-e2e` (required reviewer — владелец, только protected-ветки), секреты `E2E_SSH_KEY`/`E2E_SSH_KNOWN_HOSTS` (отдельный ключ из `~/.e2e` на hub-VM), переменные `E2E_*_HOST`, `E2E_SSH_USER/PORT`, `E2E_PREVIOUS_*_IMAGE`, `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true`, self-hosted runner `kornode-e2e-hub` (метка `kornode-e2e`); `main` защищена от force-push и удаления. Раннер на hub включать **только** пока workflow без `pull_request` (сейчас — только `workflow_dispatch`).
 
-**6. После P3.** «Готово, когда» фазы 3 закрыто четырёхмашинным E2E (D-62). Фаза 4: P4-01…P4-05, P4-06 часть 1 и S-07 (D-71) готовы; в `tests/e2e/test_routed_fabric.py` остаются 7 skip с причинами: E2E-07 в редакции спецификации (источники хаба и доменные выходы — P4-06 часть 2), NL-05, NL-07…NL-09, NL-13-forwarding и E2E-06-clients (клиентский трафик); фаза 5 — по плану выше.
+**6. После P3.** «Готово, когда» фазы 3 закрыто четырёхмашинным E2E (D-62). Фаза 4: P4-01…P4-05, P4-06 части 1–2 (без доменных/set-выходов), P4-07 и S-07 (D-71) готовы; в `tests/e2e/test_routed_fabric.py` остаются 7 skip с причинами: E2E-07 в редакции спецификации (хаб-источник и доменные выходы; реальный сценарий выхода агентов — `test_e2e_07_client_of_agent_a_...` — проходит), NL-05, NL-07…NL-09, NL-13-forwarding и E2E-06-clients (клиентский трафик); фаза 5 — P5-03 сделан (D-73), остальное по плану выше.
 
 ## Тестирование
 
@@ -573,6 +572,6 @@ PR #1 был большим (≈90 коммитов); его промежуто�
 
 **Режим фабрики.** `fabric.enabled` удалён (D-71): spike S-07 прошёл — агенты и enroll идут на vhost `fabric.<fabric.domain>` по SNI, а хост клиентов на том же 443/tcp сохраняет вход по сертификату и OIDC (D-70). Хаб всегда работает с фабрикой; хаб без агентов — обычный сервер для клиентов. Ключ `fabric.enabled` в конфиге отвергается как неизвестный.
 
-**Удаляется из кода:** `kornode.config.legacy` и `legacy_policy`, порядок «последняя метка выигрывает» и связанные с ним правила обнуления метки, отдельные `*_static`/`*_dynamic` наборы на каждую комбинацию цели и источника (остаётся по паре на выход), `nftables-static-refresh` и `nftables-dynamic-refresh` как отдельные пути (их заменяет diff reconciler'а), `RoutingTarget`/`list_targets()`. Тесты, кодирующие поведение v1, удаляются в том же PR со списком.
+**Удалено из кода (D-73, `1fdf819`):** `kornode.config.legacy` и `legacy_policy`, порядок «последняя метка выигрывает» и связанные с ним правила обнуления метки, отдельные `*_static`/`*_dynamic` наборы на каждую комбинацию цели и источника (остаётся по паре на выход), `nftables-static-refresh` и `nftables-dynamic-refresh` как отдельные пути (их заменяет diff reconciler'а), `RoutingTarget`/`list_targets()`, а также `RoutingService`, `external_lists`, `upstream_pushed` и `korctl routes|upstream hook|sync`. Тесты, кодирующие поведение v1, удалены в том же коммите (список — в CHANGELOG).
 
 **Не трогается:** ocserv и управление пользователями (включая вход по сертификату и OIDC), сертификаты, internal DNS с блоклистами, разрешение доменов через `DomainResolverService` (он пишет в наборы правил `egress`), панель и CLI как интерфейсы, совместимость хаба и агента разных версий v2.
