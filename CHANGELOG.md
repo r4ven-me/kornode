@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (E2E-07 hub source, P4-06 tail; branch `redesign/p4-06c-tests`)
+
+- E2E `test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_gone`: a source attached to the hub (docker network standing in for wg-easy) with `source -> any via exit:3` leaves through agent-b with its address, gets nowhere while the exit node is down and recovers. The harness gives the hub its own source network and client container, and keeps the hub config in a writable bucket so `korctl source add` / `egress set` work. The domain/subnet-list half of E2E-07 stays blocked on set exits.
+
 ### Added (domain and URL sets on agents, D-78; branch `redesign/p5-agent-domain-sets`)
 
 - Agent policies may use `domains`, `domain_urls` and `route_urls`: the node resolves them itself through the hub resolver (stdlib DNS client, `kornode_agent.resolver`) and downloads the lists (`kornode.net.lists`, shared with the hub); the bundle format is unchanged. `exit:<n>` to a set or domain stays refused.
