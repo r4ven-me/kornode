@@ -38,6 +38,7 @@ from kornode_agent.health import AgentHealth
 from kornode_agent.inputs import AgentNetInputs, SystemProbes
 from kornode_agent.inspection import Redactor, cache_redactor, load_cached, safe_json
 from kornode_agent.local import LocalError, LocalServer, ProcessLock, Request
+from kornode_agent.resolver import AgentSetResolver, hub_nameservers
 from kornode_agent.store import Store, atomic_write
 from kornode_agent.tunnels import TunnelManager, specs_for
 
@@ -147,8 +148,17 @@ class Agent:
             converge=self._converge_or_raise,
             link_up=lambda iface: self.probes.links().get(iface, False),
         )
+        self.set_resolver = AgentSetResolver(
+            self.root,
+            nameservers=self._hub_nameservers,
+            policy=lambda: self.inputs.active.bundle.policy if self.inputs.active else None,
+        )
         self.inputs = AgentNetInputs(
-            self.config, self.probes, self.tunnels, on_change=lambda: self.reconciler.wake()
+            self.config,
+            self.probes,
+            self.tunnels,
+            on_change=self._bundle_changed,
+            resolved=self.set_resolver.read,
         )
         self.kernel = Kernel()
         self.reconciler = Reconciler(self.inputs.desired, self.kernel)
@@ -173,6 +183,7 @@ class Agent:
             self.reconciler.run_forever,
             lambda: watch_netlink(self.reconciler, self._thread_stop),
             self._tunnel_loop,
+            lambda: self.set_resolver.run(self._thread_stop, self.reconciler.wake),
         ):
             thread = threading.Thread(target=target, daemon=True)
             self._threads.append(thread)
@@ -190,6 +201,17 @@ class Agent:
         ]
         await self.stop.wait()
         return self.exit_code
+
+    def _bundle_changed(self) -> None:
+        self.reconciler.wake()
+        self.set_resolver.changed.set()  # re-resolve the sets of the new policy now
+
+    def _hub_nameservers(self) -> list[str]:
+        """The hub resolver the node's dnsmasq forwards the fabric zone to (D-66, D-78)."""
+        active = self.inputs.active
+        dns = active.bundle.dns if active else None
+        zones = dns.forward_zones if dns is not None and dns.forward_zones else ()
+        return hub_nameservers([server for zone in zones for server in zone.servers])
 
     def _fabric_address(self) -> str | None:
         inputs = getattr(self, "inputs", None)

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (domain and URL sets on agents, D-78; branch `redesign/p5-agent-domain-sets`)
+
+- Agent policies may use `domains`, `domain_urls` and `route_urls`: the node resolves them itself through the hub resolver (stdlib DNS client, `kornode_agent.resolver`) and downloads the lists (`kornode.net.lists`, shared with the hub); the bundle format is unchanged. `exit:<n>` to a set or domain stays refused.
+
 ### Changed (fabric settings single writer, D-77; branch `redesign/p4-07b-fabric-settings`)
 
 - `POST /api/config/fabric-settings` is removed: `FabricService.set` takes `node_id` too (`node.id`), `GET/PATCH /api/fabric` and `korctl fabric show|set --node-id` expose it; the Fabric tab has a Hub node ID field and the Config panel saves through `PATCH /api/fabric`. Invalid fabric settings answer 422 `invalid` instead of 400.

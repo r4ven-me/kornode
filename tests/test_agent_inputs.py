@@ -83,6 +83,15 @@ def test_bundle_facts_follow_the_links(tmp_path: Path) -> None:
     assert inputs.facts().upstreams == ()
 
 
+def test_resolved_set_addresses_reach_the_node_facts(tmp_path: Path) -> None:
+    resolved = {"web": frozenset({"203.0.113.5"})}
+    inputs = AgentNetInputs(
+        CONFIG, FakeProbes({"oc-hub0": True}), FakeCarriers(), resolved=lambda: resolved
+    )
+    inputs.set_bundle(_validated(tmp_path))
+    assert inputs.facts().resolved == resolved
+
+
 def test_set_bundle_wakes_the_reconciler(tmp_path: Path) -> None:
     woke: list[int] = []
     inputs = AgentNetInputs(

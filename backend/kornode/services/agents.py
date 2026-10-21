@@ -835,14 +835,6 @@ class AgentService:
             if node.id != changed:
                 # Another node's stale policy must not block this mutation.
                 continue
-            if any(s.domains or s.domain_urls or s.route_urls for s in policy.sets.values()) or any(
-                getattr(rule.to, "domains", ()) for rule in policy.egress
-            ):
-                raise ManagementError(
-                    409,
-                    "runtime_unsupported",
-                    "agent domain/URL resolution is not implemented; use explicit CIDRs",
-                )
             self._check_exits(r, node, policy)
             for source in policy.sources:
                 network = ipaddress.ip_network(source.cidr)
@@ -934,7 +926,8 @@ class AgentService:
                 raise ManagementError(
                     409,
                     "runtime_unsupported",
-                    "exit via another node supports `to: any` only; set/domain exits need hub sets",
+                    "exit via another node supports `to: any` only; "
+                    "set/domain exits need identical sets on the hub and the node (D-78)",
                 )
             if "host" in rule.from_:
                 raise ManagementError(

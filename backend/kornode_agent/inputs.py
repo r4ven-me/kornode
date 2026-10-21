@@ -11,7 +11,7 @@ import ipaddress
 import json
 import subprocess
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -117,11 +117,13 @@ class AgentNetInputs:
         carriers: Carriers,
         *,
         on_change: Callable[[], None] = lambda: None,
+        resolved: Callable[[], Mapping[str, frozenset[str]]] = dict,
     ) -> None:
         self.config = config
         self.probes = probes
         self.carriers = carriers
         self._on_change = on_change
+        self._resolved = resolved
         self._lock = threading.Lock()
         self._active: Validated | None = None
 
@@ -225,6 +227,7 @@ class AgentNetInputs:
             local_addresses=local_addresses,
             access_ifaces=access_ifaces,
             session_routes=session_routes,
+            resolved=self._resolved(),
         )
 
     def desired(self) -> DesiredState:

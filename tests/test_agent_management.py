@@ -325,12 +325,11 @@ def test_artifact_ownership_size_and_metadata_without_base64(world) -> None:  # 
         {"sets": {"web": {"route_urls": ["https://example.org/routes"]}}, "egress": []},
     ],
 )
-def test_unsupported_runtime_is_refused_not_delivered(world, policy) -> None:  # type: ignore[no-untyped-def]
+def test_domain_and_url_sets_are_accepted_for_agents(world, policy) -> None:  # type: ignore[no-untyped-def]
+    # The node resolves them itself (D-78); the bundle carries the policy as is.
     _, service, _, _ = world
     service.create(AgentCreate(name="branch"))
-    with pytest.raises(ManagementError) as exc:
-        service.set_policy("branch", policy)
-    assert exc.value.error == "runtime_unsupported"
+    assert service.set_policy("branch", policy)["name"] == "branch"
 
 
 def test_stale_policy_of_one_agent_does_not_block_another(world) -> None:  # type: ignore[no-untyped-def]
@@ -338,17 +337,16 @@ def test_stale_policy_of_one_agent_does_not_block_another(world) -> None:  # typ
     service.create(AgentCreate(name="old"))
     service.create(AgentCreate(name="branch"))
     old = env.registry.get_node_by_name("old")
-    # A policy the runtime no longer supports, left over from an earlier release.
-    env.registry.update_node(
-        old.id, policy={"sets": {"web": {"domains": ["example.org"]}}, "egress": []}
-    )
+    # A policy the hub would refuse today (exit node gone), left over from earlier.
+    stale = {"egress": [{"from": ["clients"], "to": "any", "via": "exit:9"}]}
+    env.registry.update_node(old.id, policy=stale)
 
     saved = service.set_policy("branch", {"egress": []})
 
     assert saved["name"] == "branch"
     with pytest.raises(ManagementError) as exc:
-        service.set_policy("old", {"sets": {"web": {"domains": ["example.org"]}}, "egress": []})
-    assert exc.value.error == "runtime_unsupported"
+        service.set_policy("old", stale)
+    assert exc.value.error == "exit_node"
 
 
 @pytest.mark.parametrize(
