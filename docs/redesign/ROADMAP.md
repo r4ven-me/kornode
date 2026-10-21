@@ -128,7 +128,7 @@ Done when:
 
 | ID | Task |
 | --- | --- |
-| P5-01 | **Hub done in a first form (D-72): `korctl egress|source`, `/api/egress`, `/api/sources`, panel Network → Egress and sources (JSON policy editor + source form); ordered-list editor with drag, dead-rule warnings inline and explain still open.** Egress editor in the panel (ordered list, drag to reorder, dead-rule warnings, explain inline) + `korctl egress ...` + API (parity). |
+| P5-01 | **Done (D-72, D-76).** Egress editor in the panel (ordered list, drag to reorder, dead-rule warnings, inline explain of the saved policy; JSON kept as an advanced tab) + `korctl egress ...` + API (parity). |
 | ~~P5-02~~ | **Removed (D-70):** no `korctl config migrate` — there are no v1 installations; legacy keys are deleted, not translated. |
 | P5-03 | **Done (D-73, `1fdf819`).** Remove legacy keys and code outright (D-70; together with P4-06 part 2): `routing.client_policy/host_policy/split/host_split`, per-profile route/host-route lists, `routing.fwmark/table_id`, `kornode.config.legacy`/`legacy_policy`, last-mark-wins, per-target static/dynamic set families, static/dynamic refresh templates (the `UpstreamService`/watchdog policy re-application already went in P2, D-29). Tests encoding v1 behaviour are deleted in the same PR. |
 | ~~P5-04~~ | **Removed (D-70):** no `korctl migrate-to-agent` — nodes are deployed as agents and enrolled. |

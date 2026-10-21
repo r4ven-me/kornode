@@ -10,7 +10,7 @@ export type Agent = {
 };
 export type Prefix = { prefix: string; kind: string; export: boolean };
 export type Source = { name: string; interface: string; cidr: string; export: boolean; allow_outside_pool?: boolean; description?: string };
-export type Rule = { id?: string | null; from: string[]; to: unknown; via: string; kill_switch?: boolean };
+export type Rule = { id?: string | null; from: string[]; to: unknown; via: string; kill_switch?: boolean; description?: string };
 export type Policy = { sources?: Source[]; sets?: JsonObject; egress?: Rule[] };
 export type Upstream = {
   name: string; interface: string; server: string; port: number; enabled?: boolean;

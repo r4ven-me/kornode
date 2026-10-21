@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (egress rule editor, P5-01, D-76; branch `redesign/p5-01-egress-editor`)
+
+- Panel Network → Egress and sources: ordered rule list (per-rule form, drag-and-drop and Up/Down reorder), dead rules marked inline while editing, inline explain of the saved policy, JSON editor kept as an advanced tab. `egress show|check|set` / `/api/egress*` also return `dead_rules: [{rule, shadowed_by}]`.
+
 ### Added (URL-sourced sets on the hub, D-75; branch `redesign/p5-url-sets`)
 
 - `sets.*.route_urls` / `domain_urls` are accepted on the hub: `DomainResolverService` downloads them (hourly, cached, last good copy kept on failure) and records them in `resolved/<set>.txt`. Agents still reject URL sets.

@@ -64,6 +64,15 @@ def check_hub_policy(config: AppConfig, nodes: Iterable[Node]) -> None:
     validate_hub_policy(config.egress_policy(), nodes, slugs)
 
 
+def _warning_fields(policy: EgressPolicy) -> dict[str, Any]:
+    """Dead-rule findings as text (CLI) and as indices (the panel marks rows with them)."""
+    dead = dead_rules(policy)
+    return {
+        "warnings": [f"rule {rule} is shadowed by rule {by}" for rule, by in dead],
+        "dead_rules": [{"rule": rule, "shadowed_by": by} for rule, by in dead],
+    }
+
+
 def _dump(policy: EgressPolicy) -> dict[str, Any]:
     dumped: dict[str, Any] = policy.model_dump(mode="json", by_alias=True, exclude_defaults=True)
     return {
@@ -96,9 +105,7 @@ class HubEgressService:
         policy = self.config.egress_policy()
         return {
             "policy": _dump(policy),
-            "warnings": [
-                f"rule {dead} is shadowed by rule {by}" for dead, by in dead_rules(policy)
-            ],
+            **_warning_fields(policy),
         }
 
     def sources(self) -> dict[str, Any]:
@@ -106,12 +113,13 @@ class HubEgressService:
 
     def check(self, data: dict[str, Any]) -> dict[str, Any]:
         candidate = self._candidate(data)
-        return {"valid": True, "warnings": self._warnings(candidate)}
+        return {"valid": True, **_warning_fields(candidate.egress_policy())}
 
     def set_policy(self, data: dict[str, Any]) -> dict[str, Any]:
         candidate = self._candidate(data)
         self._commit(data)
-        return {"policy": _dump(candidate.egress_policy()), "warnings": self._warnings(candidate)}
+        policy = candidate.egress_policy()
+        return {"policy": _dump(policy), **_warning_fields(policy)}
 
     def set_source(self, name: str, data: dict[str, Any] | None) -> dict[str, Any]:
         current = _dump(self.config.egress_policy())
@@ -126,10 +134,6 @@ class HubEgressService:
                 raise _invalid(exc) from None
             current["sources"].append(source.model_dump(mode="json", exclude_defaults=True))
         return self.set_policy(current) | {"sources": current["sources"]}
-
-    def _warnings(self, candidate: AppConfig) -> list[str]:
-        policy = candidate.egress_policy()
-        return [f"rule {dead} is shadowed by rule {by}" for dead, by in dead_rules(policy)]
 
     def _raw(self, data: dict[str, Any]) -> dict[str, Any]:
         try:
