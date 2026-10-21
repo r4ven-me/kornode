@@ -139,6 +139,22 @@
    (клиенты хаба, источники хаба, хост хаба): таблица узла n уже есть, нужны метки по классам хаба и **обратный маршрут
    на узле n** для источников с `export: false`. Затем: доменные/set-выходы агентов (нужны одинаковые наборы на хабе),
    NL-17/NL-18 (netlab), E2E-07 в редакции спецификации, NL-05. Источники хаба и их doctor-проверки отложены сюда из D-68.
+   **Карта legacy-ключей (снята 2026-10-21, grep по `backend frontend tests docs/spec parity.yaml`):** ключи
+   `client_policy`/`host_policy`/`host_split`/`legacy_policy`/`routing.split`/`fwmark`/`table_id` живут в
+   `config/models.py` (RoutingConfig и миграции), `config/legacy.py` (175 строк, удаляется целиком),
+   `config/defaults.py`, `services/routing.py` (550 строк), `services/netinputs.py` (`legacy_policy`),
+   `services/upstream.py`, `services/host_dns.py`, `services/backup_state.py`, `services/apply.py`,
+   `renderers/dnsmasq.py` (split-домены), `api/routes_routing.py`, `api/routes_upstream.py`,
+   `tunnels/vpnc-script-kornode`; фронтенд — `lib/drafts.ts`, `app/hooks/useRouting.ts`, `api.ts`,
+   `views/upstream/*` (RoutingListSourcesPanel, профили). Тесты v1: `test_config_legacy.py`,
+   `test_routing_policy_migration.py`, `test_routing_api.py`, `test_routing_service.py`, `test_domain_resolver.py`,
+   `test_dnsmasq_render.py`, часть `test_upstream_*`, `test_net_service.py`, `test_netinputs.py`, netlab
+   `test_p0_upstream.py`/`kornode_nodes.py`/`tests/golden/hub.rules`. Общая инфраструктура, которая **остаётся**:
+   `net/` (kernel, compile, diff, state: `fwmark`/таблицы выходов как внутренняя деталь компилятора), reconciler,
+   kill switch. Делать вертикальными срезами: модель `egress`/`sources`/`sets` + валидатор → компилятор хаба поверх
+   `kornode.net` → CLI/API/панель + parity → удаление legacy одним блоком → netlab NL-17/NL-18.
+   Перед пушем в `main` гонять **все** шаги CI: `make lint typecheck test render parity` (память
+   `ci-steps-beyond-make-check`), иначе красный `main` из-за `config.example.yaml` повторится.
 3. **P4-07**: панель/CLI/API фабрики (топология, префиксы узлов, записи DNS — сейчас они на странице Agents →
    Fabric DNS —, источники), parity. Раздел `Fabric` в панели.
 4. **Прогон `e2e.yml` на GitHub Actions**: настроено (см. начало файла). Нужно, чтобы владелец разблокировал keyring, затем
