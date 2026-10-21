@@ -274,6 +274,24 @@ class UpstreamService:
                 return True
         return False
 
+    def _interface_admin_up(self, interface: str) -> bool:
+        """Whether the device carries the UP flag.
+
+        The reconciler treats an exit as up only with this flag (``NetInputs._links``),
+        and openconnect's script sets it moments after creating the device: the pass
+        right after dialing must not see the tunnel as still down.
+        """
+        result = self.runner.run(
+            ["ip", "-j", "link", "show", "dev", interface], timeout=5, check=False
+        )
+        if not result.ok:
+            return False
+        try:
+            entries = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError:
+            return False
+        return any("UP" in entry.get("flags", []) for entry in entries if isinstance(entry, dict))
+
     def _interface_exists(self, interface: str) -> bool:
         """Whether the tunnel device has been created yet.
 
@@ -621,7 +639,11 @@ class UpstreamService:
         process_seen = False
         while time.monotonic() < deadline:
             process_seen = self._profile_connected(profile)
-            if process_seen and self._interface_exists(interface):
+            if (
+                process_seen
+                and self._interface_exists(interface)
+                and self._interface_admin_up(interface)
+            ):
                 return
             time.sleep(0.2)
 

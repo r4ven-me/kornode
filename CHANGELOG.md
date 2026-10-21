@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (connect race, branch `redesign/netlab-connect-race`)
+
+- `upstream connect` waited only for the tunnel device to exist, but the reconciler counts an exit as up only with the `UP` flag, which openconnect's script sets a moment later: the final pass could leave the exit down (kill-switch route in place) until the next pass. `_verify_backgrounded` now also waits for the flag. The netlab helper waited for any `default` in the exit table, which the kill-switch `unreachable default` satisfies; it now waits for `default dev <tunnel>`. Found as a CI flake in `test_kernel_after_connect_matches_the_plan`.
+
 ### Added (E2E-07 hub source, P4-06 tail; branch `redesign/p4-06c-tests`)
 
 - E2E `test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_gone`: a source attached to the hub (docker network standing in for wg-easy) with `source -> any via exit:3` leaves through agent-b with its address, gets nowhere while the exit node is down and recovers. The harness gives the hub its own source network and client container, and keeps the hub config in a writable bucket so `korctl source add` / `egress set` work. The domain/subnet-list half of E2E-07 stays blocked on set exits.

@@ -19,6 +19,14 @@ from kornode.services.command import CommandError, CommandResult
 from kornode.services.net import NetApplyError
 from kornode.services.upstream import UpstreamService
 
+_REAL_ADMIN_UP = UpstreamService._interface_admin_up
+
+
+@pytest.fixture(autouse=True)
+def _tunnel_is_admin_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FakeRunner has no `ip` to ask; the UP flag is exercised on its own below."""
+    monkeypatch.setattr(UpstreamService, "_interface_admin_up", lambda self, interface: True)
+
 
 class FakeRunner:
     """tmp_path is optional: only tests exercising a connect() that must
@@ -643,6 +651,30 @@ def test_connect_waits_for_tunnel_interface_before_applying_routes(
         runner.close()
 
     assert expected_interface == "oc-middle0"
+    assert net.calls == ["converge", "converge"]
+
+
+def test_connect_waits_for_the_up_flag_before_the_final_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reconciler counts an exit as up only with the UP flag, which openconnect sets
+    after creating the device: the pass after dialing must not run before it."""
+    config = _config(tmp_path)
+    config.upstream.profiles.append(_profile())
+    config.upstream.active_profile = "primary"
+    runner = FakeRunner(tmp_path)
+    net = FakeNet()
+    service = UpstreamService(config, runner=runner, net=net)
+    flags = iter([False, False, True])
+    monkeypatch.setattr(service, "_interface_exists", lambda _interface: True)
+    monkeypatch.setattr(service, "_interface_admin_up", lambda _interface: next(flags))
+
+    try:
+        service.connect_active()
+    finally:
+        runner.close()
+
+    assert next(flags, None) is None  # all three checks were consumed before the final pass
     assert net.calls == ["converge", "converge"]
 
 
@@ -1613,7 +1645,7 @@ def test_watchdog_logs_every_failed_healthcheck_with_streak(
                 "secrets_dir": tmp_path / "secrets",
                 "log_dir": tmp_path / "logs",
             },
-                "upstream": {
+            "upstream": {
                 "enabled": True,
                 "check_interval": 1,
                 "check_threshold": 2,
@@ -2130,3 +2162,21 @@ def test_disconnect_of_a_dead_process_drops_its_stale_carrier_exemption(tmp_path
 
     assert not service._carrier_exclusion_state_path(profile).exists()
     assert net.calls == ["converge"]
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ('[{"ifname": "oc-middle0", "flags": ["POINTOPOINT", "UP", "LOWER_UP"]}]', True),
+        ('[{"ifname": "oc-middle0", "flags": ["POINTOPOINT", "NOARP"]}]', False),
+        ("not json", False),
+    ],
+)
+def test_interface_admin_up_reads_the_up_flag(output: str, expected: bool) -> None:
+    class Runner:
+        def run(self, argv: list[str], **_: Any) -> CommandResult:
+            return CommandResult(argv=tuple(argv), returncode=0, stdout=output, stderr="")
+
+    stub = type("Stub", (), {"runner": Runner()})()
+
+    assert _REAL_ADMIN_UP(stub, "oc-middle0") is expected  # type: ignore[arg-type]
