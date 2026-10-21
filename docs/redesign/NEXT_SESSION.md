@@ -1,5 +1,7 @@
-# Prompt for the next session — остаток P4-06, P5-01, `e2e.yml`
+# Prompt for the next session — set/доменные выходы, хвост netlab/E2E, `e2e.yml`
 
+> **Шестая сессия (2026-10-21), всё влито в `main`, CI зелёный (последний `65fde1d`: backend, frontend, netlab, publish):** (1) URL-источники `sets` на хабе (D-75, `kornode.net.lists`, `DomainResolverService` качает `route_urls`/`domain_urls` раз в час, кэш, при сбое остаётся последняя копия); (2) упорядоченный редактор правил egress в панели (P5-01, D-76: форма на правило, drag и Up/Down, мёртвые правила inline через `dead_rules` в ответах `egress show|check|set`, inline-explain сохранённой политики, JSON — вкладка advanced); (3) `POST /api/config/fabric-settings` удалён, `FabricService.set` принимает `node_id` (D-77); (4) домены и URL-наборы на агентах (D-78): агент резолвит сам через DNS хаба (`kornode_agent/resolver.py`), формат пакета не менялся, `exit:<n>` к set/доменам остаётся запрещён. Доказательства: `make lint typecheck test render parity` — 1177 passed / 92 skipped; фронтенд 41 тест + сборка; netlab на hub-VM 70 passed (SSH к hub-VM разрешён владельцем 2026-10-21; дерево синхронизируется `rsync`, `git` на VM нет; прогон — `nohup sh -c "sudo make netlab > ~/netlab.log"`). Один раз netlab упал в CI на HTTP-таймауте 3 с в `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` — таймаут поднят до 10 с (`a2cac74`). UI проверен тестами, в браузере не открывался.
+>
 > **Состояние на 2026-10-21 (пятая сессия).** В `main` влита ветка `redesign/p4-06b-hub-egress` (`95b0b62`, три
 > среза + удаление v1): модель egress хаба (**D-72**), `HubEgressService` (`korctl egress|source`, `/api/egress`,
 > `/api/sources`, панель Network → Egress and sources, parity), источники хаба, выход хаба через `exit:<n>`, и
@@ -29,11 +31,7 @@
 > Python 3.12, netlab и E2E не гонялись (код не менялся). CI на `main` (`421c465`) зелёный: backend, frontend,
 > netlab, publish. Команды `korctl` в README сверены с `--help` выборочно.
 >
-> **Не сделано:** set/domain-выходы через
-> `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спеки,
-> упорядоченный редактор правил с drag и inline-explain (P5-01, сейчас JSON), URL-источники `sets` на хабе
-> (`route_urls`/`domain_urls` отвергаются как `runtime_unsupported`), прогон `e2e.yml` на GitHub Actions, пересборка образов E2E-06
-> (флаг-день D-71 и новая конфигурация).
+> **Не сделано:** set/доменные выходы через `exit:<n>` (нужны одинаковые наборы на хабе и узле: вариант «хаб кладёт адреса в пакет» или отдельный подписанный канал, см. D-78), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спецификации, редактирование префиксов и источников хаба во вкладке Fabric (сейчас чтение), общий редактор политики для `AgentPolicy.tsx` (там ещё сырой JSON), прогон `e2e.yml` через GitHub Actions (нужен `gh` и разблокированный keyring), пересборка образов E2E-06 (флаг-день D-71).
 >
 > **Важно для продолжения:**
 > 1. Хост перезагружался: VM `debian13-kornode1..4` были выключены, их запускают `virsh -c qemu:///system start
@@ -177,7 +175,7 @@
    guard по `$VHOST`, токен `sni`, пакет `hubs[].server_name`; `fabric.enabled` удалён и влит в `main`.
 2a. ~~P4-06 часть 2 + P5-03~~ — сделано (D-72, D-73). Остаток: доменные/set-выходы агентов и хаба, NL-17/NL-18 (netlab),
    E2E-07 по спеке, NL-05, прогон E2E `routed` на четырёх VM.
-3. ~~P4-07~~ — сделано (D-74): `FabricService`, `korctl fabric`, `/api/fabric`, вкладка Fabric. Открыто: свернуть `POST /api/config/fabric-settings` в `FabricService`.
+3. ~~P4-07~~ — сделано (D-74): `FabricService`, `korctl fabric`, `/api/fabric`, вкладка Fabric. `POST /api/config/fabric-settings` свёрнут в `FabricService` (D-77).
 4. **Прогон `e2e.yml` на GitHub Actions**: настроено (см. начало файла). Нужно, чтобы владелец разблокировал keyring, затем
    `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрение деплоя (required reviewer — владелец).
    Раннер должен быть `online`; иначе смотреть `~/actions-runner/_diag/` на hub-VM.

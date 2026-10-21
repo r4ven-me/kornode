@@ -252,6 +252,8 @@ P0-03 с kill-switch (D-20, D-21).
 
 ## Дальнейшие действия
 
+**Шестая сессия (2026-10-21), всё влито в `main`, CI зелёный (последний `65fde1d`: backend, frontend, netlab, publish):** (1) URL-источники `sets` на хабе (D-75, `kornode.net.lists`, `DomainResolverService` качает `route_urls`/`domain_urls` раз в час, кэш, при сбое остаётся последняя копия); (2) упорядоченный редактор правил egress в панели (P5-01, D-76: форма на правило, drag и Up/Down, мёртвые правила inline через `dead_rules` в ответах `egress show|check|set`, inline-explain сохранённой политики, JSON — вкладка advanced); (3) `POST /api/config/fabric-settings` удалён, `FabricService.set` принимает `node_id` (D-77); (4) домены и URL-наборы на агентах (D-78): агент резолвит сам через DNS хаба (`kornode_agent/resolver.py`), формат пакета не менялся, `exit:<n>` к set/доменам остаётся запрещён. Доказательства: `make lint typecheck test render parity` — 1177 passed / 92 skipped; фронтенд 41 тест + сборка; netlab на hub-VM 70 passed (SSH к hub-VM разрешён владельцем 2026-10-21; дерево синхронизируется `rsync`, `git` на VM нет; прогон — `nohup sh -c "sudo make netlab > ~/netlab.log"`). Один раз netlab упал в CI на HTTP-таймауте 3 с в `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` — таймаут поднят до 10 с (`a2cac74`). UI проверен тестами, в браузере не открывался.
+
 **Состояние на 2026-10-21 (конец пятой сессии).** В `main` влиты PR #1 (P2…P4-02), PR #2 (P4-03,
 D-66), PR #3 (P4-04, D-67), а также P4-05 (источники агентов, D-68), P4-06 часть 1 (`via: exit:<n>` для
 трафика агентов, D-69), фикс CI (`vite` 8.3.x), **S-07 / D-71** (vhost фабрики по SNI), **удаление
@@ -265,13 +267,8 @@ egress хаба D-72 и удаление v1-маршрутизации D-73, P4-
 **Флаг-день D-71:** хаб и агенты обновляются вместе — новый хаб не пускает агента, который идёт на хост
 клиентов. Образы базы E2E-06 и переменные `E2E_PREVIOUS_*_IMAGE` надо пересобрать/обновить из текущего `main`.
 
-**Не сделано:** set/доменные выходы через `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05,
-NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спецификации, упорядоченный редактор правил с перетаскиванием и
-inline-explain (P5-01, сейчас JSON), URL-источники `sets` на хабе (`route_urls`/`domain_urls` →
-`runtime_unsupported`), свёртка
-`POST /api/config/fabric-settings` в `FabricService`, прогон `e2e.yml` через GitHub Actions, пересборка образов
-E2E-06. Накопительная передача — [CLAUDE-HANDOFF.md](CLAUDE-HANDOFF.md), детали P3 — [P3-07](P3-07-REVIEW.md),
-[P3-08](P3-08-REVIEW.md), [P3-09](P3-09-REVIEW.md), [P3-10](P3-10-REVIEW.md); решения — D-55…D-74;
+**Не сделано:** set/доменные выходы через `exit:<n>` (нужны одинаковые наборы на хабе и узле: вариант «хаб кладёт адреса в пакет» или отдельный подписанный канал, см. D-78), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спецификации, редактирование префиксов и источников хаба во вкладке Fabric (сейчас чтение), общий редактор политики для `AgentPolicy.tsx` (там ещё сырой JSON), прогон `e2e.yml` через GitHub Actions (нужен `gh` и разблокированный keyring), пересборка образов E2E-06 (флаг-день D-71). Накопительная передача — [CLAUDE-HANDOFF.md](CLAUDE-HANDOFF.md), детали P3 — [P3-07](P3-07-REVIEW.md),
+[P3-08](P3-08-REVIEW.md), [P3-09](P3-09-REVIEW.md), [P3-10](P3-10-REVIEW.md); решения — D-55…D-78;
 промпт следующей сессии — [NEXT_SESSION.md](NEXT_SESSION.md); эксплуатация —
 `docs/runbooks/hub-recovery.md` и `docs/runbooks/vm-e2e.md`.
 
@@ -402,7 +399,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    `make lint typecheck test render parity` (`make check` не включает `render` и `parity`, `typecheck` ещё
    проверяет `tests/e2e`).
 4. ~~**P4-07**~~ — сделано (D-74, `5f3a6d8`): `FabricService`, `korctl fabric`, `/api/fabric`, вкладка Fabric.
-   **Остаток:** свернуть `POST /api/config/fabric-settings` (задаёт `node.id`) в `FabricService`; редактирование
+   **Остаток:** (`fabric-settings` свёрнут, D-77) редактирование
    префиксов и источников хаба во вкладке Fabric (сейчас только чтение).
 5. **Пересобрать базу E2E-06 (флаг-день D-71):** образы «предыдущей версии» в registry-контейнере на
    hub-VM собраны до vhost'ов и теперь несовместимы. Собрать новые из текущего `main` так же, как при
@@ -416,9 +413,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрение деплоя. Раннер в
    последний раз был `offline` (подключается, но брокер GitHub из VM отвечает медленно) — проверять
    `gh api repos/r4ven-me/kornode/actions/runners`, логи — `~/actions-runner/_diag/` на hub-VM.
-8. **Остаток фазы 5** (P5-01): упорядоченный редактор правил egress в панели с перетаскиванием и
-   inline-explain (сейчас редактор JSON); документация v2 готова (P5-05); URL-источники `sets` на хабе (`route_urls`/`domain_urls`
-   сейчас `runtime_unsupported`). P5-02 и P5-04 сняты (D-70), P5-03 сделан (D-73).
+8. **Фаза 5 закрыта по коду:** P5-01 (D-76), URL-источники `sets` на хабе (D-75), домены/URL на агентах (D-78), документация v2 (P5-05); P5-02 и P5-04 сняты (D-70), P5-03 сделан (D-73).
 9. Известные мелочи: нестабильный по таймауту netlab-тест
    `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table` (HTTP 2 с; если повторится в CI —
    поднять таймаут); NL-04 однажды упал в полном прогоне (дамп маршрутов был полным, в одиночку и в
