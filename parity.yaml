@@ -955,6 +955,46 @@ capabilities:
     cli: "agent prefix del"
     api: "DELETE /api/agents/{name}/prefixes"
     ui: agent.prefix.delete
+  - id: egress.hub.show
+    service: kornode.services.hub_egress.HubEgressService.policy
+    cli: "egress show"
+    api: "GET /api/egress"
+    ui: egress.hub.show
+  - id: egress.hub.set
+    service: kornode.services.hub_egress.HubEgressService.set_policy
+    cli: "egress set"
+    api: "PUT /api/egress"
+    ui: egress.hub.set
+  - id: egress.hub.edit
+    service: kornode.services.hub_egress.HubEgressService.set_policy
+    cli: "egress edit"
+    api: "PUT /api/egress"
+    ui: egress.hub.set
+  - id: egress.hub.check
+    service: kornode.services.hub_egress.HubEgressService.check
+    cli: "egress check"
+    api: "POST /api/egress/check"
+    ui: egress.hub.check
+  - id: sources.hub.list
+    service: kornode.services.hub_egress.HubEgressService.sources
+    cli: "source list"
+    api: "GET /api/sources"
+    ui: sources.hub.list
+  - id: sources.hub.add
+    service: kornode.services.hub_egress.HubEgressService.set_source
+    cli: "source add"
+    api: "PUT /api/sources/{name}"
+    ui: sources.hub.set
+  - id: sources.hub.set
+    service: kornode.services.hub_egress.HubEgressService.set_source
+    cli: "source set"
+    api: "PUT /api/sources/{name}"
+    ui: sources.hub.set
+  - id: sources.hub.delete
+    service: kornode.services.hub_egress.HubEgressService.set_source
+    cli: "source del"
+    api: "DELETE /api/sources/{name}"
+    ui: sources.hub.delete
   - id: agent.policy.show
     service: kornode.services.agents.AgentService.policy
     cli: "agent egress show"

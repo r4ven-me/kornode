@@ -13,6 +13,7 @@ import {
 import { errorMessage } from "../lib/errors";
 import { netDriftCount, netPlanLines } from "../lib/net";
 import { ActionButton, EmptyState, Pill } from "../components/ui";
+import { HubEgress } from "./network/HubEgress";
 
 export function NetworkView({ token }: { token: string }) {
   const [plan, setPlan] = useState<NetPlan | null>(null);
@@ -198,6 +199,7 @@ export function NetworkView({ token }: { token: string }) {
           {netDriftCount(status)}
         </p>
       </section>
+      <HubEgress token={token} />
     </div>
   );
 }
