@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (hub egress model, P4-06 part 2 / P5-03, slice 1; branch `redesign/p4-06b-hub-egress`)
+
+- Top-level `egress`, `sources`, `sets` keys in the hub config (the agent policy model). Config-level checks: references, source CIDR inside `fabric.source_pool` (or `allow_outside_pool`), no overlap with the client pool/fabric/enroll pool/other sources, unique interfaces, `host` and non-exported sources cannot use `exit:<n>`. Registry/upstream checks: `services/hub_egress.py`. Not wired into the compiler yet (slice 2); legacy keys stay until the removal block.
+
 ### Removed (`fabric.enabled`, D-71; branch `redesign/p4-fabric-always-on`)
 
 - `fabric.enabled` is gone: the hub always runs the fabric (vhost, registry, groups, enroll guard, hub DNS zone while `server.enabled`, registry snapshot program). The key is rejected as unknown. `control.enabled` no longer requires it.

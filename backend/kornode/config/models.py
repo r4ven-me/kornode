@@ -19,6 +19,7 @@ from kornode.net.addressing import (
     validate_templates,
 )
 from kornode.net.errors import PolicyError
+from kornode.net.model import DestSet, EgressPolicy, Rule, Source
 
 DOMAIN_RE = re.compile(
     r"^(?=.{1,253}\.?$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
@@ -1442,10 +1443,65 @@ class AppConfig(StrictModel):
     identity: IdentityConfig = Field(default_factory=IdentityConfig)
     upstream: UpstreamConfig = Field(default_factory=UpstreamConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
+    # Declarative hub egress (P4-06 part 2, docs/spec/02-egress-and-sources.md); the
+    # same model the agents use. Registry-dependent checks live in services/hub_egress.
+    sources: tuple[Source, ...] = ()
+    sets: dict[str, DestSet] = Field(default_factory=dict)
+    egress: tuple[Rule, ...] = ()
     internal_dns: InternalDnsConfig = Field(default_factory=InternalDnsConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     cli: CliConfig = Field(default_factory=CliConfig)
     advanced: AdvancedConfig = Field(default_factory=AdvancedConfig)
+
+    def egress_policy(self) -> EgressPolicy:
+        return EgressPolicy(sources=self.sources, sets=self.sets, egress=self.egress)
+
+    @model_validator(mode="after")
+    def validate_hub_egress(self) -> AppConfig:
+        # Builds the policy: duplicate names and unknown source/set references raise here.
+        policy = self.egress_policy()
+        derived = derive_addresses(
+            self.node.id,
+            fabric_cidr=self.fabric.cidr,
+            client_pool=self.fabric.client_pool,
+            source_pool=self.fabric.source_pool,
+            domain=self.fabric.domain,
+        )
+        client_pool = ipaddress.ip_network(self.server.ipv4_network, strict=False)
+        fixed = {
+            "the client pool": client_pool,
+            "fabric.cidr": ipaddress.ip_network(self.fabric.cidr, strict=False),
+            "fabric.enroll_pool": ipaddress.ip_network(self.fabric.enroll_pool, strict=False),
+        }
+        seen: dict[str, ipaddress.IPv4Network | ipaddress.IPv6Network] = {}
+        interfaces: set[str] = set()
+        for source in policy.sources:
+            net = ipaddress.ip_network(source.cidr)
+            if not source.allow_outside_pool and not net.subnet_of(derived.source_pool):  # type: ignore[arg-type]
+                raise ValueError(
+                    f"source {source.name}: {net} is outside the source pool {derived.source_pool}"
+                    " (set allow_outside_pool: true to override)"
+                )
+            for label, other in (*fixed.items(), *seen.items()):
+                if net.version == other.version and net.overlaps(other):
+                    raise ValueError(f"source {source.name}: {net} overlaps {label} ({other})")
+            if source.interface in interfaces:
+                raise ValueError(f"source {source.name}: interface {source.interface} is reused")
+            interfaces.add(source.interface)
+            seen[f"source {source.name}"] = net
+        for index, rule in enumerate(policy.egress):
+            via = rule.parsed_via
+            if via.kind != "exit":
+                continue
+            if "host" in rule.from_:
+                raise ValueError(f"egress[{index}]: host traffic cannot use {rule.via}")
+            for name in rule.from_:
+                src = next((s for s in policy.sources if s.name == name), None)
+                if src is not None and not src.export:
+                    raise ValueError(
+                        f"egress[{index}]: source {name} must be exported to use {rule.via}"
+                    )
+        return self
 
     @model_validator(mode="after")
     def validate_control(self) -> AppConfig:
