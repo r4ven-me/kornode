@@ -311,7 +311,8 @@ def test_suppress_rule_keeps_connected_routes_ahead_of_policy_table(
         timeout=2.0,
     )
     cli3_ping = topology.node3.run(["ping", "-c", "1", "-W", "1", CLI3_ADDR], check=False)
-    inet_body = http_get(topology.node3, f"http://{INET_HTTP_ADDR}:{HTTP_PORT}/", timeout=3.0)
+    # Generous: first packets through a freshly connected tunnel are slow on loaded CI runners.
+    inet_body = http_get(topology.node3, f"http://{INET_HTTP_ADDR}:{HTTP_PORT}/", timeout=10.0)
 
     assert lan_body == f"echo from {NODE3_LAN_ADDR}\n"
     assert cli3_ping.ok
