@@ -814,6 +814,16 @@ capabilities:
     cli: "egress check"
     api: "POST /api/egress/check"
     ui: egress.hub.check
+  - id: fabric.show
+    service: kornode.services.fabric.FabricService.show
+    cli: "fabric show"
+    api: "GET /api/fabric"
+    ui: fabric.show
+  - id: fabric.settings
+    service: kornode.services.fabric.FabricService.set
+    cli: "fabric set"
+    api: "PATCH /api/fabric"
+    ui: fabric.settings
   - id: sources.hub.list
     service: kornode.services.hub_egress.HubEgressService.sources
     cli: "source list"

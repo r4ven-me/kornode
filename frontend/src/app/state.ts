@@ -110,6 +110,7 @@ export const tabs: Array<{ id: Tab; label: string; icon: LucideIcon }> = [
   { id: "config", label: "Config", icon: FileSliders },
   { id: "users", label: "Users", icon: Users },
   { id: "agents", label: "Agents", icon: Server },
+  { id: "fabric", label: "Fabric", icon: Network },
   { id: "groups", label: "Groups", icon: ShieldCheck },
   { id: "sessions", label: "Sessions", icon: Server },
   { id: "network", label: "Network", icon: Network },

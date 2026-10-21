@@ -162,8 +162,7 @@
    guard по `$VHOST`, токен `sni`, пакет `hubs[].server_name`; `fabric.enabled` удалён и влит в `main`.
 2a. ~~P4-06 часть 2 + P5-03~~ — сделано (D-72, D-73). Остаток: доменные/set-выходы агентов и хаба, NL-17/NL-18 (netlab),
    E2E-07 по спеке, NL-05, прогон E2E `routed` на четырёх VM.
-3. **P4-07**: панель/CLI/API фабрики (топология, префиксы узлов, записи DNS — сейчас они на странице Agents →
-   Fabric DNS —, источники), parity. Раздел `Fabric` в панели.
+3. ~~P4-07~~ — сделано (D-74): `FabricService`, `korctl fabric`, `/api/fabric`, вкладка Fabric. Открыто: свернуть `POST /api/config/fabric-settings` в `FabricService`.
 4. **Прогон `e2e.yml` на GitHub Actions**: настроено (см. начало файла). Нужно, чтобы владелец разблокировал keyring, затем
    `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрение деплоя (required reviewer — владелец).
    Раннер должен быть `online`; иначе смотреть `~/actions-runner/_diag/` на hub-VM.

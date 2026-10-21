@@ -4,6 +4,7 @@ export type Tab =
   | "dashboard"
   | "users"
   | "agents"
+  | "fabric"
   | "groups"
   | "sessions"
   | "network"

@@ -10,7 +10,7 @@ function relative(record: ZoneRecord, domain: string): string {
 }
 
 /** Fabric DNS zone (spec 07 "DNS"): the hub answers it, agents answer their node<id> part. */
-export function FabricDns({ token, agents }: { token: string | null; agents: Agent[] }) {
+export function FabricDns({ token, agents }: { token: string | null; agents: Array<Pick<Agent, "id" | "name" | "state">> }) {
   const [zone, setZone] = useState<Zone | null>(null);
   const [name, setName] = useState(""), [type, setType] = useState<ZoneRecord["type"]>("A"), [value, setValue] = useState(""), [node, setNode] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
