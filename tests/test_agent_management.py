@@ -323,7 +323,6 @@ def test_artifact_ownership_size_and_metadata_without_base64(world) -> None:  # 
     [
         {"sets": {"web": {"domains": ["example.org"]}}, "egress": []},
         {"sets": {"web": {"route_urls": ["https://example.org/routes"]}}, "egress": []},
-        {"egress": [{"from": ["host"], "to": "any", "via": "exit:2"}]},
     ],
 )
 def test_unsupported_runtime_is_refused_not_delivered(world, policy) -> None:  # type: ignore[no-untyped-def]

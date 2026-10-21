@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "docs" / "spec" / "examples"
 GOLDEN = Path(__file__).resolve().parent / "golden"
 
+from tests.test_net_transit import agent_exit_case, exit_node_case, hub_transit_case  # noqa: E402
+
 
 def n(text: str) -> Any:
     return ipaddress.ip_network(text)
@@ -99,7 +101,16 @@ def _render(compiled: Compiled) -> dict[str, str]:
     }
 
 
-@pytest.mark.parametrize("name,case", [("hub", hub_case), ("node3", node3_case)])
+@pytest.mark.parametrize(
+    "name,case",
+    [
+        ("hub", hub_case),
+        ("node3", node3_case),
+        ("hub_transit", hub_transit_case),
+        ("agent_exit", agent_exit_case),
+        ("exit_node", exit_node_case),
+    ],
+)
 def test_examples_match_golden(name: str, case: Any, update_golden: bool) -> None:
     rendered = _render(compile_policy(*case()))
     for kind, text in rendered.items():

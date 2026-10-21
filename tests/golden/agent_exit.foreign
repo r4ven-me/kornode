@@ -1,0 +1,2 @@
+ForeignNftRule(family='ip', table='filter', chain='DOCKER-USER', expr='ip daddr 10.100.2.0/24 accept')
+ForeignNftRule(family='ip', table='filter', chain='DOCKER-USER', expr='ip saddr 10.100.2.0/24 accept')

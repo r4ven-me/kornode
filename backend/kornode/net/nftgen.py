@@ -46,12 +46,11 @@ def _set_decl(name: str, kind: str) -> list[str]:
 
 def _classify_lines(rule: ClassifyRule) -> list[str]:
     """One nft line per address family the rule can match."""
-    action = (
-        REJECT
-        if rule.exit is None
-        else f"meta mark set {_hex(rule.exit.mark)} ct mark set meta mark accept"
-    )
-    comment = f'comment "egress rule {rule.index}"'
+    if rule.exit is None:
+        action = rule.verdict or REJECT
+    else:
+        action = f"meta mark set {_hex(rule.exit.mark)} ct mark set meta mark accept"
+    comment = f'comment "{rule.label or f"egress rule {rule.index}"}"'
     match = list(rule.match)
     v4_only = any(part.startswith("ip saddr") for part in match)
     v6_only = any(part.startswith("ip6 saddr") for part in match)
@@ -118,7 +117,13 @@ def _session_rpf(facts: NodeFacts) -> list[str]:
     globs += [item for item in facts.access_ifaces if item not in globs]
     if not globs:
         return []
-    lines = [
+    lines: list[str] = []
+    if facts.transit_exits:
+        # D-69: answers from an exit node carry the internet's addresses, which are
+        # not routed through its session; the flow is established by a marked packet
+        # that passed the check when it came in from the agent.
+        lines.append("    iifname @transit_ifaces ct state established,related return")
+    lines += [
         "    # strict reverse path for ocserv sessions: a session may only use a "
         "source address routed back through its own device (D-47)"
     ]
@@ -156,6 +161,8 @@ def render_script(
 ) -> str:
     lines: list[str] = ["table inet kornode {"]
     lines += _set_decl("fabric_ifaces", "ifname")
+    if facts.transit_exits:
+        lines += _set_decl("transit_ifaces", "ifname")
     for name, kind in (
         ("local_v4", "ipv4_addr"),
         ("local_v6", "ipv6_addr"),
@@ -196,13 +203,20 @@ def render_script(
         "  chain input {",
         "    type filter hook input priority mangle; policy accept;",
     ]
-    # Connections arriving through a tunnel are answered through it too.
+    # Connections arriving through a tunnel are answered through it too. One mark per
+    # interface (the first exit wins: on an agent `fabric` precedes `exit:<n>`, which
+    # shares the hub tunnel); a hub transit exit's session device changes with every
+    # connect and its main-table routes already answer the node.
+    answered: set[str] = set()
     for exit_ in exits:
-        if exit_.kind != "local" and exit_.interface:
-            lines.append(
-                f'    ct state new iifname "{_ifname(exit_.interface)}" '
-                f"ct mark set {_hex(exit_.mark)}"
-            )
+        if exit_.kind == "local" or not exit_.interface or exit_.interface in answered:
+            continue
+        if exit_.kind == "exit" and facts.fabric_guard:
+            continue
+        answered.add(exit_.interface)
+        lines.append(
+            f'    ct state new iifname "{_ifname(exit_.interface)}" ct mark set {_hex(exit_.mark)}'
+        )
     lines += _access_input(facts)
     if facts.enroll is not None:
         lines.extend(

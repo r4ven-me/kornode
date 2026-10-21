@@ -1,0 +1,7 @@
+('inet', 'kornode', 'carrier_v4'): []
+('inet', 'kornode', 'carrier_v6'): []
+('inet', 'kornode', 'fabric_ifaces'): ['oc-hub0']
+('inet', 'kornode', 'fabric_v4'): ['10.100.1.0/24', '10.100.2.0/24', '10.99.0.0/24', '192.168.2.0/24']
+('inet', 'kornode', 'fabric_v6'): []
+('inet', 'kornode', 'local_v4'): ['10.100.3.0/24']
+('inet', 'kornode', 'local_v6'): []

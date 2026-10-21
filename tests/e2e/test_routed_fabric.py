@@ -5,6 +5,7 @@ throughput, no-NAT routed prefixes or wg-easy access/exit runtime.
 """
 
 import secrets
+import time
 
 import pytest
 from tests.e2e.fleet import Cluster, wait_for
@@ -13,7 +14,7 @@ from tests.e2e.inventory import E2EError
 pytestmark = pytest.mark.e2e
 
 BLOCKED = {
-    "E2E-07": "P4 access/exit, source routing and domain resolution are not implemented",
+    "E2E-07": "needs hub-attached sources and domain-set exits (hub egress model, P4-06 part 2)",
     "NL-05": "source client through upstream:office needs a source client and the ext upstream "
     "in one case (kill switch itself: client netlab suite); wg-easy image/kernel module absent",
     "NL-07": "P4 local delivery with the new egress model",
@@ -227,3 +228,74 @@ def test_nl_06_source_prefix_is_exported_and_reachable_in_both_directions_withou
         cluster.tcp_peer("agent-b", "agent-a", SOURCE_CLIENT, source=agent_a, listener_client=True)
         == agent_a
     )
+
+
+@pytest.mark.e2e_case("routed")
+def test_e2e_07_client_of_agent_a_leaves_through_agent_b_and_fails_closed_when_it_is_gone(
+    cluster: Cluster,
+) -> None:
+    """Exit via another node (D-69). A VPN client of agent-a (role access) has the policy
+    `clients -> any via exit:3`: its internet traffic crosses the fabric, the hub steers it
+    into agent-b's session and agent-b (role exit) masquerades it. With agent-b gone the
+    traffic is never sent out of agent-a or the hub: it gets nowhere."""
+    inventory = cluster.fleet.inventory
+    agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
+    ext = inventory.host("ext").address
+    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
+    password = secrets.token_hex(12)
+    before = {role: cluster.status(role)["applied_version"] for role in ("agent-a", "agent-b")}
+    cluster.call("hub", "exit_role")
+    access = cluster.call(
+        "hub", "access_setup", name="agent-a", host=agent_a, port=ACCESS_PORT,
+        user="alice", password=password,
+    )  # fmt: skip
+    pin = access["certificate"]["pin"]
+    cluster.call("hub", "access_policy", via="exit:3")
+    for role in ("agent-a", "agent-b"):
+
+        def applied(role: str = role) -> bool:
+            return bool(cluster.status(role)["applied_version"] > before[role])
+
+        wait_for(applied, 60, f"{role} did not apply its bundle")
+
+    def login() -> None:
+        def attempt() -> bool:
+            try:
+                # Full tunnel: the client's own namespace, the VPN server stays reachable
+                # through the original gateway (as openconnect's own script does).
+                cluster.call(
+                    "agent-b", "access_client", host=agent_a, port=ACCESS_PORT, pin=pin,
+                    user="alice", password=password, routes=[], full=True,
+                )  # fmt: skip
+            except E2EError:
+                return False
+            return True
+
+        try:
+            wait_for(attempt, 90, "VPN login to the access server of agent-a failed")
+        except E2EError as exc:
+            diag = {role: cluster.call(role, "access_diag") for role in ("agent-a", "agent-b")}
+            raise E2EError(f"{exc}: {diag}") from None
+
+    try:
+        login()
+        # Out through agent-b: ext, the "internet", sees agent-b's address. (Neither the hub's
+        # address, the tunnel's carrier that no policy touches, nor agent-a's, the VPN server
+        # the client reaches around the tunnel, can be the target. The client container shares
+        # agent-b's VM, so the proof that this goes through the tunnel is the next check.)
+        assert cluster.tcp_peer("ext", "agent-b", ext, client=True) == agent_b
+        # Inside the fabric nothing changed: no NAT, the client keeps its own address.
+        peer = cluster.tcp_peer("hub", "agent-b", HUB_FABRIC_ADDRESS, client=True)
+        assert peer.startswith("10.100.2.")
+
+        cluster.call("agent-b", "stop")
+        time.sleep(15)  # the hub notices the session going away
+        assert cluster.tcp_unreachable("ext", "agent-b", ext, client=True), (
+            "traffic reached the internet while the exit node was down"
+        )
+
+        cluster.call("agent-b", "restart")
+        wait_for(lambda: cluster.ping("agent-b") == 204, 120, "agent-b did not reconnect")
+        assert cluster.tcp_peer("ext", "agent-b", ext, client=True) == agent_b
+    finally:
+        cluster.call("agent-b", "access_client_stop")

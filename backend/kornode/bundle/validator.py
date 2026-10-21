@@ -16,7 +16,7 @@ from kornode.bundle.errors import BundleError
 from kornode.bundle.models import Bundle
 from kornode.bundle.sealing import unseal, walk_sealed
 from kornode.bundle.signing import verify
-from kornode.net.compile import NodeFacts, TunnelFact, compile_policy
+from kornode.net.compile import NodeFacts, TunnelFact, compile_policy, node_exit_tunnels
 from kornode.net.errors import PolicyError
 
 
@@ -44,6 +44,7 @@ def facts_for(bundle: Bundle) -> NodeFacts:
     tunnels = {"fabric": TunnelFact(interface=bundle.tunnels.fabric.interface, up=True)}
     for upstream in bundle.tunnels.upstreams:
         tunnels[f"upstream:{upstream.name}"] = TunnelFact(interface=upstream.interface, up=True)
+    tunnels.update(node_exit_tunnels(bundle.policy, bundle.tunnels.fabric.interface, True))
     return NodeFacts(
         node_id=bundle.node_id,
         client_pool=ipaddress.IPv4Network(bundle.node.client_pool, strict=False),

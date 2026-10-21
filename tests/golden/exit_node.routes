@@ -1,0 +1,6 @@
+Route(table=12001, dst='10.100.1.0/24', type='unicast', dev='oc-hub0', gateway=None, metric=0, family=4, proto=0)
+Route(table=12001, dst='10.100.2.0/24', type='unicast', dev='oc-hub0', gateway=None, metric=0, family=4, proto=0)
+Route(table=12001, dst='10.99.0.0/24', type='unicast', dev='oc-hub0', gateway=None, metric=0, family=4, proto=0)
+Route(table=12001, dst='192.168.2.0/24', type='unicast', dev='oc-hub0', gateway=None, metric=0, family=4, proto=0)
+Route(table=12001, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=4, proto=0)
+Route(table=12001, dst='default', type='unreachable', dev=None, gateway=None, metric=4096, family=6, proto=0)

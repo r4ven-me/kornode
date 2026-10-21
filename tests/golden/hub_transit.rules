@@ -1,0 +1,4 @@
+IpRule(priority=101, table=12001, family=4, fwmark=201326848, fwmask=4294967040, to=None, suppress_prefixlength=None)
+IpRule(priority=101, table=12001, family=6, fwmark=201326848, fwmask=4294967040, to=None, suppress_prefixlength=None)
+IpRule(priority=90, table='main', family=4, fwmark=None, fwmask=None, to=None, suppress_prefixlength=0)
+IpRule(priority=90, table='main', family=6, fwmark=None, fwmask=None, to=None, suppress_prefixlength=0)

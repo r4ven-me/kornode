@@ -35,11 +35,12 @@ from kornode.bundle.validator import validate
 from kornode.config.models import AppConfig
 from kornode.net.addressing import derive_addresses
 from kornode.registry.models import Node, StoredBundle
-from kornode.registry.repository import Registry
+from kornode.registry.repository import Registry, RegistryNotFound
 from kornode.tunnels.pin import certificate_file_pin
 
 HUB_NODE_ID = 1
 _FABRIC_RULE_ID = "to-fabric"
+_EXIT_RULE_ID = "exit-local"
 _SECRET_UPSTREAM_FIELDS = ("password", "key", "camouflage")
 
 
@@ -318,7 +319,7 @@ class BundleService:
                 "fabric": fabric_tunnel,
                 "upstreams": self._upstreams(registry, node.id),
             },
-            "policy": _policy_with_fabric_rule(node.policy, node.roles),
+            "policy": self._policy(registry, node),
             "dns": self._dns(registry, node.id, hub.client_pool),
             **self._access(registry, node),
             "settings": {
@@ -331,6 +332,23 @@ class BundleService:
         if announcement:
             plan["next_signing_pubkey"] = announcement
         return plan
+
+    def _policy(self, registry: Registry, node: Node) -> dict[str, Any]:
+        """The node's policy with the implicit rules; `exit:<n>` must name another active
+        agent with role `exit` (spec 07), whatever wrote the registry."""
+        policy = _policy_with_fabric_rule(node.policy, node.roles)
+        for rule in policy["egress"]:
+            via = str(rule.get("via", ""))
+            if not via.startswith("exit:"):
+                continue
+            target = int(via.removeprefix("exit:") or 0)
+            try:
+                other = registry.get_node(target)
+            except RegistryNotFound:
+                raise BundleError("invalid", f"exit:{target} is not a registered agent") from None
+            if target == node.id or other.state != "active" or "exit" not in other.roles:
+                raise BundleError("invalid", f"exit:{target} is not an active agent with role exit")
+        return policy
 
     def _access(self, registry: Registry, node: Node) -> dict[str, Any]:
         """`access` only for role `access` with a configured listener (D-67).
@@ -418,6 +436,7 @@ def _policy_with_fabric_rule(policy: dict[str, Any], roles: list[str]) -> dict[s
     result.setdefault("sources", [])
     result.setdefault("sets", {})
     rules = result.setdefault("egress", [])
+    position = 0
     if not any(
         rule.get("via") == "fabric" and "host" in (rule.get("from") or []) for rule in rules
     ):
@@ -429,4 +448,13 @@ def _policy_with_fabric_rule(policy: dict[str, Any], roles: list[str]) -> dict[s
         while rule_id in taken:
             rule_id += "-hub"
         rules.insert(0, {"id": rule_id, "from": names, "to": "fabric", "via": "fabric"})
+        position = 1
+    if "exit" in roles and not any("fabric" in (rule.get("from") or []) for rule in rules):
+        # An exit node (D-69) NATs what the hub sends it: anything from the fabric
+        # to a non-fabric destination leaves through this node's own uplink.
+        taken = {rule.get("id") for rule in rules}
+        rule_id = _EXIT_RULE_ID
+        while rule_id in taken:
+            rule_id += "-hub"
+        rules.insert(position, {"id": rule_id, "from": ["fabric"], "to": "any", "via": "local"})
     return result
