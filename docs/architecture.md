@@ -1,325 +1,148 @@
-# Target architecture
+# Architecture
 
-## Layers
+Kornode v2 is a hub plus agents: one hub (node 1) and any number of agents (nodes 2..254) joined into a routed
+overlay (the fabric) by ocserv/openconnect sessions on 443/tcp. Every node runs the same networking core and one
+reconciler. Contracts: `docs/spec/` (start with `00-overview.md`); decisions: `docs/redesign/DECISIONS.md`.
 
-1. Configuration layer
-   - Load defaults.
-   - Load YAML config.
-   - Load `.env`.
-   - Apply environment variable overrides.
-   - Apply CLI flag overrides.
-   - Validate with Pydantic.
+## Components
 
-2. Domain layer
-   - Users.
-   - Certificates.
-   - OTP.
-   - Sessions.
-   - Server runtime.
-   - Upstream profiles.
-   - Routing profiles.
-   - DNS/domain sets.
-   - Firewall/nftables state.
+| Component | Runs on | Purpose |
+| --- | --- | --- |
+| `kornode` (hub image) | hub | ocserv for clients, agents and enroll, registry, bundle compiler, control API, admin API, panel, `korctl`, reconciler. |
+| `kornode-agent` (agent image) | every other node | openconnect to the hub and to external upstreams, reconciler, control-plane client, optional local ocserv (`access` role), optional dnsmasq. |
+| `kornode.net` | both images | Desired-state model, egress compiler, kernel adapter, reconciler, explain. The only code that changes kernel networking state. |
+| `kornode.control` | hub | Agent-facing control API, a separate process from the admin API, bound to the hub fabric address. |
+| `kornode_agent` | agent | Agent runtime and the `kornode-agent` CLI. |
 
-3. Service layer
-   - `ConfigService`.
-   - `OcservConfigRenderer`.
-   - `UserService`.
-   - `CertificateService`.
-   - `OtpService`.
-   - `SessionService`.
-   - `UpstreamService`.
-   - `RoutingService`.
-   - `DnsmasqService`.
-   - `NftablesService`.
-   - `DiagnosticsService`.
-   - `LogService`.
+## Planes
 
-4. Infrastructure layer
-   - Safe command runner.
-   - File manager with atomic writes.
-   - Secret masker.
-   - Process supervisor adapter.
-   - Systemd/supervisord/s6 adapter if needed.
+- **Data plane**: kernel routing, nftables, tunnels. Keeps working without the control plane: an agent with a
+  cached bundle keeps forwarding when the hub is down and boots from cache.
+- **Control plane**: registry, signed bundles, agent reports, commands. Agents pull; everything is carried inside
+  the fabric.
+- **Management plane**: `korctl`, the admin REST API and the panel. They are equal (parity) and call the same
+  services; `parity.yaml` plus `tests/test_parity.py` enforce it. The control plane runs even with
+  `web.enabled: false`.
 
-5. Interface layer
-   - CLI.
-   - REST API.
-   - Optional Web GUI.
+## Layers (hub)
+
+1. **Configuration**: defaults → YAML → `.env` → environment → CLI flags, validated with Pydantic
+   (`config/models.py`). Removed v1 keys fail validation and name their replacement.
+2. **Registry** (`registry/`): SQLite (`data_dir/registry.db`) with nodes, prefixes, per-node egress policy,
+   externals, bundle history.
+3. **Services** (`services/`): all business logic, shared by CLI, API and panel — `AgentService`,
+   `HubEgressService`, `FabricService`, `FabricGroupsService`, `FabricDnsService`, `UserService`,
+   `CertificateService`, `SessionService`, `UpstreamService`, `DomainResolverService`, `BackupService`, `NetService`,
+   `DiagnosticsService`, `DoctorService`, and others.
+4. **Bundle** (`bundle/`): compiles, signs (ed25519) and seals per-agent bundles; schema
+   `docs/spec/schemas/bundle.v1.schema.json`.
+5. **Net core** (`net/`): pure `compile()` from inputs to `DesiredState`, `diff`, `kernel`, `reconciler`, `explain`.
+6. **Infrastructure**: safe command runner (explicit argv, no shell), atomic file manager, secret masker,
+   supervisor adapter, `tunnels/` (openconnect argv, carrier and pin handling).
+7. **Interfaces**: `korctl`, REST API (`api/`), panel (`frontend/`).
 
 ## Backend package layout
 
-The tree below is the actual current layout (not an aspirational proposal) --
-regenerate it with `find backend/kornode -name '*.py' | sort` if it drifts.
-`api/routes_*.py` follows a one-file-per-resource convention; `services/`
-holds all business logic reusable by both the CLI and the API, per
-`AGENTS.md`'s "CLI and API must call the same services" rule.
+Regenerate with `find backend/kornode -name '*.py' | sort` if it drifts. `api/routes_*.py` is one file per
+resource; `services/` holds all logic reusable by CLI and API, per `AGENTS.md` ("CLI and API must call the same
+services").
 
 ```text
 kornode/
-├── __init__.py
-├── __main__.py
-├── main.py
-├── cli.py
-├── healthcheck.py
-├── api/
-│   ├── app.py
-│   ├── auth.py
-│   ├── routes_auth.py
-│   ├── routes_certificates.py
-│   ├── routes_client_sync.py
-│   ├── routes_config.py
-│   ├── routes_diagnostics.py
-│   ├── routes_groups.py
-│   ├── routes_identity.py
-│   ├── routes_internal_dns.py
-│   ├── routes_logs.py
-│   ├── routes_routing.py
-│   ├── routes_server.py
-│   ├── routes_sessions.py
-│   ├── routes_terminal.py
-│   ├── routes_upstream.py
-│   ├── routes_users.py
-│   └── routes_web_config.py
-├── config/
-│   ├── defaults.py
-│   ├── env.py
-│   ├── loader.py
-│   └── models.py
-├── services/
-│   ├── admin_totp.py
-│   ├── audit.py
-│   ├── certificates.py
-│   ├── command.py
-│   ├── config.py
-│   ├── diagnostics.py
-│   ├── files.py
-│   ├── groups.py
-│   ├── internal_dns.py       # the built-in blocking DNS resolver + dnsmasq config
-│   ├── logs.py
-│   ├── network_stats.py
-│   ├── nftables.py
-│   ├── otp.py
-│   ├── password_hash.py
-│   ├── policy_routing.py     # fwmark ip-rule/route management
-│   ├── routing.py            # split routes/domains, RoutingTarget derivation
-│   ├── secrets.py
-│   ├── server.py
-│   ├── server_certificates.py  # Let's Encrypt / external cert upload
-│   ├── sessions.py
-│   ├── software_versions.py
-│   ├── supervisor_rpc.py
-│   ├── upstream.py
-│   └── users.py
-├── renderers/
-│   ├── base.py
-│   ├── dnsmasq.py
-│   ├── nftables.py
-│   ├── ocserv.py
-│   └── supervisor.py
+├── cli.py, cli_agents.py, cli_egress.py, cli_fabric.py, cli_hub.py   # korctl
+├── main.py, healthcheck.py
+├── api/            # routes_agents, routes_egress, routes_fabric, routes_dns, routes_net, routes_hub,
+│                   # routes_users, routes_sessions, routes_certificates, routes_config, ...
+├── bundle/         # canonical JSON, models, signing, sealing, validator, redaction
+├── config/         # defaults, env, loader, models, reserved
+├── control/        # agent-facing API (app, auth, tls, service)
+├── net/            # model, addressing, compile, nftgen, state, diff, kernel, reconciler, explain
+├── registry/       # db, models, repository, snapshot, SQL migrations
+├── renderers/      # ocserv, dnsmasq, supervisor
+├── services/       # agents, hub_egress, fabric, fabric_groups, fabric_dns, netinputs, net, bundle, apply,
+│                   # enrollment, backup, doctor, upstream, domain_resolver, users, certificates, ...
+├── tunnels/        # openconnect argv, carrier addresses, pin
 └── schemas/
+kornode_agent/      # agent runtime: agent, control, apply, inputs, tunnels, access, dns, doctor, store, cli
 ```
+
+`kornode.net` imports only stdlib, `pydantic`, `pyroute2` and its own modules (`tests/test_net_imports.py`).
 
 ## Frontend layout
 
 `frontend/src/` is split by role; `main.tsx` only mounts `<App />`.
 
-- `App.tsx` — the root component: tab/section navigation, the page shell, and the wiring
-  of feature-hook state and actions into the views. It holds no feature logic itself.
-- `app/core.ts` — `usePanelCore()`: auth, the loaded `AppState`, busy/notice handling,
-  the "last command" outputs, `loadAll()` and `runAction()` (the wrapper every mutation goes
-  through for consistent busy state, notices, dry-run labelling and auth-error logout).
-- `app/hooks/` — one hook per panel area (`useUsers`, `useGroups`, `useSessions`,
-  `useDashboard`, `useRouting`, `useInternalDns`, `useIdentity`, `useUpstream`,
-  `useCertificates`, `useSettings`, `useConfigEditor`, `useLogs`, `useLogin`, `useTheme`).
-  Each owns its drafts, dialogs and action handlers. A hook that keeps editable drafts
-  copies fresh server values into them with `core.registerHydrator()`, which `loadAll()`
-  calls right after every load.
-- `app/types.ts`, `app/state.ts` — shared app-level types and initial state/draft values.
-- `api.ts` — typed API client (request/response types and one function per endpoint).
-- `views/` — one component per tab or config section; larger areas get their own folder
-  with their dialogs (`views/users/`, `views/groups/`, `views/upstream/`,
-  `views/certificates/`, `views/config/`).
-- `components/` — reusable UI building blocks (`ui.tsx` buttons/pills, `fields.tsx` form
-  fields, `Table`, `BulkListEditor`, `CertSourceField`, `CommandOutput`, ...).
-- `lib/` — pure helpers without React state: config→draft readers (`drafts.ts`,
-  `read.ts`), formatting, log grouping, user-config normalization, error helpers.
+- `App.tsx` — the root component: tab navigation (Dashboard, Config, Users, Agents, Fabric, Groups, Sessions,
+  Network, Diagnostics, Logs, Terminal) and the wiring of feature-hook state into the views.
+- `app/core.ts` — `usePanelCore()`: auth, the loaded `AppState`, busy/notice handling, `loadAll()` and
+  `runAction()` (the wrapper every mutation goes through for consistent busy state, notices, dry-run labelling
+  and auth-error logout).
+- `app/hooks/` — one hook per panel area (`useUsers`, `useGroups`, `useSessions`, `useDashboard`,
+  `useInternalDns`, `useIdentity`, `useUpstream`, `useCertificates`, `useSettings`, `useConfigEditor`, `useLogs`,
+  `useLogin`, `useTheme`). A hook with editable drafts copies fresh server values into them with
+  `core.registerHydrator()`.
+- `api.ts` — typed API client; `app/types.ts`, `app/state.ts` — shared types and initial state.
+- `views/` — one component per tab or section; larger areas have a folder: `views/agents/` (agent policy,
+  settings, resources, activity), `views/fabric/` (topology, fabric settings, fabric DNS), `views/network/`
+  (hub egress and sources), `views/upstream/`, `views/users/`, `views/groups/`, `views/certificates/`,
+  `views/config/`.
+- `components/` — reusable UI blocks; `lib/` — pure helpers without React state.
 
-Views receive state and callbacks as props and leave API calls to the hooks; the one
-exception is `views/config/AdminTotpPanel.tsx`, which runs its own two-factor
-setup/confirm/disable flow.
+Views receive state and callbacks as props and leave API calls to the hooks; the exceptions are views that own
+their data flow (`views/network/HubEgress.tsx`, `views/fabric/FabricView.tsx`, `views/agents/AgentsView.tsx`,
+`views/config/AdminTotpPanel.tsx`).
+
+## Egress and the reconciler
+
+What leaves where is declarative: one ordered `egress` list per node (first match wins) over `clients`, `host`,
+`fabric` and named `sources`, with `via` one of `local`, `fabric`, `exit:<node>`, `upstream:<profile>`, `drop`
+(`docs/spec/02-egress-and-sources.md`). On the hub it comes from `config.yaml` (`egress`, `sources`, `sets`;
+`HubEgressService`); for agents it is stored per node in the registry and delivered in the bundle.
+
+`net.compile()` is a pure function: equal inputs give byte-identical nft text and rule lists. The hub builds its
+inputs in `services/netinputs.py` (YAML + registry + runtime facts); the agent builds them from the bundle
+(`kornode_agent/inputs.py`). The reconciler (`net/reconciler.py`) diffs actual against desired state and applies a
+plan — sysctl, routes into exit tables, ip rules, one `nft -f` transaction — on a netlink event, an inputs
+change or a 10 s timer, with debounce, single-flight and backoff. A failed op does not abort the pass, so the
+fail-closed rules still land (`docs/spec/04-netcore-reconciler.md`). Only `kornode.net` writes kernel state.
 
 ## Runtime modes
 
-### Normal VPN server mode
+### Hub
 
-- ocserv accepts user connections directly.
-- client traffic is always NATed through the host interface by default; enabling
-  upstream additionally routes it (fully or by split routes/domains) through a
-  private upstream connection instead.
+- ocserv serves three classes: `clients` (users, all `auth.*` methods), `agents` and one-time `enroll` sessions.
+  Agents and enroll use the `fabric.<fabric.domain>` virtual host on the same 443/tcp, selected by TLS SNI, with
+  their own certificate and a connect-script guard that admits only registry agents there.
+- Per-user ocserv files (`FabricGroupsService`) carry `explicit-ipv4`, `iroute` for each agent's exported prefixes
+  and `route` for other agents'. ocserv does not install `iroute` routes itself, so the hub reconciler installs
+  `<prefix> dev vpnsN` into `main` with `proto 77`; a session counts as connected while that route exists.
+- The hub egress model is the same as an agent's; without an explicit `egress` list, hub clients leave through
+  the uplink, and an explicit list replaces that rule (unmatched traffic is dropped).
+- Bundles are compiled per agent, signed and sealed; agents long-poll the control API at `10.99.0.1:8444`.
 
-### Middle-server mode
+### Agent
 
-- ocserv accepts user connections.
-- kornode also runs OpenConnect client connections to upstream private ocserv
-  servers (`upstream.*`), each daemonized (`--background --pid-file`) once
-  connected so the request that started it returns promptly instead of blocking
-  for the whole session (`UpstreamService.connect()`).
-- several profiles can be **connected simultaneously**: each profile gets its
-  own tunnel device (explicit `profiles[].interface`, or derived -- the first
-  profile inherits the top-level `upstream.interface`, later ones get
-  `oc-up<N>`) and its own pid file. Exactly one profile is *active*: the
-  nftables `oifname` match and the policy-route device point at its tunnel.
-  Switching the active profile (`korctl upstream switch` / the panel's Switch
-  button) only re-points those redirection rules -- connections stay up.
-- how the *server's own* egress for that VPN client traffic is routed (as opposed
-  to what ocserv pushes to clients themselves, which is `server.routes`/`no_routes`,
-  independent of this) is `routing.client_policy`, one web section ("Upstream", merged
-  with the former standalone "Routing" tab so the two aren't presented as
-  unrelated features):
-  - Both modes are only about *upstream* egress and are inert without one:
-    with `upstream.enabled: false`, VPN clients always get plain masquerade
-    through the host (`main_interface`, or any interface if `auto`) regardless
-    of which mode is configured -- mode has nothing to route into otherwise.
-    There is no "off"/"direct" mode: once upstream is enabled, kornode
-    always manages NAT/routing for it -- `full` by default, optionally
-    narrowed to `split`.
-  - `full`: all VPN client traffic is marked and forced through the upstream
-    interface via a dedicated policy-routing table (`ip rule`/`ip route`,
-    `routing.fwmark`/`routing.table_id`); an nftables `forward` rule drops any
-    marked packet that doesn't leave via that interface, i.e. a kill switch --
-    if upstream is down, traffic is blocked rather than leaking out the host's
-    own connection;
-  - `split`: only `routing.split.routes` (CIDRs -- a single host is just a
-    /32) and domain-resolved addresses are marked and subject to the same
-    forced-routing/kill-switch treatment; everything else is masqueraded
-    normally through the host, unaffected. Domains are resolved into their
-    nftables set by the independent `DomainResolverService`
-    (`backend/kornode/services/domain_resolver.py`, `korctl domains watch`),
-    on its own schedule -- not fed by dnsmasq answering a live query, so it
-    doesn't matter which resolver a VPN client or the host actually uses.
-  - VPN clients always use this server's own dnsmasq (`internal_dns.listen`)
-    as their DNS while `server.enabled` -- mandatory, not opt-in -- so
-    split-DNS domain resolution feeds the same nftables set automatically
-    whenever `client_policy: split`.
-  - `routing.host_policy` extends routing to the **server host's own
-    traffic**, independent of the client-facing `routing.client_policy`: an nftables
-    `output` chain (`type route hook output`) marks host-originated packets,
-    so they hit the same fwmark policy route (and, with upstream enabled, the
-    same kill-switch via a `postrouting` filter chain — postrouting on
-    purpose: an output-hook filter chain shares its nf_hook_state with the
-    route chain and still sees the pre-reroute oifname, so it would drop
-    every marked host packet even with the tunnel up). `routing.host_policy`
-    (`full`/`split`) picks which packets get marked, mirroring the
-    client_policy's own full/split logic but decided on its own terms:
-    `split` marks only destinations in the split sets (as before); `full`
-    marks all host-originated traffic unconditionally — same caveat as split
-    routes never covering the upstream server's own address, but sharper
-    here since there's no curated list to keep it out of: the outbound
-    openconnect carrier connection itself would get marked and try to route
-    through the tunnel it's still establishing, a loop. Prefer `split` with a
-    curated route list when precision matters. Only connections the
-    host itself initiated are marked (`ct direction original`) — replies to
-    inbound connections (SSH, the panel, ocserv sessions) keep their normal
-    route. Marked host traffic is additionally masqueraded to the upstream
-    tunnel address: locally originated packets pick their source address
-    *before* the fwmark re-route (same reason korclient masquerades its own
-    tunnel egress), so without it they would enter the tunnel with the uplink
-    source and replies would never return — this also silently kills
-    `DomainResolverService`'s own queries if they happen to be reached
-    through the tunnel, draining the domain-fed split sets. Domain masks
-    apply to the host's own traffic the same way they apply to VPN
-    clients', regardless of which resolver the host itself uses for its own
-    lookups -- `DomainResolverService` resolves `routing.host_split`'s
-    domains independently (see `domain_groups()`), not by watching the
-    host's queries, so `host_policy: split` needs nothing from the host's
-    own resolver configuration.
+- `kornode-agent enroll` redeems a one-time token and stores the identity; `kornode-agent run` is the supervisor
+  main process. It holds the fabric tunnel and external upstream tunnels, applies bundles with
+  apply-with-confirm (verify health within a window, else roll back) and reports status.
+- A cached bundle is enough to boot and forward without the hub.
+- Roles: `access` runs a local ocserv listener for users of that node (password and certificate, hashes delivered
+  in the bundle); `exit` accepts `from: fabric` traffic and masquerades it for other nodes' `via: exit:<node>`.
+- Sources (wg-easy, Amnezia) attach to a node as named sources; kornode owns their routing and NAT.
 
-    `routing.host_dns` (point the host's own resolver at
-    `internal_dns.listen`, the address already sitting on `lo`, see "Listen
-    address lifecycle": `nameserver 10.10.10.1` in `/etc/resolv.conf`) is a
-    separate, narrower feature now: it lets the host's *own* lookups get
-    the blocklist/local-records effect too, and resolve a profile's
-    server-pushed internal-only names, which nothing but the upstream's own
-    DNS can answer -- unrelated to routing the host's traffic. This
-    replaces the tempting-but-broken pattern of connecting the host to its
-    own ocserv as a client: such a session's sync requests to
-    `/api/client/routing` arrive over loopback with a non-tunnel source
-    address and fail the VPN-session check. **Requires
-    `network_mode: host`** — the
-    project's `compose.yaml` uses it by default precisely for this and to drop
-    an extra NAT hop for VPN traffic in general (see README's Quick Start), not
-    as an opt-in for this one feature. Under the bridge network + port mapping
-    this replaced, every mechanism named above (upstream tunnels, nftables
-    rules, the fwmark table, dnsmasq's listen address) exists only inside the
-    container's own network namespace — VPN clients still work, but the host's
-    packets never traverse the container's netfilter, so the feature silently
-    does nothing for the host and `ip route show table <id>` on the host stays
-    empty.
-  - The upstream openconnect always runs with a minimal interface-only
-    vpnc-script (`templates/vpnc-script-kornode`, installed into
-    generated_dir on connect): the fwmark policy routing owns all tunnel
-    egress, so upstream-pushed routes/DNS must not touch the namespace's
-    routing table or resolv.conf — under `network_mode: host` the
-    distribution vpnc-script would hijack the host's default route.
-  - **Per-profile targeted routes/domains**: any `upstream.profiles[]` entry
-    can list its own `routes` (CIDRs) and/or `domains`, independent of
-    whether that profile is the active one. `RoutingService.list_targets()`
-    is the single source of truth: it always yields a `"default"` target
-    (the top-level `routing.client_policy`/routes/domains, following whichever
-    profile is active), plus one extra target per profile that has its own
-    `routes`/`domains` — each gets its own auto-derived fwmark/table
-    (`routing.fwmark`/`table_id` + a per-target offset, 1, 2, 3... in
-    profile list order, zero-padded to match the configured fwmark's width),
-    its own pair of nftables sets per family (`split_v4_<profile>_static`/
-    `_dynamic`, and the `_v6` equivalent) — `_static` holds this target's
-    config-known `routes`, `_dynamic` is fed by dnsmasq for its `domains` and
-    is never touched by a routes/domains-only reload (see
-    `NftablesService._apply_ruleset`) — and its own kill switch — unconditional even if
-    that profile itself is currently disabled/not dialed, since traffic
-    explicitly assigned to it should never silently leak out a different
-    path. These targeted profiles only exist at all when `upstream.enabled`
-    is true globally; nftables/prerouting marks the default target first and
-    named targets after (so a named target's more specific match overrides
-    the default's broader one for the same packet), while NAT masquerade
-    renders named targets first and the default last (so the default's
-    catch-all branch never steals a decision from a more specific target).
-    A profile with its own routes/domains still gets its own target even
-    while it's also the active (default) profile — the two targets end up
-    pointing at the same interface but keep separate fwmarks/tables, which
-    is harmless (the named target's more specific match just wins first)
-    and avoids special-casing "is this profile currently the default" in
-    `list_targets()`. Configured from the Upstream tab's profile editor
-    ("Target routes"/"Target domains" fields).
-  - **Per-profile HOST routing** (`route_host_enabled`/`host_routes`/
-    `host_domains`, `services/upstream_pushed.py`): the same idea as the
-    client-side targeting above, but for this host's own traffic, on its own
-    toggle/lists, independent of the global `routing.host_policy`/
-    `host_policy` and of whether this box runs a VPN server at all
-    (`server.enabled: false` is a supported "client-only" deployment).
-    `accept_server_routes` additionally merges in whatever the upstream
-    pushes at connect time (`route =`/`split-dns =`), resolved through the
-    upstream's own DNS; `sync_url`/`sync_interval` re-polls the upstream's
-    `GET /api/client/routing` (see "Client routing sync" below) on the live
-    tunnel to refresh those pushed lists without reconnecting.
-    `routing.host_dns` (`services/host_dns.py`) optionally points this
-    host's own resolver at the project-owned dnsmasq, via a bind-mounted
-    `/etc/resolv.conf` or a `systemd-resolved` drop-in, so the domains above
-    apply to the host's own lookups too.
-- `upstream.check_interval`/`check_threshold`/`failover` drive a supervised
-  watchdog (`[program:upstream-watchdog]`, `korctl upstream watch`) that pings
-  the active profile's `check_host` **through the tunnel interface**
-  (`ping -I`; a host that also answers via the uplink would otherwise report
-  healthy forever while the tunnel is dead) — or just checks the process is
-  alive if unset. On every healthy tick it also re-asserts the fwmark
-  rule/route (`PolicyRoutingService.ensure()`, add-only, no del/add churn):
-  the kernel purges the fwmark table's route whenever the tunnel device
-  bounces, e.g. during openconnect's own internal reconnect. After
-  `check_threshold` consecutive failures, it recovers: the
-  active profile is redialed first, then -- if `failover` is enabled and more
-  than one profile exists -- the next profiles in list order, cycling. A
-  standby profile whose tunnel is already up is adopted by just switching the
-  redirection rules to it, no dialing (`UpstreamService.recover()`).
+### External upstreams
+
+`upstream.*` profiles (hub) and agent upstreams are openconnect client connections to other ocserv servers, used as
+`via: upstream:<profile>`. Several profiles can be connected at once, each with its own tunnel device. Switching
+the active profile (`korctl upstream switch`, panel) re-points the profile used by rules; the egress rules and the
+kill switch (`unreachable default` in the exit table, stale-mark rejects) decide what happens while a tunnel is
+down. A supervised watchdog (`korctl upstream watch`, `upstream.check_*`, `failover`) pings the active profile's
+`check_host` through the tunnel interface and redials, cycling through profiles when `failover` is on. The
+upstream openconnect runs with a minimal interface-only vpnc-script (`tunnels/vpnc-script-kornode`): routes and
+DNS pushed by the server must not touch the namespace's routing table or `resolv.conf`; the reconciler owns them.
+
+`routing.host_dns` (`off`, `resolv_conf`, `resolved`) optionally points the host's own resolver at the built-in
+dnsmasq (`services/host_dns.py`). It needs `network_mode: host` and a mount of the host file or directory.
 
 ## Internal DNS
 
@@ -339,16 +162,18 @@ setup/confirm/disable flow.
      "Download & apply" button), validated (scheme, size cap, per-line domain parsing)
      and cached individually under `data_dir/internal-dns/urls/` before use.
 
-The same dnsmasq instance also serves split-DNS domains whenever `routing.client_policy: split`
-— both features compose; either one keeps the `dnsmasq` supervisor program running
-(`AppConfig.dns_tunnel_active()`), and the client DNS is the VPN server's own resolver
-unconditionally while `server.enabled` (`client_dns_servers()`).
+The same dnsmasq instance answers the fabric zone (`node<id>.<fabric.domain>` and registry records, owned by the
+hub; agents forward fabric names to it) and, through `DomainResolverService`, backs the domain sets of the egress
+policy. It runs whenever `server.enabled` or any of blocklist, local records or forward domains is on
+(`AppConfig.dnsmasq_active_reasons()`), and the client DNS is the VPN server's own resolver unconditionally while
+`server.enabled` (`client_dns_servers()`). Clients routed by domain sets must use it, so the addresses they
+connect to match the ones the resolver put into the set.
 
 ### Listen address lifecycle (runtime-dependent)
 
 ocserv never assigns the VPN gateway IP to any host interface: it creates one
 point-to-point tun device (`vpnsN`) per client, and per-client `/32` routes appear only
-while clients are connected — so the absence of a `10.10.10.0/24` route on the host is
+while clients are connected — so the absence of a route for the client pool (default `10.100.1.0/24` on the hub) is
 normal, and a bare dnsmasq would fail with "cannot assign requested address". The
 supervisor therefore starts dnsmasq through `korctl internal-dns run`, which first runs
 the idempotent `ip addr replace <listen>/32 dev lo` and then execs dnsmasq in the
@@ -369,11 +194,7 @@ inside `server.ipv4_network` that occtl reports as an active session — and
 receives only its own effective routing (server `routes`/`search_domains`,
 the user's config-per-group files, the per-user config) plus a version hash.
 korclient polls it through the tunnel and applies changes live without
-reconnecting. A kornode acting as an outbound client polls the same endpoint
-on the *upstream* kornode, the same way, when a profile sets `sync_url`
-(`upstream.profiles[].sync_url`/`sync_interval`, see "Middle-server mode"
-above) — the identification and versioning are identical either way, only the
-caller differs.
+reconnecting.
 
 ## Control surfaces
 
@@ -392,9 +213,8 @@ panel (a labeled input, checkbox or select bound to that specific field), groupe
 `config.yaml`'s own section layout: VPN server behavior and accepted auth methods live under
 the "Server (VPN)" / "Authentication methods" panels (Config tab), the admin web panel's own
 settings live under "Web / API panel", `system`/`cli` under "General", `identity`/`certificates`
-live in their own dedicated tabs, and `routing` lives inside the "Upstream" tab (not its own
-tab) since routing.client_policy's full/split behavior only means anything in terms of the upstream
-connection it forces traffic through -- keeping them apart read as two unrelated features.
+live in their own dedicated tabs, `egress`/`sources`/`sets` live in Network → Egress and sources,
+and `fabric` settings live in the Fabric tab.
 
 When a new field is added to `AppConfig`, add its GUI control in the same change:
 

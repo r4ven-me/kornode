@@ -1,11 +1,13 @@
 # Korvus Node
 
 Korvus Node (`kornode`) is a Python-first management platform for OpenConnect/ocserv
-VPN in Docker. The project supports two modes:
+VPN in Docker. It is a hub plus agents:
 
-- a regular OpenConnect VPN server built on `ocserv`;
-- middle-server mode, where the container additionally dials an outbound `openconnect`
-  connection into a private network and routes selected client traffic through it.
+- the hub (this image) is an `ocserv` VPN server for users, the registry and control plane for agents, and the
+  admin CLI/API/panel;
+- agents (`kornode-agent` image) join the hub over ocserv/openconnect on 443/tcp and form a routed overlay (the
+  fabric); each node decides where its traffic goes with one declarative egress policy and one reconciler;
+- a single node also works on its own as a plain VPN server, optionally dialing external OpenConnect upstreams.
 
 The CLI is the primary interface and always works. The Web API/GUI are optional and
 disabled by default.
@@ -24,7 +26,7 @@ disabled by default.
 - manages users, passwords, certificates, PKCS#12, OTP;
 - encrypted hub backup and non-destructive staged restore through CLI/API/panel
   (P3-09, awaiting review/runtime acceptance): [recovery runbook](docs/runbooks/hub-recovery.md);
-- commands for sessions, upstream profiles, split routes/domains, nftables and
+- commands for sessions, agents, fabric, egress policy, sources, upstream profiles, DNS records and
   diagnostics;
 - multi-stage Dockerfile with frontend/backend test stages;
 - compose file with `/dev/net/tun`, `NET_ADMIN`, `NET_RAW` and persistent volumes.
@@ -79,17 +81,17 @@ docker compose up -d
 `compose.yaml` runs with `network_mode: host` - this is the target, recommended deployment
 scheme, not just a performance tweak for special cases. The container uses the host's
 network interfaces directly instead of Docker's bridge/NAT, which removes an extra
-`docker-proxy` hop for VPN client traffic and lets the host itself participate in split
-routing (`routing.host_policy`) and use the built-in `dnsmasq` as its own
+`docker-proxy` hop for VPN client traffic and lets the host's own traffic follow the egress
+rules (`from: [host]`) and use the built-in `dnsmasq` as its own
 resolver - neither is possible under the default bridge network, since host packets
 never traverse the container's netfilter there. Two things worth knowing: `nft` rules
 are applied directly to the host's netfilter in this mode (not an isolated namespace),
 so the image's `nftables` userspace version (built on Debian) should match the host
 kernel - a Debian host avoids the issue entirely; and `kornode` only ever creates its
-own project-owned tables (prefixed with `routing.nft_prefix`, no global `flush
+own project-owned tables (`kornode`, `kornode_nat`; no global `flush
 ruleset`), so it doesn't touch unrelated host rules. The `devices:` list also has a
 commented-out `/dev/vhost-net` entry - an optional accelerated TUN path that `openconnect`
-(including the Upstream/middle-server outbound tunnel) can use if the host supports the
+(including the external upstream tunnels) can use if the host supports the
 `vhost_net` kernel module. It's off by default because Docker refuses to start a
 container whose listed device doesn't exist on the host; uncomment it only after
 checking `test -c /dev/vhost-net`. Without it, `openconnect` falls back to a plain
@@ -145,7 +147,7 @@ Key files:
 - `templates/` - Jinja2 templates for generated system configs;
 - `tests/` - pytest coverage;
 - `docs/` - additional notes on architecture, security, networking and Docker;
-- `examples/` - minimal, full, middle-server and client-only configurations;
+- `examples/` - minimal, full, hub-with-upstream (`middle-server`) and client-only configurations;
 - `Dockerfile` - frontend/backend test stages and the runtime image;
 - `compose.yaml` - production-like container startup;
 - `config.example.yaml` - main example YAML config;
@@ -263,9 +265,6 @@ auth:
     enabled: false
     ocserv_oath_auth: false
 
-routing:
-  client_policy: full
-
 upstream:
   enabled: false
 
@@ -299,242 +298,14 @@ Diff between the current generated files and a fresh render:
 docker compose exec kornode korctl config diff
 ```
 
-### Exhaustive Configuration Reference
+### Configuration Reference
 
-Every top-level field `AppConfig` knows about, in one file - also available as
-`examples/config.full.yaml`. Useful as a copy-paste base, or just to see what exists
-beyond the minimal example above. Values are illustrative, not defaults; anything you
-omit falls back to the real default in `backend/kornode/config/models.py`. It was
-validated as-is with `korctl config validate` and `korctl config render --dry-run`
-(after exporting the referenced `${SECRET:...}` names).
-
-```yaml
-system:
-  timezone: Europe/Moscow
-  data_dir: /var/lib/kornode
-  log_dir: /var/log/kornode
-  generated_dir: /var/lib/kornode/generated
-  secrets_dir: /var/lib/kornode/secrets
-  log_level: info # debug | info | warning | error
-  project_name: kornode
-  log_rotation:
-    enabled: false
-    max_size_mb: 50
-    max_age: 0
-    max_age_unit: days # hours | days | weeks | months
-    keep_files: 5
-
-server:
-  enabled: true
-  listen: 0.0.0.0
-  port: 443
-  udp_enabled: true
-  device: vpns
-  cn: vpn.example.com
-  realm: Korvus Node
-  ipv4_network: 10.10.10.0/24
-  dns:
-    - 10.10.10.1
-    - 1.1.1.1
-  search_domains:
-    - corp.example.com
-  routes:
-    - 192.168.25.0/24
-  no_routes: []
-  max_clients: 128
-  max_same_clients: 2
-  keepalive: 32400
-  compression: false
-  cisco_client_compat: true
-  debug_level: 2
-  connect_script: null
-  disconnect_script: null
-  camouflage:
-    enabled: true
-    secret: secretWord
-    realm: Hidden service
-
-certificates:
-  mode: auto # auto | external
-  ca_name: Example Internal CA
-  server_cert: null
-  server_key: null
-  ca_cert: null
-  letsencrypt:
-    enabled: false
-    email: admin@example.com
-    domains:
-      - vpn.example.com
-    renew_reload: true
-    auto_renew_enabled: true
-    auto_renew_interval: 7
-    auto_renew_interval_unit: days # hours | days | weeks | months
-    http01_address: null
-    http01_port: 80
-
-auth:
-  password:
-    enabled: true
-  certificate:
-    enabled: true
-  otp:
-    enabled: true
-    ocserv_oath_auth: false
-    issuer: Korvus Node
-    send_by_email: false
-    send_by_telegram: false
-  # Experimental: the OIDC/PAM-RADIUS auth bridge hasn't been verified against
-  # a real IdP in production. See "OIDC / Identity" before relying on it.
-  oidc:
-    enabled: true
-    connector: pam # pam | radius
-    pam:
-      service: ocserv-oidc
-      gid_min: 1000
-    radius:
-      config_file: /etc/radiusclient/radiusclient.conf
-      groupconfig: true
-      nas_identifier: kornode
-      group_separator: semicolon # semicolon | comma
-
-identity:
-  config_per_group_dir: /var/lib/kornode/generated/config-per-group
-  config_per_user_dir: null
-  default_group_config: null
-  select_group_by_url: true
-  default_select_group: devops
-  # Same experimental status as auth.oidc above.
-  oidc_providers:
-    - name: keycloak
-      issuer_url: https://sso.example.com/realms/vpn
-      client_id: kornode-vpn
-      client_secret: "${SECRET:OIDC_CLIENT_SECRET}"
-      scopes:
-        - openid
-        - profile
-        - email
-      username_claim: preferred_username
-      groups_claim: groups
-      allowed_groups:
-        - devops
-        - finance
-  group_policies:
-    - name: devops
-      display_name: DevOps
-      routes:
-        - 10.20.0.0/16
-      dns:
-        - 10.10.10.1
-      split_dns:
-        - corp.example.com
-      max_same_clients: 4
-    - name: finance
-      display_name: Finance
-      routes:
-        - 10.30.0.0/16
-      no_routes:
-        - 10.20.99.0/24
-      session_timeout: 28800
-
-upstream:
-  enabled: true
-  interface: oc-middle0
-  check_interval: 5
-  check_threshold: 3
-  check_settle_seconds: 15
-  failover: true
-  profiles:
-    - name: private-main
-      server: private.example.com
-      port: "443"
-      # Only if the upstream ocserv itself has camouflage enabled; appended
-      # as "/?secret" after host:port, same as server.camouflage.secret on
-      # this server's own side. Optional -- omit for a plain upstream.
-      camouflage_secret: "${SECRET:PRIVATE_MAIN_CAMOUFLAGE_SECRET}"
-      auth_type: p12 # password | cert | p12
-      # The upstream's certificate isn't CA-signed (another Korvus Node with
-      # its own CA), so pin it -- see "Trusting the upstream certificate".
-      server_cert_pin: "pin-sha256:<pin shown by the upstream>"
-      cert_file: /var/lib/kornode/secrets/private-main.p12
-      # Alternative to cert_file/key_file: paste the file itself, Base64-encoded,
-      # so it never has to exist on disk outside kornode's own secrets_dir:
-      # cert_file_base64: "${SECRET:PRIVATE_MAIN_P12_BASE64}"
-      cert_pass: "${SECRET:PRIVATE_MAIN_P12_PASSWORD}"
-      check_host: 10.11.11.1
-    - name: private-backup
-      server: backup.example.com
-      port: "443"
-      auth_type: password
-      username: middle-user
-      password: "${SECRET:PRIVATE_BACKUP_PASSWORD}"
-      trusted_cert: false
-      server_cert_pin: ""
-      check_host: 10.12.12.1
-
-routing:
-  client_policy: split # off | full | split
-  host_policy: off # off | full | split -- independent of client_policy above
-  main_interface: auto
-  fwmark: "0x0c01"
-  table_id: 1201
-  nft_prefix: kornode
-  split:
-    routes_file: /var/lib/kornode/routes.txt
-    domains_file: /var/lib/kornode/domains.txt
-    routes:
-      - 192.168.25.0/24
-      - 10.20.0.0/16
-    domains:
-      - example.com
-      - corp.example.com
-
-internal_dns:
-  listen: 10.10.10.1
-  port: 53
-  blocklist_enabled: true
-  local_records_enabled: true
-  blocklist_domains:
-    - ads.example.com
-    - tracker.example.net
-  blocklist_files:
-    - /var/lib/kornode/blocklist.txt
-  blocklist_urls:
-    - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
-    - https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt
-  cache_size: 150
-  log_queries: false
-  local_records:
-    - "nas.corp.local 10.11.11.5"
-
-web:
-  enabled: false
-  listen: 127.0.0.1
-  port: 8443
-  tls: true
-  tls_cert: null
-  tls_key: null
-  allow_insecure_http: false
-  trusted_proxies: []
-  admin_user: admin
-  admin_password: null
-  admin_password_hash: "${SECRET:KORNODE_ADMIN_PASSWORD_HASH}"
-  static_dir: /usr/share/kornode/frontend # container-internal, rarely changed
-  terminal_enabled: false
-  terminal_idle_timeout: 900
-  terminal_max_sessions: 2
-  session_lifetime: 43200
-  session_cookie_secure: true
-  admin_totp_enabled: false
-  admin_totp_secret: null
-
-cli:
-  enabled: true
-
-advanced:
-  raw_ocserv_options:
-    auth-timeout: 240
-```
-
+Every top-level field `AppConfig` knows about is in `examples/config.full.yaml` (validated by
+`tests/test_examples.py`); `config.example.yaml` is the annotated hub config. Values are illustrative, not
+defaults; anything you omit falls back to the real default in `backend/kornode/config/models.py`. Other examples:
+`config.minimal.yaml` (plain VPN server), `config.middle-server.yaml` (hub with an external upstream) and
+`config.client.yaml` (client-only node). Addressing, `fabric`, `control`, `egress`, `sources` and `sets` are
+described in "Fabric, Agents and Egress"; legacy v1 routing keys are rejected as unknown.
 Section by section, beyond what's already covered in depth elsewhere in this README:
 
 - `system` - runtime paths and log level/rotation; `project_name` feeds the ocserv
@@ -548,11 +319,11 @@ Section by section, beyond what's already covered in depth elsewhere in this REA
   is the experimental PAM/RADIUS bridge, covered next.
 - `identity` - OIDC providers and group policies, covered in "OIDC / Identity"
   (**experimental, not verified against a real IdP in production** - see that section).
-- `upstream` - middle-server outbound profiles, covered in "Middle-Server Mode";
+- `upstream` - external OpenConnect profiles, covered in "Upstreams";
   `cert_file_base64`/`key_file_base64` let a profile's client certificate/key travel
   as a `.env` secret instead of a mounted file, the same pattern Korvus Client uses.
-- `routing` - server-side policy routing/kill-switch, covered in "Routing,
-  Firewall/NAT, Split Routes and Domains".
+- `fabric`, `control`, `egress`, `sources`, `sets` - the fabric, agent control plane and egress policy, covered in
+  "Fabric, Agents and Egress"; `routing` only keeps host-level settings (`host_dns`, `main_interface`).
 - `internal_dns` - the built-in blocking resolver; unlisted here beyond the minimal
   example, but every field is self-explanatory from its name (domains/files/URLs to
   block, DNS cache size, query logging, local A-record overrides).
@@ -922,197 +693,130 @@ Dry-run:
 docker compose exec kornode korctl sessions kick alice --dry-run
 ```
 
-## Routing, Firewall/NAT, Split Routes and Domains
+## Fabric, Agents and Egress
 
-This section controls how **the server itself** sends VPN client traffic onward - not
-what ocserv pushes to clients (that's the separate `server.routes`/`no_routes`). The
-server can just exit through the host, or through an upstream tunnel (see "Middle-Server
-Mode" below); the modes decide which of these actually happens. In the web panel these
-settings live under the "Upstream" tab (not a tab of their own), because they only mean
-anything together.
+Kornode v2 is a hub plus agents. This server is the **hub** (node 1). Other machines run the `kornode-agent`
+image (agents, nodes 2..254) and join the hub over ocserv/openconnect on 443/tcp, forming a routed overlay (the
+fabric). Nothing else carries traffic between nodes. The data plane does not depend on the hub being up: an agent
+with a cached bundle keeps forwarding and boots from cache. Addressing, the egress compiler and the kernel layout
+are described in [docs/networking.md](docs/networking.md) and [docs/architecture.md](docs/architecture.md); the
+contracts are in `docs/spec/`.
 
-Both modes are only about routing traffic into an *upstream* tunnel, so without one
-they're inert: with `upstream.enabled: false`, VPN clients always get plain NAT through
-the host (`main_interface`, or any interface if `main_interface: auto`) no matter which
-mode is set - there's nothing for a mode to route into otherwise. Mode only starts
-mattering once you actually enable upstream.
+With default settings, node `<id>` gets fabric address `10.99.0.<id>`, client pool `10.100.<id>.0/24`, service
+address `10.100.<id>.1` and DNS zone `node<id>.kornode.internal`. Overlapping prefixes are rejected
+(`409 address_overlap`, `korctl` exit code 3).
 
-Modes:
+### Adding an agent
 
-- `full` (the default) - all VPN client traffic is marked and forced through the
-  upstream interface via a dedicated policy-routing table; if upstream is enabled but
-  unreachable, that traffic is blocked by a firewall rule (kill-switch) instead of
-  leaking out directly from the host;
-- `split` - only the routes/domains listed below are forced the same way; everything
-  else is NAT'd through the host as usual.
+On the hub (the control plane listens on the fabric address; enable it with `control.enabled: true`):
 
-Example split config:
+```bash
+docker compose exec kornode korctl agent create site-a --role exit   # roles: access, exit (optional)
+docker compose exec kornode korctl agent token site-a                # one-time enroll token
+```
+
+On the new node (`compose.agent.yaml`, `network_mode: host`, persistent `./agent-data`):
+
+```bash
+docker compose -f compose.agent.yaml run --rm agent kornode-agent enroll <token>
+docker compose -f compose.agent.yaml up -d
+```
+
+Then manage the agent from the hub: `korctl agent list|show|set|status|revoke|delete`, its exported networks
+(`korctl agent prefix list|add|del`), its egress policy (`korctl agent egress show|set|edit`), sources
+(`korctl agent source`), external upstreams (`korctl agent upstream`), the optional local ocserv listener for the
+`access` role (`korctl agent access`, `korctl agent user`), bundle history (`korctl agent bundle`) and remote
+commands (`korctl agent exec`). Every operation exists in the REST API and in the panel's Agents tab (CLI ⇄ API ⇄
+Web parity). On the agent, `kornode-agent status|explain|doctor|diag|reconnect|bundle` work offline from the
+cached state.
+
+`korctl fabric show` prints the topology, prefixes, DNS and sources; `korctl fabric set` changes fabric settings
+(Fabric tab in the panel). Fabric DNS records: `korctl dns record list|add|del`.
+
+### Egress policy
+
+What leaves where is one ordered list per node; the **first match wins**. On the hub it is in `config.yaml`; for
+agents it is stored in the registry and delivered in the bundle. Without an explicit `egress`, the hub's clients
+leave through the uplink (`clients -> any via local`); an explicit list replaces that rule, and traffic of clients
+and sources that no rule matches is dropped.
 
 ```yaml
-routing:
-  client_policy: split
-  main_interface: auto
-  fwmark: "0x0c01"
-  table_id: 1201
-  nft_prefix: kornode
-  split:
-    routes:
-      - 192.168.25.0/24
-      - 10.20.0.0/16
-      - 10.11.11.1
-    domains:
-      - corp.example.com
-
-internal_dns:
-  listen: 10.10.10.1
-  port: 53
+sources:                       # attached access servers (wg-easy, Amnezia)
+  - {name: wg, interface: wg0, cidr: 10.8.1.0/24, export: true}
+sets:                          # reusable destination sets
+  corp:
+    routes: [10.20.0.0/16]
+    domains: [corp.example.com]
+egress:
+  - from: [clients, wg]        # clients, host, fabric or a source name
+    to: {set: corp}            # any | fabric | {set: n} | {routes, domains} | {node: id}
+    via: upstream:office       # local | fabric | exit:<node> | upstream:<profile> | drop
+  - from: [clients, wg]
+    to: any
+    via: local
 ```
 
-There's no separate "ips" list - a single host is just a route with a /32 mask
-(`10.11.11.1` is equivalent to `10.11.11.1/32`), `routes` accepts both.
-
-Route commands:
+Traffic assigned to a tunnel **fails closed**: while the tunnel is down or reconnecting it is rejected rather than
+sent through the uplink (`kill_switch`, default `true` for every `via` except `local`). Connected networks (LANs,
+docker bridges) and tunnel carrier addresses always win over rules. There is no NAT inside the fabric; masquerade is
+applied only toward the internet and toward upstreams. Domains of a set are resolved into nft sets by
+`DomainResolverService` (`korctl domains resolve|reload|watch`); clients routed by domain should use the node's
+dnsmasq so they get the same addresses.
 
 ```bash
-docker compose exec kornode korctl routes list
-docker compose exec kornode korctl routes add 192.168.25.0/24
-docker compose exec kornode korctl routes delete 192.168.25.0/24
-docker compose exec kornode korctl routes reload --dry-run
+docker compose exec kornode korctl egress show
+docker compose exec kornode korctl egress check            # validation, dead-rule warnings
+docker compose exec kornode korctl egress set --help
+docker compose exec kornode korctl source --help
+docker compose exec kornode korctl net plan                # what the reconciler would change
+docker compose exec kornode korctl net explain --help      # why traffic from SRC to DST goes where it goes
 ```
 
-Domain commands:
+In the panel: Network → Egress and sources (hub) and Agents → policy (agents). Sources are documented in
+[docs/sources.md](docs/sources.md): run the access server in `network_mode: host` and disable its own NAT hooks,
+kornode owns routing and NAT for the source subnet (`korctl doctor` reports foreign NAT rules as an error).
 
-```bash
-docker compose exec kornode korctl domains list
-docker compose exec kornode korctl domains add corp.example.com
-docker compose exec kornode korctl domains delete corp.example.com
-docker compose exec kornode korctl domains reload --dry-run
-```
+### Firewall and NAT
 
-`routes add/delete` and `domains add/delete` work on runtime files:
+kornode owns only its objects: nft tables `inet kornode` and `ip kornode_nat`, `ip rule` priorities 90-199, route
+tables 12000-12999 and `main` routes with `proto 77`. It never flushes the host ruleset. Only the reconciler writes
+them; nothing needs a manual "apply" step. If `nft` exits with `signal 11` inside the container while the same
+rules load on the host, the image's `nftables` userspace does not match the host kernel: update the image or use a
+base image aligned with the host (Debian hosts avoid it).
 
-- `data/routes.txt`;
-- `data/domains.txt`.
+## Upstreams
 
-Check risky network changes with dry-run first:
-
-```bash
-docker compose exec kornode korctl nft apply --dry-run
-docker compose exec kornode korctl nft cleanup --dry-run
-```
-
-Apply firewall/NAT rules:
-
-```bash
-docker compose exec kornode korctl nft apply
-```
-
-This command renders the project-owned nftables state from the current config and
-applies it via `nft -f /var/lib/kornode/generated/nftables.nft`. It never does a
-global `flush ruleset` and never manages anyone else's firewall rules. In the GUI the
-same operation is called `Apply firewall/NAT`.
-
-Show the nftables state:
-
-```bash
-docker compose exec kornode korctl nft show
-```
-
-Clean up the project-owned nftables state:
-
-```bash
-docker compose exec kornode korctl nft cleanup
-```
-
-The project only generates project-owned tables with the prefix from
-`routing.nft_prefix` and never does a global `flush ruleset`. If `nft apply` inside the
-container fails with `returncode: -11`/`signal 11` while the same command works on the
-host, that's usually a mismatch between the image's `nft` userspace package and the
-host's kernel/netfilter stack. Check the exact same command inside the container:
-
-```bash
-docker compose exec kornode nft -f /var/lib/kornode/generated/nftables.nft
-docker compose exec kornode nft --version
-uname -r
-```
-
-In that case the fix isn't a Korvus Node config change but updating/replacing the
-nftables userspace in the image, or picking a base image compatible with the host's
-kernel.
-
-## Middle-Server Mode
-
-Middle-server mode is for when clients connect to this VPN server, and access to a
-private network goes through an outbound OpenConnect tunnel from the container.
-
-Basic example:
+An upstream is an external OpenConnect server (or an existing network interface) that the node dials out to and
+uses as `via: upstream:<profile>`. Profiles are defined under `upstream.profiles` on the hub, or per agent. The
+rules above decide which traffic uses which profile; there is no separate routing mode. Several profiles can be
+connected at once, each with its own tunnel device.
 
 ```yaml
-server:
-  enabled: true
-  listen: 0.0.0.0
-  port: 443
-  udp_enabled: true
-  device: vpns
-  cn: vpn.example.com
-  ipv4_network: 10.10.10.0/24
-  dns:
-    - 10.10.10.1
-    - 1.1.1.1
-
-auth:
-  password:
-    enabled: true
-  certificate:
-    enabled: true
-  otp:
-    enabled: true
-    ocserv_oath_auth: false
-
 upstream:
   enabled: true
-  interface: oc-middle0
   active_profile: private-main
-  check_interval: 5
-  check_threshold: 3
-  check_settle_seconds: 15
   failover: true
   profiles:
     - name: private-main
       server: private.example.com
       port: "443"
-      auth_type: password
+      auth_type: password        # password | cert | p12
       username: middle-user
       password: "${SECRET:PRIVATE_MAIN_PASSWORD}"
-      check_host: 10.11.11.1
-      # Optional: if the upstream server also uses ocserv's camouflage
-      # feature, the client appends it as a "?secret" query, not part of
-      # `port` itself.
-      # camouflage_secret: "${SECRET:PRIVATE_MAIN_CAMOUFLAGE_SECRET}"
-
-routing:
-  client_policy: split
-  main_interface: auto
-  fwmark: "0x0c01"
-  table_id: 1201
-  nft_prefix: kornode
-  split:
-    routes:
-      - 192.168.25.0/24
-      - 10.20.0.0/16
-    domains:
-      - corp.example.com
-
-internal_dns:
-  listen: 10.10.10.1
-  port: 53
+      check_host: 10.11.11.1     # pinged through the tunnel by the watchdog
 ```
 
-Put the secret in `.env`:
-
-```env
-PRIVATE_MAIN_PASSWORD=change-me
+```bash
+docker compose exec kornode korctl upstream list
+docker compose exec kornode korctl upstream status
+docker compose exec kornode korctl upstream connect private-main --dry-run
+docker compose exec kornode korctl upstream switch private-main
+docker compose exec kornode korctl upstream enable|disable private-main
 ```
+
+A supervised watchdog (`upstream.check_interval`, `check_threshold`, `failover`) pings `check_host` through the
+tunnel and redials, cycling through profiles when `failover` is on. `examples/config.middle-server.yaml` is a
+complete hub with an upstream.
 
 ### Trusting the upstream certificate
 
@@ -1122,7 +826,7 @@ its own CA (for example another Korvus Node in `auto` certificate mode), pin its
 certificate in the profile's `server_cert_pin`. It is passed as `--servercert`:
 
 1. On the **upstream** server, open Config → Certificates → *Server certificate* and
-   click **Show connection pin**, or run `korctl server cert pin`. Copy the
+   click **Show connection pin**, or run `korctl certificates pin`. Copy the
    `pin-sha256:...` value.
 2. On **this** server, paste it into the upstream profile's *Server cert pin* field.
    Or click **Fetch** next to that field (`korctl upstream fetch-pin HOST --port PORT`):
@@ -1144,11 +848,10 @@ differs from the last accepted one, a warning is written to the upstream log. Th
 trade-off is no protection against a man-in-the-middle on the path to the upstream. An
 explicit `server_cert_pin` always wins over this mode.
 
-### Routing through an existing interface instead of dialing out
+### Using an existing interface instead of dialing out
 
-A profile can also point at a network interface that already exists on the host --
-for example a WireGuard interface brought up outside kornode entirely (`wg-quick`,
-systemd-networkd, etc.) -- instead of dialing an OpenConnect server:
+A profile can point at an interface that already exists on the host - for example a WireGuard
+interface brought up outside kornode (`wg-quick`, systemd-networkd) - instead of dialing:
 
 ```yaml
 upstream:
@@ -1156,172 +859,17 @@ upstream:
     - name: site-b-wireguard
       kind: external_interface
       interface: wg0
-      route_host_enabled: true
-      host_routes:
-        - 10.30.0.0/16
 ```
 
-Set `kind: external_interface` and give `interface` explicitly (there's nothing for
-kornode to derive a name for, since it doesn't own the device). kornode never creates,
-brings up, tears down, or redials this interface -- it only applies the same
-routing/nftables/split-DNS automation on top of it that an `openconnect` profile's own
-tunnel gets. `server`, `auth_type` and the other dial-specific fields don't apply, and
-`accept_server_routes`/`sync_url` are rejected (there's no vpnc-script handshake or
-panel behind a plain externally-managed link to poll). The watchdog only observes this
-kind of profile's link state (up/down) to decide whether to (re)apply or tear down its
-routing -- it never attempts to reconnect it.
-
-Check the profiles:
-
-```bash
-docker compose exec kornode korctl upstream list
-docker compose exec kornode korctl upstream status
-```
-
-Switch the active profile:
-
-```bash
-docker compose exec kornode korctl upstream switch private-main
-```
-
-Connect/disconnect the active upstream (openconnect daemonizes after a successful
-connect, the command returns immediately without waiting for the tunnel to drop):
-
-```bash
-docker compose exec kornode korctl upstream connect --dry-run
-docker compose exec kornode korctl upstream connect
-docker compose exec kornode korctl upstream disconnect
-```
-
-`routing.client_policy: split` (as in the example above) really forces the listed routes/domains
-through the upstream interface via a dedicated policy-routing table
-(`routing.fwmark`/`routing.table_id`) and turns on the kill-switch: if upstream is
-unreachable, that traffic won't go out directly from the host, it will be blocked by a
-firewall rule instead of leaking past the tunnel. `client_policy: full` does the same thing but
-for all client traffic. Several profiles can be connected **at the same time**: each has its own tunnel interface
-(`profiles[].interface`; without one, the first profile inherits `upstream.interface`,
-the next ones get `oc-up<N>`) and its own pid file. Exactly one is always active - the
-redirection rules (nftables oifname + policy route) point at its tunnel. Switching the
-active profile (`korctl upstream switch` / the Switch button in the panel) only
-repoints these rules, the connection itself isn't touched:
-
-```bash
-docker compose exec kornode korctl upstream connect backup   # dial a standby tunnel
-docker compose exec kornode korctl upstream switch backup    # instant switch-over
-```
-
-`upstream.check_interval`/`check_threshold`/`failover` drive a separate supervisor
-process, `korctl upstream watch`: it pings the active profile's `check_host` and, after
-`check_threshold` failures, first reconnects to the same profile, then - if `failover:
-true` and there's more than one profile - tries the next ones in turn; an already
-connected standby profile is picked up by simply switching the redirection rules,
-without dialing. `upstream.check_settle_seconds` is a grace window after a successful
-reconnect during which health-check failures aren't counted yet, so a tunnel that just
-came back up (routing/DPD still settling) can't immediately trigger another reconnect
-before it had a chance to prove itself.
-
-Any profile can also carry its own `routes`/`domains` (CIDRs / domain names) in
-addition to the ones above - this targets that traffic through this specific profile's
-tunnel regardless of which profile is currently active/default, each with its own
-fwmark/table/kill-switch and nftables set, derived automatically from
-`routing.fwmark`/`table_id`. This is separate from `routing.client_policy`/`routing.split`, which
-only shape the *default* profile's traffic:
-
-```yaml
-upstream:
-  enabled: true
-  profiles:
-    - name: private-main
-      server: vpn.internal.example.com
-      routes:
-        - 10.50.0.0/16
-      domains:
-        - internal.example.com
-```
-
-Set from the Upstream tab's profile editor ("Target routes"/"Target domains" fields) or
-directly in `config.yaml`.
-
-### Routing the host's own traffic through a profile
-
-The same idea applies to this **host's** own traffic (not VPN clients - this box may not
-even run a VPN server, see "Client-only deployment" below), via a separate toggle and
-separate lists, independent of the global `routing.host_policy`:
-
-```yaml
-upstream:
-  profiles:
-    - name: private-main
-      route_host_enabled: true
-      host_routes:
-        - 10.60.0.0/16
-      host_domains:
-        - internal.example.com
-```
-
-Set from the Upstream tab's profile dialog ("Route host traffic" section) or directly in
-`config.yaml`.
-
-### Server-pushed routes and split-DNS
-
-With `accept_server_routes: true`, whatever the upstream pushes in the connect handshake
-(`route =`/CISCO_SPLIT_INC and `split-dns =`/CISCO_SPLIT_DNS - the same fields Korvus
-Client's full-tunnel/split modes use) is merged into this profile's host routing on top
-of `host_routes`/`host_domains` above. Pushed domains resolve through the upstream's own
-DNS (the tunnel's `INTERNAL_IP4_DNS`), not the host's normal resolvers, since they're
-typically internal names nothing else can answer. Requires `route_host_enabled: true` -
-without it there's no host routing to add these to:
-
-```yaml
-upstream:
-  profiles:
-    - name: private-main
-      route_host_enabled: true
-      accept_server_routes: true
-```
-
-### Mid-session sync
-
-The pushed lists above are captured once, at connect time. If the upstream is itself a
-Korvus Node, its admin can add or remove routes/split-DNS domains from its own panel at
-any time - `sync_url` refreshes this profile's pushed lists on the already-open tunnel
-without reconnecting, by polling the upstream panel's own `GET /api/client/routing`
-(the same endpoint Korvus Client polls, see "Client routing sync" in
-`docs/architecture.md`) every `sync_interval` seconds. That endpoint has no admin
-auth (VPN clients authenticate by their session source IP), so **the upstream**
-must also turn on `web.client_sync_enabled: true` - a separate, default-off toggle
-from `web.enabled` for exactly that reason (Web API and GUI - Client routing sync):
-
-```yaml
-upstream:
-  profiles:
-    - name: private-main
-      route_host_enabled: true
-      accept_server_routes: true
-      sync_url: https://10.10.10.1:8443
-      sync_interval: 60
-      # The upstream panel usually runs on its own private-CA certificate;
-      # verification is opt-in since the request already travels inside this
-      # profile's authenticated tunnel.
-      sync_verify_tls: false
-```
-
-Trigger a sync immediately instead of waiting for the interval:
-
-```bash
-docker compose exec kornode korctl upstream sync private-main
-```
-
-Or the **Sync now** button in the panel's Clients table.
+Give `interface` explicitly. kornode never creates, brings up, tears down or redials this interface; it only
+applies the egress rules, NAT and kill switch on top of it (`via: upstream:site-b-wireguard`). Dial-specific
+fields (`server`, `auth_type`, ...) do not apply. The watchdog only observes the link state.
 
 ### Host DNS
 
-`routing.host_dns` points this **host's** own resolver at the built-in dnsmasq. This is
-*not* needed for domain-based host routing above (`routing.host_split.domains`,
-a profile's own `host_domains`) any more -- those are resolved into their nftables
-sets independently, regardless of which resolver the host uses. It's for the host's
-*own* lookups: getting the blocklist/local-records effect too, and being able to
-resolve a profile's server-pushed internal-only names at all:
+`routing.host_dns` points this **host's** own resolver at the built-in dnsmasq, so the host's own lookups get the
+blocklist and local-records effect. It is not needed for domain-based egress: set domains are resolved
+independently of whichever resolver the host uses.
 
 ```yaml
 routing:
@@ -1334,41 +882,31 @@ routing:
 - `resolved` - installs a `systemd-resolved` drop-in instead. After the first time this
   is enabled, run `systemctl restart systemd-resolved` on the host once - resolved only
   reads new drop-ins on (re)start, and the container cannot restart a host service
-  itself. The drop-in file itself is removed automatically (same as `resolv_conf`'s
-  restore) when `host_dns` is turned off or the container stops, but that removal still
-  needs the same manual restart to actually take effect - if you want that automated
-  too, watch the drop-in's directory with a host-side systemd path unit (or similar)
-  that restarts `systemd-resolved` on change.
+  itself. The drop-in file is removed automatically when `host_dns` is turned off or the
+  container stops, but that removal needs the same manual restart to take effect.
 
-Only takes effect while dnsmasq is actually running (i.e. something else above already
-needs it - `accept_server_routes`, `host_domains`, or split-DNS), so `host_dns` never
-points the host at a resolver that isn't there. Either mode needs the host's resolver
-file/directory bind-mounted into the container, on top of the `network_mode: host` the
-base `compose.yaml` already uses - see "Client-only deployment" below for the override
-that adds it.
+Only takes effect while dnsmasq is running, so the host is never pointed at a resolver that isn't there. Either
+mode needs the host's resolver file/directory bind-mounted into the container, on top of the `network_mode: host`
+the base `compose.yaml` already uses - see "Client-only deployment" below.
 
 ### Client-only deployment
 
-Everything above works the same with `server.enabled: false`: kornode then runs
-purely as an outbound client - no ocserv, no VPN-server healthcheck, just the upstream
-tunnel(s), host routing, and (optionally) `routing.host_dns` - the same role Korvus
-Client fills as a standalone container, useful when this box doesn't also need to accept
-inbound VPN clients of its own:
+With `server.enabled: false` kornode runs purely as an outbound client - no ocserv, just the upstream tunnel(s),
+egress rules for the host's own traffic and, optionally, `routing.host_dns`:
 
 ```bash
 cp examples/config.client.yaml config/config.yaml
 docker compose -f compose.yaml -f compose.client.yaml up -d
 ```
 
-`examples/config.client.yaml` has a complete profile (host routing,
-`accept_server_routes`, `sync_url`, `routing.host_dns: resolv_conf`);
-`compose.client.yaml` adds the `/etc/resolv.conf` bind mount that mode needs (a commented
+`examples/config.client.yaml` has a complete profile with `from: [host]` egress and `routing.host_dns:
+resolv_conf`; `compose.client.yaml` adds the `/etc/resolv.conf` bind mount that mode needs (a commented
 alternative mount is included for `resolved`).
 
-Middle-server routing, reconnect/failover and end-to-end access to the private network
-still depend on the real network, the upstream server, and nftables/policy-routing on
-the host/in the container (`NET_ADMIN` is required). Verify this on a test setup before
+Reconnect, failover and end-to-end access to the private network depend on the real network, the upstream
+server and nftables/policy routing on the host (`NET_ADMIN` is required). Verify this on a test setup before
 enabling it in production.
+
 
 ## Web API and GUI
 
@@ -1423,9 +961,8 @@ web:
   session_lifetime: 3600
   session_cookie_secure: true
   terminal_enabled: false
-  # Off by default even with web.enabled: true -- only turn this on if an
-  # upstream profile's sync_url (this server as a middle-server upstream)
-  # actually needs to reach it. See "Mid-session sync".
+  # Off by default even with web.enabled: true -- only turn this on if
+  # Korvus Client sync (GET /api/client/routing) needs to reach it.
   client_sync_enabled: false
 ```
 
@@ -1516,10 +1053,12 @@ CLI:
   issue/revoke certificate, PKCS#12 export/download, passphrase and Apple-compatible
   mode;
 - Sessions: list of active sessions via `occtl` and kicking a user;
-- Upstream (includes the former separate Routing tab): status, list/create/edit/delete
-  profiles, switch active profile, connect/disconnect, check host + auto-reconnect/
-  failover settings; server-side routing mode (full/split) with kill-switch,
-  routes/domains/split IPs add/delete, reload, nft show/apply/cleanup;
+- Agents: create/revoke/delete, enroll tokens, per-agent policy (egress, sources, prefixes, upstreams), access
+  listener and users, bundle history, remote commands, backup/restore of the hub;
+- Fabric: topology, fabric settings, fabric DNS records;
+- Network: hub egress rules, sources and sets (`/api/egress`, `/api/sources`);
+- Upstream profiles: status, list/create/edit/delete, switch active profile, connect/disconnect, check host +
+  auto-reconnect/failover settings;
 - Config: edit the persistent `/etc/kornode/config.yaml`, validate YAML, save with an
   atomic write, rendered files, diff and write rendered files;
 - Diagnostics: runtime probes split into ok/warning/error;
@@ -1717,9 +1256,9 @@ For the current version, a Docker smoke test was performed with `/dev/net/tun`,
 Deployment-specific checks remain:
 
 - connecting a real OpenConnect client;
-- the upstream OpenConnect tunnel in middle-server mode;
-- nftables apply/cleanup in your network environment;
-- fwmark policy routing and split DNS for your domains/networks;
+- the external upstream OpenConnect tunnels;
+- agent enrollment and the fabric (`korctl fabric show`, `kornode-agent status`) in your network;
+- egress rules, kill switch and domain sets for your domains/networks;
 - end-to-end client access to the private network.
 
 ## Useful Commands
@@ -1761,7 +1300,8 @@ docker compose exec kornode korctl user otp enable alice
 docker compose exec kornode korctl user otp show-qr alice
 
 # Network
-docker compose exec kornode korctl nft apply --dry-run
+docker compose exec kornode korctl net plan
+docker compose exec kornode korctl fabric show
 docker compose exec kornode korctl diagnose --dry-run
 
 # Stop

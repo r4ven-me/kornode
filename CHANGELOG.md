@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed (documentation v2, P5-05; branch `redesign/p5-05-docs`)
+
+- README, `docs/architecture.md`, `docs/networking.md` rewritten for hub + agents, the fabric, the declarative egress model, sources and the reconciler; the v1 routing/middle-server sections (`client_policy`, `split`, `fwmark`, `korctl routes|nft|upstream sync`, per-profile host routing) are gone. Stale rows removed from `docs/features.md`, `docs/configuration.md`. New `tests/test_docs_v2.py` fails if removed v1 terms reappear in these docs.
+
 ### Added (Fabric section, P4-07; branch `redesign/p4-07-fabric`)
 
 - `FabricService` (`show`, `set`): one read model of the fabric (addressing, hub, nodes with roles/online/fabric address/prefixes, DNS zone, hub sources) and the only writer of the `fabric:` pool/domain/reserved keys. `korctl fabric show|set`, `GET/PATCH /api/fabric`, panel **Fabric** tab (Topology, Fabric settings, Fabric DNS); `parity.yaml` rows `fabric.show`, `fabric.settings`.

@@ -23,8 +23,7 @@
 > **Не сделано:** set/domain-выходы через
 > `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спеки,
 > упорядоченный редактор правил с drag и inline-explain (P5-01, сейчас JSON), URL-источники `sets` на хабе
-> (`route_urls`/`domain_urls` отвергаются как `runtime_unsupported`), README / `docs/architecture.md` /
-> `docs/networking.md` (всё ещё про v1, P5-05), прогон `e2e.yml` на GitHub Actions, пересборка образов E2E-06
+> (`route_urls`/`domain_urls` отвергаются как `runtime_unsupported`), прогон `e2e.yml` на GitHub Actions, пересборка образов E2E-06
 > (флаг-день D-71 и новая конфигурация).
 >
 > **Важно для продолжения:**
