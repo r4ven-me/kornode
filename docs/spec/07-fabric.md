@@ -86,7 +86,7 @@ Zone `<fabric.domain>` (default `kornode.internal`), D-66.
   `cname`; a name the hub does not know is NXDOMAIN, never forwarded. Generated
   names: `hub.<domain>` and `node1.<domain>` → hub service address
   (`10.100.1.1`), `node<N>.<domain>` → service address of every registered
-  node. With `fabric.enabled` the hub dnsmasq always runs (`fabric_dns`
+  node. While `server.enabled` the hub dnsmasq always runs (`fabric_dns`
   reason). The hub restarts dnsmasq only when the rendered file changes, after
   record or agent mutations.
 - **Records** live in `dns_records`, names relative to the domain. Hub-wide:

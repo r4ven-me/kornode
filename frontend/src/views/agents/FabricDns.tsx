@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { agentGet, agentWrite, type Agent } from "../../agentsApi";
 
 export type ZoneRecord = { fqdn: string; type: "A" | "AAAA" | "CNAME"; value: string; node: string | null; generated: boolean };
-type Zone = { enabled: boolean; domain: string; records: ZoneRecord[] };
+type Zone = { domain: string; records: ZoneRecord[] };
 
 /** The name as the API takes it: relative to the zone, or to node<id>.<zone> for agent records. */
 function relative(record: ZoneRecord, domain: string): string {

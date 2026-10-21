@@ -1339,9 +1339,6 @@ def registry_maintain_command() -> None:
     from kornode.services.server import ServerService
 
     config = get_config()
-    if not config.fabric.enabled:
-        typer.echo("fabric disabled")
-        return
     server = ServerService(config)
 
     def reload_ocserv() -> None:

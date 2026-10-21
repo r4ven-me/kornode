@@ -12,7 +12,7 @@ vi.mock("../../agentsApi", () => ({
 }));
 const agent: Agent = { id: 2, name: "branch", description: "", roles: ["access"], state: "pending", online: false, desired_version: 0, applied_version: 0, last_seen: null, cert_not_after: null, transport: {} };
 const detail: Detail = { agent, prefixes: [], policy: {}, upstreams: [], users: [], bundles: [], reports: [], commands: [], access: { configured: false } };
-const status = { enabled: true, fabric_enabled: true, agents: 0, active: 0, rotation: null, signing_key_id: "public-id" };
+const status = { enabled: true, agents: 0, active: 0, rotation: null, signing_key_id: "public-id" };
 
 afterEach(cleanup);
 beforeEach(() => {

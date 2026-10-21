@@ -71,13 +71,13 @@ def test_dnsmasq_render_omits_log_queries_by_default(tmp_path: Path) -> None:
 def test_dnsmasq_render_filters_own_listen_address_from_upstreams(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
-        cli_overrides={"server": {"dns": ["10.10.10.1", "1.1.1.1"]}},
+        cli_overrides={"server": {"dns": ["10.100.1.1", "1.1.1.1"]}},
         environ={},
     )
 
     rendered = DnsmasqConfigRenderer().render(config)
 
-    assert "server=10.10.10.1" not in rendered
+    assert "server=10.100.1.1" not in rendered
     assert "server=1.1.1.1" in rendered
 
 

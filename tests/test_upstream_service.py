@@ -2156,7 +2156,7 @@ def test_external_interface_profile_forbids_sync_url(tmp_path: Path) -> None:
                         "name": "wg",
                         "kind": "external_interface",
                         "interface": "wg0",
-                        "sync_url": "https://10.10.10.1:8443",
+                        "sync_url": "https://10.100.1.1:8443",
                     }
                 ],
             )

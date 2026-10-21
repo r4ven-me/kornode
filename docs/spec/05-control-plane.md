@@ -4,7 +4,7 @@
 
 ```yaml
 control:
-  enabled: true                 # implies fabric.enabled
+  enabled: true                 # the fabric itself is always part of the hub (D-71)
   port: 8444                    # bound to the hub fabric address 10.99.0.1 only
   long_poll_seconds: 60
   report_interval_seconds: 30

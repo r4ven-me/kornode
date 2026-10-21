@@ -493,7 +493,6 @@ class Worker:
                     # health/ping target (10.8.0.1) used by the NL-13 case.
                     **({"ipv4_network": "10.8.0.0/24"} if self.role == "ext" else {}),
                 },
-                "fabric": {"enabled": self.role == "hub"},
                 "control": {
                     "enabled": self.role == "hub",
                     "report_interval_seconds": 5,

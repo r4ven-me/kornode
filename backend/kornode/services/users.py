@@ -570,7 +570,7 @@ class UserService:
             dry_run=dry_run,
             extra_secrets=[password],
         )
-        if result.ok and not dry_run and self.config.fabric.enabled:
+        if result.ok and not dry_run:
             self.ensure_default_group()
         return result
 

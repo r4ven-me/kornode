@@ -93,8 +93,6 @@ class BackupService:
 
     def create(self, passphrase: str) -> bytes:
         password_bytes(passphrase)
-        if not self.config.fabric.enabled:
-            raise ManagementError(409, "disabled", "hub backup requires an initialized fabric hub")
         path = self.config.system.data_dir / "registry.db"
         if not path.is_file() or path.is_symlink():
             raise ManagementError(409, "missing_state", "hub registry is missing")

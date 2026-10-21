@@ -30,14 +30,6 @@ class ControlManagement:
         self.agents = AgentService(config, bundles=self.bundles, clock=self.clock)
 
     def status(self) -> dict[str, Any]:
-        if not self.config.fabric.enabled:
-            return {
-                "enabled": self.config.control.enabled,
-                "fabric_enabled": False,
-                "agents": 0,
-                "rotation": None,
-                "signing_key_id": None,
-            }
         with self.agents.registry() as registry:
             nodes = [n for n in registry.list_nodes() if n.id != 1]
             rotation = registry.rotation()
@@ -70,7 +62,6 @@ class ControlManagement:
             )
             return {
                 "enabled": self.config.control.enabled,
-                "fabric_enabled": True,
                 "control_url": self.bundles.control_url(),
                 "agents": len(nodes),
                 "active": sum(n.state == "active" for n in nodes),

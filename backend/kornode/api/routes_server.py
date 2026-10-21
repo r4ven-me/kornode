@@ -41,7 +41,7 @@ class ServerSettingsRequest(BaseModel):
     device: str = "vpns"
     cn: str = "vpn.example.com"
     realm: str = "Korvus VPN Server"
-    ipv4_network: str = "10.10.10.0/24"
+    ipv4_network: str = "10.100.1.0/24"
     dns: list[str] = Field(default_factory=list)
     search_domains: list[str] = Field(default_factory=list)
     routes: list[str] = Field(default_factory=list)

@@ -86,8 +86,6 @@ class OcservConfigRenderer(TemplateRenderer):
         content = (default_template_dir() / "ocserv-connect-script-kornode").read_text(
             encoding="utf-8"
         )
-        if not config.fabric.enabled:
-            return content
         content = content.replace(
             "# connection, so failures here are deliberately swallowed.",
             "# connection, so hook failures here are deliberately swallowed.",
@@ -136,9 +134,7 @@ class OcservConfigRenderer(TemplateRenderer):
         return "\n".join(lines) + "\n"
 
 
-def _fabric_vhost(config: AppConfig) -> dict[str, Any] | None:
-    if not config.fabric.enabled:
-        return None
+def _fabric_vhost(config: AppConfig) -> dict[str, Any]:
     return {
         "name": config.fabric.server_name,
         "server_cert": config.cert_path("fabric.crt"),

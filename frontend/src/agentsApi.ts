@@ -22,7 +22,7 @@ export type AccessUser = { username: string; groups: string[]; enabled: boolean;
 export type AccessListener = { configured: boolean; role?: boolean; hostname?: string; port?: number; udp?: boolean; certificate?: { not_after: string | null; pin: string | null } };
 export type BundleVersion = { version: number; key_id: string; created_at: string; reason: string };
 export type AgentCommand = { id: string; type: string; state: string; created_at: string; args: JsonObject; result: (JsonObject & { artefact_available?: boolean }) | null };
-export type ControlStatus = { enabled: boolean; fabric_enabled: boolean; agents: number; active?: number; signing_key_id: string | null; rotation: { phase: string; promotes_at: string; warning: string } | null };
+export type ControlStatus = { enabled: boolean; agents: number; active?: number; signing_key_id: string | null; rotation: { phase: string; promotes_at: string; warning: string } | null };
 export type Detail = {
   agent: Agent; prefixes: Prefix[]; policy: Policy; upstreams: Upstream[];
   users: AccessUser[]; bundles: BundleVersion[]; reports: JsonObject[]; commands: AgentCommand[];

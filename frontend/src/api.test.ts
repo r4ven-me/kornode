@@ -156,7 +156,6 @@ describe("saveFabricSettings", () => {
 
     await saveFabricSettings("session", {
       node_id: 3,
-      enabled: true,
       cidr: "10.99.0.0/24",
       client_pool: "10.100.{id}.0/24",
       source_pool: "10.8.{id}.0/24",
@@ -170,7 +169,6 @@ describe("saveFabricSettings", () => {
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({
       node_id: 3,
-      enabled: true,
       cidr: "10.99.0.0/24",
       client_pool: "10.100.{id}.0/24",
       source_pool: "10.8.{id}.0/24",

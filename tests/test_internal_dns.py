@@ -215,8 +215,8 @@ def test_internal_dns_requires_listen_inside_vpn_subnet(tmp_path: Path) -> None:
         _config(
             tmp_path,
             {
-                "server": {"ipv4_network": "10.99.0.0/24"},
-                "internal_dns": {"listen": "10.10.10.1"},
+                "server": {"ipv4_network": "10.77.0.0/24"},
+                "internal_dns": {"listen": "10.100.1.1"},
             },
         )
 
@@ -226,10 +226,10 @@ def test_client_dns_becomes_vpn_server_when_server_enabled(tmp_path: Path) -> No
     # server is enabled (the default) -- see AppConfig.client_dns_servers().
     config = _config(tmp_path)
     assert config.dns_tunnel_active()
-    assert config.client_dns_servers() == ["10.10.10.1"]
+    assert config.client_dns_servers() == ["10.100.1.1"]
 
     rendered = OcservConfigRenderer().render(config)
-    assert "dns = 10.10.10.1" in rendered
+    assert "dns = 10.100.1.1" in rendered
     assert "dns = 1.1.1.1" not in rendered
     assert "tunnel-all-dns = true" in rendered
 
@@ -354,14 +354,14 @@ def test_rendered_files_include_dnsmasq_and_blocklist(tmp_path: Path) -> None:
 def test_ensure_listen_address_assigns_ip_to_loopback(tmp_path: Path) -> None:
     config = _config(tmp_path)
     result = InternalDnsService(config).ensure_listen_address(dry_run=True)
-    assert result.argv == ("ip", "addr", "replace", "10.10.10.1/32", "dev", "lo")
+    assert result.argv == ("ip", "addr", "replace", "10.100.1.1/32", "dev", "lo")
     assert result.dry_run
 
 
 def test_remove_listen_address_command(tmp_path: Path) -> None:
     config = _config(tmp_path)
     result = InternalDnsService(config).remove_listen_address(dry_run=True)
-    assert result.argv == ("ip", "addr", "del", "10.10.10.1/32", "dev", "lo")
+    assert result.argv == ("ip", "addr", "del", "10.100.1.1/32", "dev", "lo")
 
 
 def test_dnsmasq_argv_uses_generated_conf(tmp_path: Path) -> None:
@@ -391,8 +391,8 @@ def test_server_enabled_alone_activates_dnsmasq_and_client_dns(tmp_path: Path) -
     # is enabled -- see AppConfig.dnsmasq_active_reasons()/client_dns_servers().
     config = _config(tmp_path)
 
-    assert config.dnsmasq_active_reasons() == ["server_enabled"]
-    assert config.client_dns_servers() == ["10.10.10.1"]
+    assert config.dnsmasq_active_reasons() == ["server_enabled", "fabric_dns"]
+    assert config.client_dns_servers() == ["10.100.1.1"]
 
 
 def test_each_internal_dns_feature_activates_dnsmasq_on_its_own(tmp_path: Path) -> None:

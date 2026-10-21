@@ -30,9 +30,10 @@ of ids.
 | Source default range | `source_pool` | `10.8.1.0/24` | `10.8.3.0/24` |
 | DNS zone | `node<id>.<domain>` | `node1.kornode.internal` | `node3.kornode.internal` |
 
-`server.ipv4_network` and `internal_dns.listen` become derived on the hub when
-`fabric.enabled`; an explicit value is accepted only if it passes the overlap
-validator (it then overrides the template for node 1).
+`server.ipv4_network` and `internal_dns.listen` are always derived on the hub (there
+is no `fabric.enabled` switch, D-71); an explicit `server.ipv4_network` is accepted only
+if it passes the overlap validator (it then overrides the template for node 1) and
+`internal_dns.listen` follows it unless set too.
 
 On agents the same values come from the bundle; agents never compute them.
 

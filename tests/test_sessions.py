@@ -51,7 +51,7 @@ class SessionDetailRunner(CommandRunner):
                 0,
                 """
 username: lans
-IP: 10.10.10.2
+IP: 10.100.1.2
 Remote IP: 77.83.3.157
 Connected since: 2026-06-29 14:00
 RX: 10 MiB
@@ -141,7 +141,7 @@ class SessionIdRunner(CommandRunner):
                 0,
                 """
 User: lans
-IP: 10.10.10.28
+IP: 10.100.1.28
 Remote IP: 77.83.3.157
 Connected since: 2026-06-30 10:00 (32s)
 RX: 1000 TX: 2000
@@ -185,7 +185,7 @@ class SessionSummaryWithoutConnectedRunner(CommandRunner):
                 0,
                 """
 User: lans
-IP: 10.10.10.10
+IP: 10.100.1.10
 Remote IP: 77.83.3.157
 Connected since: 2026-07-01 12:30 (44s)
 RX: 25.4 KB
@@ -243,7 +243,7 @@ class JsonSessionRunner(CommandRunner):
 [
   {
     "Username": "lans",
-    "IP": "10.10.10.28",
+    "IP": "10.100.1.28",
     "Remote IP": "77.83.3.157",
     "Connected since": "2026-06-30 10:00",
     "RX": "40.9 KB",
@@ -260,7 +260,7 @@ class JsonSessionRunner(CommandRunner):
                 """
 {
   "User": "lans",
-  "IP": "10.10.10.28",
+  "IP": "10.100.1.28",
   "Remote IP": "77.83.3.157",
   "Connected since": "2026-06-30 10:00 (32s)",
   "raw_rx": 40856,
@@ -295,7 +295,7 @@ class LooseSessionRunner(CommandRunner):
                 0,
                 """
 User: lans
-IP: 10.10.10.28
+IP: 10.100.1.28
 Remote IP: 77.83.3.157
 Connected since: 2026-06-30 10:00 (32s)
 RX: 40856
@@ -315,7 +315,7 @@ def test_list_sessions_returns_empty_when_occtl_fails() -> None:
 def test_parse_sessions_keeps_internal_and_external_ips_separate() -> None:
     output = """
 username: alice
-IP: 10.10.10.14
+IP: 10.100.1.14
 Remote IP: 203.0.113.9
 Connected since: 2026-06-29 12:00
 RX: 1.5 MiB
@@ -328,7 +328,7 @@ TX: 620 KiB
     assert duration is not None and duration > 0
     assert sessions[0] == SessionRecord(
         username="alice",
-        vpn_ip="10.10.10.14",
+        vpn_ip="10.100.1.14",
         real_ip="203.0.113.9",
         rx="1.5 MiB",
         tx="620 KiB",
@@ -339,12 +339,12 @@ TX: 620 KiB
 def test_parse_table_sessions() -> None:
     output = """
 Username  VPN IP       Real IP       Connected          Download  Upload
-alice     10.10.10.14  203.0.113.9   00:03:21           1 MiB     2 MiB
+alice     10.100.1.14  203.0.113.9   00:03:21           1 MiB     2 MiB
 """
     sessions = SessionService(AppConfig()).parse_sessions(output)
 
     assert sessions[0].username == "alice"
-    assert sessions[0].vpn_ip == "10.10.10.14"
+    assert sessions[0].vpn_ip == "10.100.1.14"
     assert sessions[0].real_ip == "203.0.113.9"
     assert sessions[0].rx == "1 MiB"
     assert sessions[0].tx == "2 MiB"
@@ -374,9 +374,9 @@ def test_parse_loose_show_users_row_without_header() -> None:
 
 
 def test_parse_loose_row_splits_vpn_and_real_ips() -> None:
-    sessions = SessionService(AppConfig()).parse_sessions("lans 10.10.10.28 77.83.3.157 vpns0\n")
+    sessions = SessionService(AppConfig()).parse_sessions("lans 10.100.1.28 77.83.3.157 vpns0\n")
 
-    assert sessions == [SessionRecord(username="lans", vpn_ip="10.10.10.28", real_ip="77.83.3.157")]
+    assert sessions == [SessionRecord(username="lans", vpn_ip="10.100.1.28", real_ip="77.83.3.157")]
 
 
 def test_list_sessions_enriches_summary_with_user_details() -> None:
@@ -389,7 +389,7 @@ def test_list_sessions_enriches_summary_with_user_details() -> None:
     assert duration is not None and duration > 0
     assert sessions[0] == SessionRecord(
         username="lans",
-        vpn_ip="10.10.10.2",
+        vpn_ip="10.100.1.2",
         real_ip="77.83.3.157",
         device="vpns0",
         rx="10 MiB",
@@ -418,7 +418,7 @@ def test_list_sessions_enriches_loose_summary_with_user_details() -> None:
     assert sessions == [
         SessionRecord(
             username="lans",
-            vpn_ip="10.10.10.28",
+            vpn_ip="10.100.1.28",
             real_ip="77.83.3.157",
             rx="40856",
             tx="74339",
@@ -431,7 +431,7 @@ def test_parse_combined_rx_tx_line_splits_traffic() -> None:
     sessions = SessionService(AppConfig()).parse_sessions(
         """
 username: lans
-IP: 10.10.10.28
+IP: 10.100.1.28
 Remote IP: 77.83.3.157
 RX: 40856 (40.9 KB) TX: 74339 (74.3 KB)
 """
@@ -447,7 +447,7 @@ def test_list_sessions_prefers_occtl_json_output() -> None:
     assert sessions == [
         SessionRecord(
             username="lans",
-            vpn_ip="10.10.10.28",
+            vpn_ip="10.100.1.28",
             real_ip="77.83.3.157",
             rx="40856 bytes",
             tx="74339 bytes",
@@ -463,7 +463,7 @@ def test_json_session_accepts_connection_time_alias() -> None:
         """
 {
   "Username": "lans",
-  "IP": "10.10.10.28",
+  "IP": "10.100.1.28",
   "Remote IP": "77.83.3.157",
   "Connection time": "2026-06-30 10:00 (32s)",
   "raw_rx": 40856,
@@ -475,7 +475,7 @@ def test_json_session_accepts_connection_time_alias() -> None:
     assert sessions == [
         SessionRecord(
             username="lans",
-            vpn_ip="10.10.10.28",
+            vpn_ip="10.100.1.28",
             real_ip="77.83.3.157",
             rx="40856 bytes",
             tx="74339 bytes",
@@ -539,7 +539,7 @@ def test_list_sessions_falls_back_to_session_ids() -> None:
     assert sessions == [
         SessionRecord(
             username="lans",
-            vpn_ip="10.10.10.28",
+            vpn_ip="10.100.1.28",
             real_ip="77.83.3.157",
             rx="1000",
             tx="2000",
@@ -557,7 +557,7 @@ def test_list_sessions_fills_missing_device_from_session_detail() -> None:
     assert sessions == [
         SessionRecord(
             username="lans",
-            vpn_ip="10.10.10.10",
+            vpn_ip="10.100.1.10",
             real_ip="77.83.3.157",
             device="vpns0",
             rx="25.4 KB",

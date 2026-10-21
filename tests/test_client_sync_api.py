@@ -24,7 +24,7 @@ server:
     - corp.example.com
 internal_dns:
   forward_upstreams:
-    - 10.10.10.1
+    - 10.100.1.1
   forward_domains:
     - r4ven.lan
 identity:
@@ -50,7 +50,7 @@ def test_client_routing_requires_vpn_source_address(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client = _client(tmp_path / "config.yaml", tmp_path)
-    _fake_sessions(monkeypatch, [SessionRecord(username="alice", vpn_ip="10.10.10.5")])
+    _fake_sessions(monkeypatch, [SessionRecord(username="alice", vpn_ip="10.100.1.5")])
 
     # TestClient requests come from "testclient" host outside the VPN subnet.
     response = client.get("/api/client/routing")
@@ -63,7 +63,7 @@ def test_client_routing_merges_server_group_and_user_lists(
 ) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
-    _fake_sessions(monkeypatch, [SessionRecord(username="alice", vpn_ip="10.10.10.5")])
+    _fake_sessions(monkeypatch, [SessionRecord(username="alice", vpn_ip="10.100.1.5")])
 
     passwd = tmp_path / "secrets" / "ocpasswd"
     passwd.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +89,7 @@ def test_client_routing_merges_server_group_and_user_lists(
     # calling the handler through a client bound to a VPN address instead.
     assert response.status_code == 403
 
-    vpn_client = TestClient(client.app, client=("10.10.10.5", 50000))
+    vpn_client = TestClient(client.app, client=("10.100.1.5", 50000))
     response = vpn_client.get("/api/client/routing")
 
     assert response.status_code == 200
@@ -114,7 +114,7 @@ def test_client_routing_rejects_unknown_session(
     client = _client(tmp_path / "config.yaml", tmp_path)
     _fake_sessions(monkeypatch, [])
 
-    vpn_client = TestClient(client.app, client=("10.10.10.5", 50000))
+    vpn_client = TestClient(client.app, client=("10.100.1.5", 50000))
     assert vpn_client.get("/api/client/routing").status_code == 403
 
 
@@ -122,9 +122,9 @@ def test_client_routing_needs_no_admin_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client = _client(tmp_path / "config.yaml", tmp_path)
-    _fake_sessions(monkeypatch, [SessionRecord(username="bob", vpn_ip="10.10.10.7")])
+    _fake_sessions(monkeypatch, [SessionRecord(username="bob", vpn_ip="10.100.1.7")])
 
-    vpn_client = TestClient(client.app, client=("10.10.10.7", 50000))
+    vpn_client = TestClient(client.app, client=("10.100.1.7", 50000))
     response = vpn_client.get("/api/client/routing")
 
     assert response.status_code == 200
@@ -160,9 +160,9 @@ def test_client_routing_is_disabled_by_default(
     # this unauthenticated endpoint -- web.client_sync_enabled is a separate,
     # default-off gate on top of it.
     client = _client_without_sync(tmp_path / "config.yaml", tmp_path)
-    _fake_sessions(monkeypatch, [SessionRecord(username="alice", vpn_ip="10.10.10.5")])
+    _fake_sessions(monkeypatch, [SessionRecord(username="alice", vpn_ip="10.100.1.5")])
 
-    vpn_client = TestClient(client.app, client=("10.10.10.5", 50000))
+    vpn_client = TestClient(client.app, client=("10.100.1.5", 50000))
     response = vpn_client.get("/api/client/routing")
 
     assert response.status_code == 403

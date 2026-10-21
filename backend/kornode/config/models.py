@@ -196,7 +196,6 @@ class NodeConfig(StrictModel):
 
 
 class FabricConfig(StrictModel):
-    enabled: bool = False
     cidr: str = "10.99.0.0/24"
     client_pool: str = "10.100.{id}.0/24"
     source_pool: str = "10.8.{id}.0/24"
@@ -308,7 +307,7 @@ class ServerConfig(StrictModel):
     device: str = "vpns"
     cn: str = "vpn.example.com"
     realm: str = "Korvus VPN Server"
-    ipv4_network: str = "10.10.10.0/24"
+    ipv4_network: str = "10.100.1.0/24"
     dns: list[str] = Field(default_factory=lambda: ["1.1.1.1", "8.8.8.8"])
     search_domains: list[str] = Field(default_factory=list)
     routes: list[str] = Field(default_factory=list)
@@ -564,7 +563,7 @@ class UpstreamProfileConfig(StrictModel):
     # (curl --interface), so edits made on the server apply without a
     # reconnect. The endpoint identifies the caller by its VPN address, so
     # point this at the panel address reachable inside the tunnel, e.g.
-    # https://10.10.10.1:8443. Unset -> handshake lists only.
+    # https://10.100.1.1:8443. Unset -> handshake lists only.
     sync_url: str | None = None
     sync_interval: int = Field(default=60, ge=10)
     # The request already travels inside this profile's authenticated
@@ -1034,7 +1033,7 @@ class RoutingConfig(StrictModel):
 
 
 class InternalDnsConfig(StrictModel):
-    listen: str = "10.10.10.1"
+    listen: str = "10.100.1.1"
     port: int = Field(default=53, ge=1, le=65535)
     blocklist_enabled: bool = False
     local_records_enabled: bool = False
@@ -1303,8 +1302,6 @@ class AppConfig(StrictModel):
         if not isinstance(data, dict):
             return data
         fabric_raw = _raw_section(data, "fabric")
-        if not _is_truthy(fabric_raw.get("enabled", False)):
-            return data
 
         node_raw = _raw_section(data, "node")
         node_id = int(node_raw.get("id", 1))
@@ -1333,14 +1330,25 @@ class AppConfig(StrictModel):
 
         if not server_explicit:
             server["ipv4_network"] = str(derived.client_pool)
+        try:
+            client_network = ipaddress.ip_network(str(server["ipv4_network"]), strict=False)
+        except ValueError:
+            # server.ipv4_network's own field validator reports a malformed value.
+            return data
         if not dns_explicit:
-            internal_dns["listen"] = str(derived.service_address)
+            # The service address follows the pool: the derived one, or the first host
+            # of a customized server.ipv4_network.
+            internal_dns["listen"] = (
+                str(client_network.network_address + 1)
+                if server_explicit
+                else str(derived.service_address)
+            )
 
         conflicts: list[Conflict] = []
         owned = [
             OwnedPrefix(derived.source_pool, node_id, "source"),
             OwnedPrefix(
-                ipaddress.ip_network(server.get("ipv4_network", str(derived.client_pool))),
+                client_network,
                 node_id,
                 "client_pool",
                 adding=True,
@@ -1353,19 +1361,6 @@ class AppConfig(StrictModel):
             enroll_pool=enroll_pool,
         )
         conflicts.extend(overlap_result.errors)
-        if dns_explicit:
-            listen = internal_dns.get("listen", str(derived.service_address))
-            listen_ip = ipaddress.ip_address(listen)
-            client_network = ipaddress.ip_network(server["ipv4_network"], strict=False)
-            if listen_ip not in client_network:
-                conflicts.append(
-                    Conflict(
-                        str(listen_ip),
-                        node_id,
-                        str(client_network),
-                        "server.ipv4_network",
-                    )
-                )
         if conflicts:
             raise AddressOverlapError(conflicts)
 
@@ -1418,8 +1413,8 @@ class AppConfig(StrictModel):
             )
         # internal_dns.listen must be reachable from server.ipv4_network --
         # the resolver is mandatory, not opt-in, while server.enabled (see
-        # client_dns_servers()). The model default (10.10.10.1) only matches
-        # the model default ipv4_network (10.10.10.0/24); a deployment that
+        # client_dns_servers()). The model default (10.100.1.1) only matches
+        # the model default ipv4_network (10.100.1.0/24); a deployment that
         # customizes ipv4_network without separately customizing listen
         # would otherwise fail validation for an unrelated-looking reason.
         # An explicit listen always wins -- this only fills the gap.
@@ -1454,8 +1449,6 @@ class AppConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_control(self) -> AppConfig:
-        if self.control.enabled and not self.fabric.enabled:
-            raise ValueError("control.enabled requires fabric.enabled")
         if self.control.signing_key is None:
             self.control.signing_key = self.system.data_dir / "control" / "signing.ed25519"
         return self
@@ -1531,7 +1524,7 @@ class AppConfig(StrictModel):
         if settings.forward_domains:
             reasons.append("forward_domains")
         # The hub answers the fabric zone for agents and clients (D-66).
-        if self.fabric.enabled:
+        if self.server.enabled:
             reasons.append("fabric_dns")
         # routing.split/host_split domains and a profile's own plain
         # domains/host_domains do NOT need dnsmasq any more: they're

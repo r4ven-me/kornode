@@ -1,20 +1,20 @@
-# Prompt for the next session — P4-06 часть 2, P4-07, `e2e.yml`
+# Prompt for the next session — P4-06 часть 2 + P5-03, P4-07, `e2e.yml`
 
-> **Состояние на 2026-10-21 (конец третьей сессии).** В `main` влиты PR #1 (P2…P4-02), PR #2 (P4-03, D-66),
-> PR #3 (P4-04, D-67) и P4-05 (источники агентов, D-68). Последние два слиты **локальным merge-коммитом**: `gh`
-> не работает (токен в заблокированном gnome-keyring, см. память `gh-keyring-blocks-cli`), PR-объекта у P4-05 нет.
-> **P4-06 часть 1** (`via: exit:<n>` для трафика агентов, D-69) лежит на ветке `redesign/p4-06-exit-via-node`
-> и слита в `main` локальным merge-коммитом после зелёных проверок (CI на `main` по push — проверить по публичному API).
+> **Состояние на 2026-10-21 (конец четвёртой сессии).** В `main` влиты PR #1…#3, P4-05, P4-06 часть 1,
+> фикс CI (`vite` 8.3.x) и **S-07 / D-71** (vhost фабрики по SNI, `main` = `999b06b`, CI зелёный: backend, frontend,
+> netlab). **Удаление `fabric.enabled`** лежит на ветке `redesign/p4-fabric-always-on` (коммит `b5a17e8` + правка
+> CRL): хаб всегда запускает фабрику, адреса всегда выводятся (пул клиентов `10.100.<id>.0/24`), ключ `fabric.enabled`
+> отвергается как неизвестный. Слияние локальным `git merge --no-ff`/fast-forward + `git push origin main` (CI на `main`
+> идёт по push; `gh` не работает, см. память `gh-keyring-blocks-cli`).
 >
-> Доказательства по ветке P4-06: `make check` 1220 passed / 78 skipped, `make parity` 4 passed, frontend 33 passed;
-> netlab на hub-VM 55 passed (включая загрузку golden-наборов в ядро); E2E case `routed` на четырёх VM: 6 passed,
-> 7 skipped (NL-01, NL-02, NL-03, NL-04, NL-06 и новый E2E-07). Новый E2E-07 (клиент agent-a выходит
-> через agent-b с masquerade, при остановленном agent-b трафик никуда не доходит, после перезапуска выход
-> восстанавливается) прошёл отдельно.
+> Доказательства: S-07 — netlab `test_spike_p4_vhosts.py` 12 passed (ocserv 1.3.0), `make check` 1227 passed / 91
+> skipped, netlab на hub-VM 68 passed (A) и 67 passed + 1 флак `test_suppress_rule_…` (B; отдельно 2/2 passed), E2E
+> `routed` (A): 6 passed, 7 skipped. **Флаг-день D-71:** хаб и агенты обновляются вместе; образы базы для E2E-06 надо
+> пересобрать из слияния этой ветки (как при любом несовместимом контракте пакета).
 >
-> **Не сделано:** P4-06 часть 2 (выходы от самого хаба и по доменным/set-назначениям — нужна модель egress хаба),
-> P4-07 (панель/CLI/API фабрики: топология, префиксы узлов, записи DNS, источники), NL-05, NL-07…NL-09, прогон
-> `e2e.yml` на GitHub Actions.
+> **Не сделано:** P4-06 часть 2 вместе с P5-03 (модель egress хаба, удаление legacy-ключей), P4-07 (раздел Fabric в
+> панели/CLI/API), NL-05, NL-07…NL-09, прогон `e2e.yml` на GitHub Actions, `examples/` и README в формате v2 (P5-05;
+> они ещё используют явный пул `10.10.10.0/24`, это валидно).
 >
 > **Важно для продолжения:**
 > 1. Хост перезагружался: VM `debian13-kornode1..4` были выключены, их запускают `virsh -c qemu:///system start
@@ -128,11 +128,9 @@
 - Вывод harness намеренно скрыт (`output withheld`). Для разбора сетевых падений используй `net_dump`.
 
 ## Что делать дальше (по порядку)
-1. **Проверить CI на `main`** после слияния P4-05/P4-06 (публичный API, см. «Важно для продолжения», п. 2): три job — `backend`, `frontend`, `netlab`. Если красный — чинить первым делом.
-2. **Spike S-07 (D-70, решение владельца 2026-10-21):** совместимости с v1 нет, но вход клиентов по сертификату и
-   OIDC обязателен вместе с фабрикой. Проверить в netlab виртуальные хосты ocserv по SNI на 443/tcp: `fabric.<домен>` —
-   только сертификаты агентов и регистрация, хост по умолчанию — клиенты с любым входом; проверки в обе стороны (см. S-07
-   в `DECISIONS.md`). Пройдёт — удалить `fabric.enabled`, поправить spec 01/05/07; нет — запасной вариант из S-07.
+1. ~~Проверить CI на `main`~~ — сделано (vite 8.3.x, `main` зелёный).
+2. ~~Spike S-07~~ — сделано (D-71): vhost `fabric.<fabric.domain>`, отдельный сертификат `fabric.crt`, `ocpasswd-enroll`,
+   guard по `$VHOST`, токен `sni`, пакет `hubs[].server_name`; `fabric.enabled` удалён (ветка выше, влить после зелёного E2E).
 2a. **P4-06 часть 2 вместе с P5-03** (D-69, D-70): модель egress хаба. Ключи `egress`/`sources`/`sets` в `config/models.py`
    **заменяют** старые ключи — `legacy_policy` и `kornode.config.legacy` удаляются, тесты v1-поведения тоже (списком в PR), валидация против ролей реестра, parity-поверхности
    `egress.hub`/`sources.hub` (CLI `egress show/edit/set/check`, `GET/PUT /api/egress`, `source add/del/list`,

@@ -185,7 +185,6 @@ export function useSettings(core: PanelCore) {
     const result = await runAction("fabric-settings", "Fabric settings saved", (token) =>
       saveFabricSettings(token, {
         node_id: fabricSettingsDraft.nodeId,
-        enabled: fabricSettingsDraft.enabled,
         cidr: fabricSettingsDraft.cidr,
         client_pool: fabricSettingsDraft.clientPool,
         source_pool: fabricSettingsDraft.sourcePool,

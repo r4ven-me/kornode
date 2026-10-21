@@ -364,14 +364,14 @@ export function UpstreamProfileDialog({
                   draft.kind === "openconnect" &&
                   draft.accept_server_routes && (
                     <div className="settings-grid">
-                      <label title="Optional: that server's Korvus panel address reachable through this tunnel, e.g. https://10.10.10.1:8443. Server-side changes then apply without reconnecting. Empty: lists are refreshed on (re)connect only.">
+                      <label title="Optional: that server's Korvus panel address reachable through this tunnel, e.g. https://10.100.1.1:8443. Server-side changes then apply without reconnecting. Empty: lists are refreshed on (re)connect only.">
                         <span>Sync URL</span>
                         <input
                           value={draft.sync_url}
                           onChange={(event) =>
                             onDraftChange({ ...draft, sync_url: event.target.value })
                           }
-                          placeholder="https://10.10.10.1:8443"
+                          placeholder="https://10.100.1.1:8443"
                         />
                       </label>
                       <label>

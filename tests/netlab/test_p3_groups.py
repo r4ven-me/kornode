@@ -126,7 +126,6 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
         node_tmp,
         {
             "node": {"id": 1},
-            "fabric": {"enabled": True},
             "control": {"enabled": True, "port": CONTROL_PORT},
             "server": {
                 "enabled": True,

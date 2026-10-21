@@ -16,7 +16,7 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 class InternalDnsSettingsRequest(BaseModel):
     server_dns: list[str] = Field(default_factory=lambda: ["1.1.1.1", "8.8.8.8"])
     search_domains: list[str] = Field(default_factory=list)
-    listen: str = "10.10.10.1"
+    listen: str = "10.100.1.1"
     port: int = Field(default=53, ge=1, le=65535)
     blocklist_enabled: bool = False
     local_records_enabled: bool = False
