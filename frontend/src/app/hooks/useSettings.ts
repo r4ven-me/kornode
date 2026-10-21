@@ -194,7 +194,7 @@ export function useSettings(core: PanelCore) {
       })
     );
     if (result !== null) {
-      recordCommand("config", syntheticCommand(["korctl", "config", "fabric-settings"], "saved"));
+      recordCommand("config", syntheticCommand(["korctl", "fabric", "set"], "saved"));
     }
   };
 

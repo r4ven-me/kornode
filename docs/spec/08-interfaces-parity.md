@@ -68,7 +68,7 @@ capabilities:
 | agent.reports | `agent status <name> [--watch]` | `GET /api/agents/{name}/reports?limit=` | Detail → Status |
 | agent.command | `agent exec <name> reconnect/explain/collect-diag/restart/rollback ...` | `POST /api/agents/{name}/commands`, `GET .../commands/{id}` | Detail → Actions |
 | fabric.show | `fabric show` | `GET /api/fabric` | Fabric → Topology |
-| fabric.settings | `fabric set --cidr/--domain/...` | `PATCH /api/fabric` | Fabric → Settings |
+| fabric.settings | `fabric set --node-id/--cidr/--domain/...` | `PATCH /api/fabric` | Fabric → Settings |
 | dns.records | `dns record add/del <name> <type> <value> [--node <agent>]`, `dns record list` | `GET/POST/DELETE /api/dns/records` | Fabric → DNS |
 | egress.hub | `egress show/edit/set/check` | `GET/PUT /api/egress`, `POST /api/egress/check` | Network → Egress |
 | sources.hub | `source add/del/list` | `/api/sources` | Network → Sources |

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed (fabric settings single writer, D-77; branch `redesign/p4-07b-fabric-settings`)
+
+- `POST /api/config/fabric-settings` is removed: `FabricService.set` takes `node_id` too (`node.id`), `GET/PATCH /api/fabric` and `korctl fabric show|set --node-id` expose it; the Fabric tab has a Hub node ID field and the Config panel saves through `PATCH /api/fabric`. Invalid fabric settings answer 422 `invalid` instead of 400.
+
 ### Added (egress rule editor, P5-01, D-76; branch `redesign/p5-01-egress-editor`)
 
 - Panel Network → Egress and sources: ordered rule list (per-rule form, drag-and-drop and Up/Down reorder), dead rules marked inline while editing, inline explain of the saved policy, JSON editor kept as an advanced tab. `egress show|check|set` / `/api/egress*` also return `dead_rules: [{rule, shadowed_by}]`.

@@ -1026,7 +1026,5 @@ parity_ignore:
     reason: "Session identity plumbing, not an admin management capability."
   - api: "GET /api/client/routing"
     reason: "Korclient synchronization endpoint, not a hub admin management capability."
-  - api: "POST /api/config/fabric-settings"
-    reason: "Structured config helper endpoint covered by the Fabric settings panel, not a separate management capability."
   - api: "POST /api/config/validate"
     reason: "Validation helper endpoint covered by config.validate/config.source.validate, not a separate panel action."

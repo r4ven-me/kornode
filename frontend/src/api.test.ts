@@ -152,8 +152,8 @@ describe("saveFabricSettings", () => {
     });
 
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(path).toBe("/api/config/fabric-settings");
-    expect(init.method).toBe("POST");
+    expect(path).toBe("/api/fabric");
+    expect(init.method).toBe("PATCH");
     expect(JSON.parse(String(init.body))).toEqual({
       node_id: 3,
       cidr: "10.99.0.0/24",

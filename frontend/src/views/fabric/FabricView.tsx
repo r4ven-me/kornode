@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { agentGet, agentWrite, type Agent, type Prefix, type Source } from "../../agentsApi";
 import { FabricDns } from "../agents/FabricDns";
 
-type Settings = { cidr: string; client_pool: string; source_pool: string; enroll_pool: string; domain: string; reserved: string[] };
+type Settings = { node_id: number; cidr: string; client_pool: string; source_pool: string; enroll_pool: string; domain: string; reserved: string[] };
 type FabricNode = { id: number; name: string; roles: string[]; state: Agent["state"]; online: boolean; fabric_address: string; prefixes: Prefix[] };
 type Fabric = { fabric: Settings; hub: { fabric_address: string; server_name: string; prefixes: Prefix[] }; nodes: FabricNode[]; sources: Source[] };
 
-const FIELDS: Array<[keyof Omit<Settings, "reserved">, string]> = [["cidr", "Fabric CIDR"], ["client_pool", "Client pool"], ["source_pool", "Source pool"], ["enroll_pool", "Enroll pool"], ["domain", "Fabric domain"]];
+const FIELDS: Array<[Exclude<keyof Settings, "reserved" | "node_id">, string]> = [["cidr", "Fabric CIDR"], ["client_pool", "Client pool"], ["source_pool", "Source pool"], ["enroll_pool", "Enroll pool"], ["domain", "Fabric domain"]];
 
 /** The fabric in one place (spec 07): addressing, nodes with their prefixes, DNS zone, hub sources. Same service as `korctl fabric`. */
 export function FabricView({ token }: { token: string | null }) {
@@ -37,6 +37,7 @@ export function FabricView({ token }: { token: string | null }) {
       <div className="panel-header"><h2>Fabric settings</h2></div>
       {draft && <form onSubmit={e => { e.preventDefault(); void save(); }}>
         <fieldset className="agent-fields" disabled={busy}>
+          <label>Hub node ID<input type="number" min={1} max={254} value={draft.node_id} onChange={e => setDraft({ ...draft, node_id: Number(e.target.value) || 1 })} required /></label>
           {FIELDS.map(([key, label]) => <label key={key}>{label}<input value={draft[key]} onChange={e => setDraft({ ...draft, [key]: e.target.value })} required /></label>)}
           <label>Reserved addresses (comma separated)<input value={draft.reserved.join(", ")} onChange={e => setDraft({ ...draft, reserved: e.target.value.split(",").map(v => v.trim()).filter(Boolean) })} /></label>
         </fieldset>
