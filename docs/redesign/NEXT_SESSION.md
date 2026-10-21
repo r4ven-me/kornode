@@ -1,4 +1,4 @@
-# Prompt for the next session — остаток P4-06, P5-01/P5-05, `e2e.yml`
+# Prompt for the next session — остаток P4-06, P5-01, `e2e.yml`
 
 > **Состояние на 2026-10-21 (пятая сессия).** В `main` влита ветка `redesign/p4-06b-hub-egress` (`95b0b62`, три
 > среза + удаление v1): модель egress хаба (**D-72**), `HubEgressService` (`korctl egress|source`, `/api/egress`,
@@ -19,6 +19,15 @@
 > parity` на Python 3.13 и 3.12 — 1155 passed / 92 skipped; фронтенд 34 теста + сборка. Netlab/E2E не гонялись (ядро не
 > тронуто). Открыто: `POST /api/config/fabric-settings` (ещё задаёт `node.id`) не свёрнут в `FabricService`; префиксы и
 > источники хаба во вкладке Fabric только читаются.
+>
+> **P5-05 сделан (2026-10-21, ветка `redesign/p5-05-docs`, влита в `main` merge-коммитом `421c465`):** README,
+> `docs/architecture.md`, `docs/networking.md` переписаны под v2 (hub + agents, fabric, egress, sources, reconciler);
+> разделы «Routing/Split Routes» и «Middle-Server Mode» заменены на «Fabric, Agents and Egress» и «Upstreams»,
+> справочник конфигурации в README — ссылка на `examples/config.full.yaml`; убраны устаревшие строки в
+> `docs/features.md` и `docs/configuration.md`. Новый `tests/test_docs_v2.py` падает, если в этих документах снова
+> появятся удалённые v1-термины. Локально `make lint typecheck test render parity` (Python 3.13) — код 0; на
+> Python 3.12, netlab и E2E не гонялись (код не менялся). CI на `main` (`421c465`): frontend и backend зелёные,
+> netlab на момент записи ещё шёл — проверить. Команды `korctl` в README сверены с `--help` выборочно.
 >
 > **Не сделано:** set/domain-выходы через
 > `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спеки,
