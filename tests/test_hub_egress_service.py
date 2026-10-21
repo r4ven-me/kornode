@@ -115,9 +115,10 @@ def test_check_reports_shadowed_rules(world: World) -> None:
     warnings = world.service().check({"sources": [SOURCE], **shadowed})["warnings"]
     assert warnings == []  # the second rule adds the source, so it is not covered
     twice = {"egress": [RULE, RULE]}
-    assert world.service().check({"sources": [SOURCE], **twice})["warnings"] == [
-        "rule 1 is shadowed by rule 0"
-    ]
+    result = world.service().check({"sources": [SOURCE], **twice})
+    assert result["warnings"] == ["rule 1 is shadowed by rule 0"]
+    assert result["dead_rules"] == [{"rule": 1, "shadowed_by": 0}]
+    assert world.service().policy()["dead_rules"] == []
 
 
 def test_source_add_replace_and_delete(world: World) -> None:
