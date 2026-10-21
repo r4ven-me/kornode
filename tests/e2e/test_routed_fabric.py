@@ -320,7 +320,7 @@ def test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_go
     cluster.call("hub", "exit_role")
     interface = cluster.call("hub", "source_iface")["interface"]
     cluster.call("hub", "hub_source_add", interface=interface)
-    cluster.call("hub", "hub_source_policy")
+    cluster.call("hub", "hub_source_policy", interface=interface)
     wait_for(
         lambda: cluster.status("agent-b")["applied_version"] > before["agent-b"],
         60,

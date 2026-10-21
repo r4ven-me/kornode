@@ -777,9 +777,17 @@ class Worker:
         """The hub source leaves through agent-b (node 3, role exit) with a full tunnel."""
         if self.role != "hub" or self.case != "routed":
             raise ValueError("routed case, hub only")
+        interface = self.payload["interface"]
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", interface):
+            raise ValueError("invalid interface")
         path = self.directory / "hub-egress.json"
+        # `egress set` replaces the whole policy, sources included.
+        sources = [
+            {"name": "e2e-hub-source", "interface": interface, "cidr": HUB_SOURCE_CIDR,
+             "export": True}
+        ]  # fmt: skip
         rules = [{"id": "src-out", "from": ["e2e-hub-source"], "to": "any", "via": "exit:3"}]
-        atomic(path, {"egress": rules})
+        atomic(path, {"sources": sources, "egress": rules})
         try:
             return self.cli("egress", "set", "--file", str(path))
         finally:
