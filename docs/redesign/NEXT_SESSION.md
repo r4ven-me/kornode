@@ -4,10 +4,11 @@
 > PR #3 (P4-04, D-67) и P4-05 (источники агентов, D-68). Последние два слиты **локальным merge-коммитом**: `gh`
 > не работает (токен в заблокированном gnome-keyring, см. память `gh-keyring-blocks-cli`), PR-объекта у P4-05 нет.
 > **P4-06 часть 1** (`via: exit:<n>` для трафика агентов, D-69) лежит на ветке `redesign/p4-06-exit-via-node`
-> (локально и, если получилось, на origin) и **@@MERGE@@**.
+> и слита в `main` локальным merge-коммитом после зелёных проверок (CI на `main` по push — проверить по публичному API).
 >
 > Доказательства по ветке P4-06: `make check` 1220 passed / 78 skipped, `make parity` 4 passed, frontend 33 passed;
-> netlab на hub-VM @@NETLAB@@; E2E case `routed` на четырёх VM: @@E2E@@. Новый E2E-07 (клиент agent-a выходит
+> netlab на hub-VM 55 passed (включая загрузку golden-наборов в ядро); E2E case `routed` на четырёх VM: 6 passed,
+> 7 skipped (NL-01, NL-02, NL-03, NL-04, NL-06 и новый E2E-07). Новый E2E-07 (клиент agent-a выходит
 > через agent-b с masquerade, при остановленном agent-b трафик никуда не доходит, после перезапуска выход
 > восстанавливается) прошёл отдельно.
 >
@@ -116,7 +117,7 @@
   `rsync -a --delete` с исключением `/artifacts`, `.git`, `.venv`, `node_modules` в `~/kornode/`.
   Старый netlab-стенд `.30` недоступен; **netlab гоняется на hub-VM** (там поставлены `ocserv openconnect
   nftables gnutls-bin`, есть `tcpdump iproute2`): `sudo -n .venv/bin/python -m pytest -m netlab -q`
-  из `~/kornode` (полный набор ≈ 6,5 мин, @@NETLAB_COUNT@@).
+  из `~/kornode` (полный набор ≈ 6,5 мин, 55 passed).
 - **E2E на hub:** `. ~/.e2e/env.sh; export TMPDIR=/var/tmp`, затем `.venv/bin/python -m tests.e2e preflight`
   и `.venv/bin/python -m pytest tests/e2e/test_routed_fabric.py --e2e-run -q --tb=short` (кейс `routed` целиком ≈ 25 мин, один сценарий 3–9 мин). Запускай в фоне (`nohup ... > /var/tmp/x.out`) и жди по `grep` в файле вывода,
   а не по `pgrep -f` (он находит собственную команду). После падения:
@@ -127,9 +128,7 @@
 - Вывод harness намеренно скрыт (`output withheld`). Для разбора сетевых падений используй `net_dump`.
 
 ## Что делать дальше (по порядку)
-1. **Закрыть P4-06 часть 1**, если ветка `redesign/p4-06-exit-via-node` ещё не в `main`: `git log main..redesign/p4-06-exit-via-node`,
-   прогнать `make check`, netlab и `routed` (см. «Окружение»), слить локальным merge-коммитом, дождаться зелёного CI на
-   `main` (публичный API), обновить `ROADMAP.md`/`PLAN.ru.md`/`CHANGELOG.md` (пометки о слиянии).
+1. **Проверить CI на `main`** после слияния P4-05/P4-06 (публичный API, см. «Важно для продолжения», п. 2): три job — `backend`, `frontend`, `netlab`. Если красный — чинить первым делом.
 2. **P4-06 часть 2** (D-69, пункт 1): модель egress хаба. Нужны ключи `egress`/`sources`/`sets` в `config/models.py`,
    которые сливаются перед `legacy_policy` (P5 уберёт legacy), валидация против ролей реестра, parity-поверхности
    `egress.hub`/`sources.hub` (CLI `egress show/edit/set/check`, `GET/PUT /api/egress`, `source add/del/list`,
