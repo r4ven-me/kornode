@@ -26,8 +26,8 @@
 > справочник конфигурации в README — ссылка на `examples/config.full.yaml`; убраны устаревшие строки в
 > `docs/features.md` и `docs/configuration.md`. Новый `tests/test_docs_v2.py` падает, если в этих документах снова
 > появятся удалённые v1-термины. Локально `make lint typecheck test render parity` (Python 3.13) — код 0; на
-> Python 3.12, netlab и E2E не гонялись (код не менялся). CI на `main` (`421c465`): frontend и backend зелёные,
-> netlab на момент записи ещё шёл — проверить. Команды `korctl` в README сверены с `--help` выборочно.
+> Python 3.12, netlab и E2E не гонялись (код не менялся). CI на `main` (`421c465`) зелёный: backend, frontend,
+> netlab, publish. Команды `korctl` в README сверены с `--help` выборочно.
 >
 > **Не сделано:** set/domain-выходы через
 > `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спеки,
