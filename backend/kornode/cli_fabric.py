@@ -28,6 +28,7 @@ def register(
 
     @fabric.command("set")
     def fabric_set(
+        node_id: int | None = typer.Option(None, "--node-id"),
         cidr: str | None = typer.Option(None, "--cidr"),
         client_pool: str | None = typer.Option(None, "--client-pool"),
         source_pool: str | None = typer.Option(None, "--source-pool"),
@@ -37,6 +38,7 @@ def register(
         json: Json = False,
     ) -> None:
         values: dict[str, Any] = {
+            "node_id": node_id,
             "cidr": cidr,
             "client_pool": client_pool,
             "source_pool": source_pool,

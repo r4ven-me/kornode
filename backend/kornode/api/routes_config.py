@@ -45,17 +45,6 @@ class GeneralSettingsRequest(BaseModel):
     cli_enabled: bool = True
 
 
-class FabricSettingsRequest(BaseModel):
-    node_id: int = 1
-    cidr: str = "10.99.0.0/24"
-    client_pool: str = "10.100.{id}.0/24"
-    source_pool: str = "10.8.{id}.0/24"
-    enroll_pool: str = "10.99.255.240/28"
-    domain: str = "kornode.internal"
-    reserved: list[str] = []
-    write_rendered: bool = True
-
-
 @router.get("")
 def get_config(request: Request) -> dict[str, Any]:
     config: AppConfig = request.app.state.config
@@ -187,33 +176,6 @@ def save_general_settings(
         "written": written,
         "system": loaded_config.system.model_dump(mode="json"),
         "cli": loaded_config.cli.model_dump(mode="json"),
-    }
-
-
-@router.post("/fabric-settings")
-def save_fabric_settings(
-    request: Request,
-    payload: FabricSettingsRequest,
-) -> dict[str, object]:
-    patch = {
-        "node": {"id": payload.node_id},
-        "fabric": {
-            "cidr": payload.cidr,
-            "client_pool": payload.client_pool,
-            "source_pool": payload.source_pool,
-            "enroll_pool": payload.enroll_pool,
-            "domain": payload.domain,
-            "reserved": payload.reserved,
-        },
-    }
-    loaded_config, written = apply_config_patch(request, patch)
-    return {
-        "status": "saved",
-        "written": written,
-        "node": loaded_config.node.model_dump(mode="json"),
-        "fabric": loaded_config.fabric.model_dump(mode="json"),
-        "server": loaded_config.server.model_dump(mode="json"),
-        "internal_dns": loaded_config.internal_dns.model_dump(mode="json"),
     }
 
 

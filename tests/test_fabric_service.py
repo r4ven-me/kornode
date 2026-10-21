@@ -79,9 +79,27 @@ def test_set_updates_only_fabric_and_syncs(world: World) -> None:
     assert len(world.synced) == 1 and world.synced[0].fabric.domain == "mesh.example"
 
 
+def test_set_node_id_writes_the_node_section_and_derives_addresses(world: World) -> None:
+    result = world.service().set({"node_id": 3, "reserved": ["10.200.0.0/16"]})
+
+    assert result["fabric"]["node_id"] == 3
+    stored = yaml.safe_load(world.path.read_text(encoding="utf-8"))
+    assert stored["node"]["id"] == 3
+    assert stored["fabric"]["reserved"] == ["10.200.0.0/16"]
+    synced = world.synced[0]
+    assert str(synced.server.ipv4_network) == "10.100.3.0/24"
+    assert synced.internal_dns.listen == "10.100.3.1"
+
+
 def test_set_refuses_bad_input_and_writes_nothing(world: World) -> None:
     before = world.path.read_text(encoding="utf-8")
-    for bad in ({"bogus": 1}, {}, {"cidr": "not-a-cidr"}):
+    for bad in (
+        {"bogus": 1},
+        {},
+        {"cidr": "not-a-cidr"},
+        {"node_id": 0},
+        {"client_pool": "10.100.{node}.0/24"},
+    ):
         with pytest.raises(ManagementError) as err:
             world.service().set(bad)
         assert err.value.status == 422

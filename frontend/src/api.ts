@@ -646,9 +646,9 @@ export type FabricSettings = {
 export function saveFabricSettings(
   token: string,
   payload: FabricSettings
-): Promise<{ status: string }> {
-  return requestJson<{ status: string }>("/api/config/fabric-settings", token, {
-    method: "POST",
+): Promise<unknown> {
+  return requestJson<unknown>("/api/fabric", token, {
+    method: "PATCH",
     body: body(payload)
   });
 }

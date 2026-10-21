@@ -28,6 +28,8 @@ from kornode.services.net import NetService
 
 HUB_NODE_ID = 1
 SETTINGS_KEYS = ("cidr", "client_pool", "source_pool", "enroll_pool", "domain", "reserved")
+# `node_id` lives in the `node:` section (the hub's own id), not under `fabric:`.
+ACCEPTED_KEYS = (*SETTINGS_KEYS, "node_id")
 
 
 class FabricService:
@@ -79,16 +81,19 @@ class FabricService:
 
     def settings(self) -> dict[str, Any]:
         fabric = self.config.fabric.model_dump(mode="json")
-        return {key: fabric[key] for key in SETTINGS_KEYS}
+        return {"node_id": self.config.node.id, **{key: fabric[key] for key in SETTINGS_KEYS}}
 
     def set(self, data: dict[str, Any]) -> dict[str, Any]:
-        unknown = sorted(set(data) - set(SETTINGS_KEYS))
+        unknown = sorted(set(data) - set(ACCEPTED_KEYS))
         if unknown:
             raise ManagementError(422, "invalid", f"unknown fabric settings: {', '.join(unknown)}")
         if not data:
             raise ManagementError(422, "invalid", "no fabric settings given")
         raw = load_yaml_file(self.path)
-        raw["fabric"] = {**(raw.get("fabric") or {}), **data}
+        values = {key: value for key, value in data.items() if key != "node_id"}
+        raw["fabric"] = {**(raw.get("fabric") or {}), **values}
+        if "node_id" in data:
+            raw["node"] = {**(raw.get("node") or {}), "id": data["node_id"]}
         self._validate(raw)
         FileManager().atomic_write_text(self.path, yaml.safe_dump(raw, sort_keys=False), mode=0o600)
         self.config = load_config(self.path)
