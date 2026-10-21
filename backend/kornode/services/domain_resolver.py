@@ -22,13 +22,11 @@ from pathlib import Path
 import dns.exception
 import dns.resolver
 
-from kornode.config.legacy import profile_slug
 from kornode.config.models import AppConfig
-from kornode.net.model import EgressPolicy
+from kornode.net.model import EgressPolicy, InlineDest
 from kornode.services.files import FileManager
 from kornode.services.net import NetService
-from kornode.services.netinputs import HubNetInputs, resolved_state_dir
-from kornode.services.upstream_pushed import PushedRoutingStore
+from kornode.services.netinputs import resolved_state_dir
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,23 +65,22 @@ class RefreshOutcome:
 
 
 def domain_groups(config: AppConfig, policy: EgressPolicy | None = None) -> list[DomainGroup]:
-    """Every policy set that has domains. A profile's host set resolves
-    through the DNS its upstream pushed (accept_server_routes), when it has
-    one; everything else through the internal DNS upstreams."""
-    policy = policy or HubNetInputs(config).policy()
+    """Every destination with domains, resolved through the internal DNS upstreams: the
+    policy's named sets (key = set name) and inline rule destinations (key `rule<N>`,
+    the names NodeFacts.resolved is read by)."""
+    policy = policy or config.egress_policy()
     upstreams = tuple(config.internal_dns.upstreams)
-    pushed_dns: dict[str, tuple[str, ...]] = {}
-    if config.upstream.enabled:
-        store = PushedRoutingStore(config, FileManager())
-        for profile in config.upstream.profiles:
-            dns_servers = tuple(store.effective(profile).dns)
-            if dns_servers:
-                pushed_dns[f"p_{profile_slug(profile.name)}_host"] = dns_servers
-    return [
-        DomainGroup(name, tuple(dest.domains), pushed_dns.get(name, upstreams))
+    groups = [
+        DomainGroup(name, tuple(dest.domains), upstreams)
         for name, dest in policy.sets.items()
         if dest.domains
     ]
+    groups += [
+        DomainGroup(f"rule{index}", tuple(rule.to.domains), upstreams)
+        for index, rule in enumerate(policy.egress)
+        if isinstance(rule.to, InlineDest) and rule.to.domains
+    ]
+    return groups
 
 
 class DnsLookup:

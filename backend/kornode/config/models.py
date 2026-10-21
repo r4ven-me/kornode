@@ -75,6 +75,10 @@ def _drop_removed_static_files(data: Any, label: str) -> Any:
     return data
 
 
+def _default_hub_rule() -> Rule:
+    return Rule.model_validate({"id": "default", "from": ["clients"], "to": "any", "via": "local"})
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
@@ -1447,11 +1451,17 @@ class AppConfig(StrictModel):
     # same model the agents use. Registry-dependent checks live in services/hub_egress.
     sources: tuple[Source, ...] = ()
     sets: dict[str, DestSet] = Field(default_factory=dict)
-    egress: tuple[Rule, ...] = ()
+    # Without an explicit `egress` the hub's clients leave through the uplink (D-72); an
+    # explicit list replaces this rule and everything not matched is dropped (spec 02).
+    egress: tuple[Rule, ...] = Field(default_factory=lambda: (_default_hub_rule(),))
     internal_dns: InternalDnsConfig = Field(default_factory=InternalDnsConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     cli: CliConfig = Field(default_factory=CliConfig)
     advanced: AdvancedConfig = Field(default_factory=AdvancedConfig)
+
+    def exported_source_cidrs(self) -> list[str]:
+        """Hub source subnets announced to the agents (bundle prefixes, per-user `route`)."""
+        return [source.cidr for source in self.sources if source.export]
 
     def egress_policy(self) -> EgressPolicy:
         return EgressPolicy(sources=self.sources, sets=self.sets, egress=self.egress)

@@ -26,9 +26,12 @@ def node(id_: int, roles: list[str], state: str = "active") -> Node:
 SRC = {"name": "wg", "interface": "wg0", "cidr": "10.8.1.0/24"}
 
 
-def test_defaults_are_empty() -> None:
+def test_default_policy_lets_clients_out_locally() -> None:
     config = cfg()
-    assert config.egress == () and config.sources == () and config.sets == {}
+    assert config.sources == () and config.sets == {}
+    (rule,) = config.egress
+    assert (rule.from_, rule.to, rule.via) == (("clients",), "any", "local")
+    assert cfg(egress=[]).egress == ()
 
 
 def test_valid_policy_parses() -> None:

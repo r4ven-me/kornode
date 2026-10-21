@@ -435,6 +435,9 @@ def _transit_head(
             str(net) for net in transit.sources if net.version == 4
         )
     for node, nets in sorted(by_node.items()):
+        if not nets:
+            # The hub's own exit (egress.hub): only here for the answers' reverse path.
+            continue
         name = f"transit{node}_v4"
         sets.setdefault(name, DestSetDecl(name, 4))
         elements.setdefault(name, set()).update(nets)

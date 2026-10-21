@@ -9,6 +9,7 @@ from typing import Any
 from kornode.net.compile import (
     EnrollGuard,
     NodeFacts,
+    SourceFact,
     TransitExit,
     TunnelFact,
     compile_policy,
@@ -242,6 +243,25 @@ def test_prefix_routes_in_main_bring_the_answers_back() -> None:
 
 def hub_transit_case() -> tuple[EgressPolicy, NodeFacts]:
     return EgressPolicy(), hub_facts()
+
+
+def hub_egress_exit_case() -> tuple[EgressPolicy, NodeFacts]:
+    """The hub's own clients and a hub source leave through node 3 (egress.hub)."""
+    policy = EgressPolicy.model_validate(
+        {
+            "sources": [{"name": "wg", "interface": "wg0", "cidr": "10.8.1.0/24"}],
+            "egress": [{"from": ["clients", "wg"], "to": "any", "via": "exit:3"}],
+        }
+    )
+    facts = hub_facts()
+    facts = dataclasses.replace(
+        facts,
+        sources={"wg": SourceFact(present=True)},
+        tunnels={"exit:3": TunnelFact(interface="vpns1", up=True)},
+        node_prefixes={**facts.node_prefixes, 1: (*facts.node_prefixes[1], n("10.8.1.0/24"))},
+        transit_exits=(*facts.transit_exits, TransitExit(3, (), "vpns1")),
+    )
+    return policy, facts
 
 
 def agent_exit_case() -> tuple[EgressPolicy, NodeFacts]:

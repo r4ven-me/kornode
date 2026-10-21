@@ -71,123 +71,38 @@ def _upstream_enabled() -> dict[str, object]:
     }
 
 
-def test_domain_groups_includes_default_target_only_when_client_policy_is_split(
-    tmp_path: Path,
-) -> None:
-    split = domain_groups(
-        _config(
-            tmp_path,
-            {
-                **_upstream_enabled(),
-                "routing": {"client_policy": "split", "split": {"domains": ["example.com"]}},
-            },
-        )
-    )
-    assert any(group.name == "split" for group in split)
-
-    full = domain_groups(
-        _config(
-            tmp_path,
-            {
-                **_upstream_enabled(),
-                "routing": {"client_policy": "full", "split": {"domains": ["example.com"]}},
-            },
-        )
-    )
-    assert not any(group.name == "split" for group in full)
+def _split(*domains: str) -> dict[str, object]:
+    return {
+        **_upstream_enabled(),
+        "sets": {"split": {"domains": list(domains)}},
+        "egress": [{"from": ["clients"], "to": {"set": "split"}, "via": "upstream:primary"}],
+    }
 
 
-def test_domain_groups_includes_named_target_domains_regardless_of_client_policy(
-    tmp_path: Path,
-) -> None:
-    groups = domain_groups(
-        _config(
-            tmp_path,
-            {
-                "routing": {"client_policy": "full"},
-                "upstream": {
-                    "enabled": True,
-                    "profiles": [
-                        {
-                            "name": "finance",
-                            "server": "finance.example.com",
-                            "auth_type": "password",
-                            "username": "user",
-                            "domains": ["finance-internal.corp"],
-                        }
-                    ],
-                },
-            },
-        )
-    )
-    matching = [g for g in groups if g.name == "p_finance"]
-    assert len(matching) == 1
-    assert matching[0].domains == ("finance-internal.corp",)
-
-
-def test_domain_groups_host_domains_use_profile_dns_when_configured(tmp_path: Path) -> None:
-    from kornode.services.upstream_pushed import PushedRouting, PushedRoutingStore
-
+def test_domain_groups_cover_named_sets_and_inline_destinations(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
         {
-            "upstream": {
-                "enabled": True,
-                "profiles": [
-                    {
-                        "name": "office",
-                        "server": "office.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "route_host_enabled": True,
-                        "accept_server_routes": True,
-                        "host_domains": ["own.example"],
-                    }
-                ],
-            }
+            **_upstream_enabled(),
+            "sets": {
+                "corp": {"domains": ["corp.example"]},
+                "routes_only": {"routes": ["10.0.0.0/8"]},
+            },
+            "egress": [
+                {"from": ["clients"], "to": {"set": "corp"}, "via": "upstream:primary"},
+                {"from": ["clients"], "to": {"set": "routes_only"}, "via": "local"},
+                {"from": ["clients"], "to": {"domains": ["inline.example"]}, "via": "local"},
+            ],
         },
     )
-    PushedRoutingStore(config).save(
-        config.upstream.profiles[0],
-        PushedRouting(domains=["corp.example.com"], dns=["172.16.0.53"]),
-    )
-
-    groups = domain_groups(config)
-    host_group = next(g for g in groups if g.name == "p_office_host")
-    assert set(host_group.domains) == {"own.example", "corp.example.com"}
-    assert host_group.nameservers == ("172.16.0.53",)
+    groups = {group.name: group.domains for group in domain_groups(config)}
+    assert groups == {"corp": ("corp.example",), "rule2": ("inline.example",)}
 
 
-def test_domain_groups_includes_global_host_split_only_when_host_policy_is_split(
-    tmp_path: Path,
-) -> None:
-    split = domain_groups(
-        _config(
-            tmp_path,
-            {
-                **_upstream_enabled(),
-                "routing": {
-                    "host_policy": "split",
-                    "host_split": {"domains": ["intranet.example"]},
-                },
-            },
-        )
-    )
-    assert any(g.name == "host_split" and g.domains == ("intranet.example",) for g in split)
-
-    off = domain_groups(
-        _config(
-            tmp_path,
-            {
-                **_upstream_enabled(),
-                "routing": {
-                    "host_policy": "off",
-                    "host_split": {"domains": ["intranet.example"]},
-                },
-            },
-        )
-    )
-    assert not any(g.name == "host_split" for g in off)
+def test_domain_groups_resolve_through_internal_dns_upstreams(tmp_path: Path) -> None:
+    config = _config(tmp_path, _split("example.com"))
+    (group,) = domain_groups(config)
+    assert group.nameservers == tuple(config.internal_dns.upstreams)
 
 
 def test_refresh_is_a_noop_when_nothing_is_configured_to_resolve(tmp_path: Path) -> None:
@@ -204,8 +119,7 @@ def test_refresh_writes_resolved_addresses_and_wakes_net(tmp_path: Path) -> None
     config = _config(
         tmp_path,
         {
-            **_upstream_enabled(),
-            "routing": {"client_policy": "split", "split": {"domains": ["example.com"]}},
+            **_split("example.com"),
         },
     )
     lookup = FakeLookup({"example.com": (["203.0.113.5", "203.0.113.6"], ["2001:db8::1"], 120)})
@@ -239,13 +153,7 @@ def test_refresh_removes_stale_files_when_domain_list_is_now_empty(tmp_path: Pat
 def test_refresh_interval_is_clamped_between_min_and_max(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
-        {
-            **_upstream_enabled(),
-            "routing": {
-                "client_policy": "split",
-                "split": {"domains": ["short.example", "long.example"]},
-            },
-        },
+        _split("short.example", "long.example"),
     )
     lookup = FakeLookup(
         {
@@ -263,8 +171,7 @@ def test_refresh_dry_run_does_not_touch_the_runner_or_filesystem(tmp_path: Path)
     config = _config(
         tmp_path,
         {
-            **_upstream_enabled(),
-            "routing": {"client_policy": "split", "split": {"domains": ["example.com"]}},
+            **_split("example.com"),
         },
     )
     lookup = FakeLookup({"example.com": (["203.0.113.5"], [], 60)})

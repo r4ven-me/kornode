@@ -13,13 +13,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kornode.config.legacy import legacy_policy, profile_slug, upstream_exit
+from kornode.config.legacy import profile_slug, upstream_exit
 from kornode.config.models import AppConfig, UpstreamProfileConfig
 from kornode.net.addressing import derive_addresses
 from kornode.net.compile import (
     Compiled,
     EnrollGuard,
     NodeFacts,
+    SourceFact,
     TransitExit,
     TunnelFact,
     compile_policy,
@@ -141,11 +142,7 @@ class HubNetInputs:
         self.proc_sys = proc_sys
 
     def policy(self) -> EgressPolicy:
-        return legacy_policy(
-            self.config,
-            RoutingLists(self.config, self.files),
-            selected_profile(self.config, self.files),
-        )
+        return self.config.egress_policy()
 
     def facts(self) -> NodeFacts:
         config = self.config
@@ -165,6 +162,14 @@ class HubNetInputs:
                 upstreams.append(profile_slug(profile.name))
         tunnel_ifaces = {tunnel.interface for tunnel in tunnels.values()}
         view = self._fabric_view()
+        policy = self.policy()
+        # `exit:<n>` of the hub's own policy leaves through node n's ocserv session; while
+        # that session is down there is no fact and the exit only fails closed.
+        for rule in policy.egress:
+            via = rule.parsed_via
+            device = view.sessions.get(int(via.target or 0)) if via.kind == "exit" else None
+            if device is not None:
+                tunnels[via.name] = TunnelFact(interface=device, up=True)
         return NodeFacts(
             node_id=node_id,
             client_pool=pool,
@@ -172,10 +177,14 @@ class HubNetInputs:
             local_networks=tuple(self._local_networks(exclude=tunnel_ifaces)),
             resolved=self._resolved(),
             upstreams=tuple(upstreams),
+            sources={
+                source.name: SourceFact(present=source.interface in links)
+                for source in policy.sources
+            },
             node_prefixes=self._node_prefixes(pool, view),
             fabric_ifaces=tuple(sorted(set(view.sessions.values()))),
             fabric_guard=True,
-            transit_exits=tuple(self._transit_exits(view)),
+            transit_exits=tuple(self._transit_exits(view, policy)),
             session_routes=tuple(self._session_routes(view)),
             uplink=NetworkStatsService(config, runner=self.runner).resolve_interface(),
             all_rp_filter=self._read_sysctl("net.ipv4.conf.all.rp_filter"),
@@ -260,8 +269,12 @@ class HubNetInputs:
     def _node_prefixes(self, pool: Network, view: FabricView) -> dict[int, tuple[Network, ...]]:
         """Every active node's exported prefixes; the hub's are its pool and the fabric."""
         hub: list[Network] = [pool, ipaddress.ip_network(self.config.fabric.cidr, strict=False)]
+        hub += [ipaddress.ip_network(cidr) for cidr in self.config.exported_source_cidrs()]
         result: dict[int, tuple[Network, ...]] = {1: tuple(hub)}
         active = {node.id for node in view.nodes}
+        # A node without exported prefixes is still a valid `exit:<n>` target.
+        for node_id in sorted(active - {1}):
+            result[node_id] = ()
         for item in view.prefixes:
             if item.export and item.node_id in active and item.node_id != 1:
                 result[item.node_id] = (
@@ -270,7 +283,7 @@ class HubNetInputs:
                 )
         return result
 
-    def _transit_exits(self, view: FabricView) -> list[TransitExit]:
+    def _transit_exits(self, view: FabricView, own: EgressPolicy) -> list[TransitExit]:
         """Exits that agents declare for their own traffic (D-69): `from` classes of a
         rule `to: any via exit:<n>` become the source prefixes the hub marks for node
         n's table. Only an active node with role `exit` is honoured; anything else stays
@@ -278,6 +291,15 @@ class HubNetInputs:
         fabric = self.config.fabric
         roles = {node.id: node.roles for node in view.nodes}
         found: list[TransitExit] = []
+        # The hub's own exits (egress.hub) have no agent sources to mark; they are listed
+        # for the strict reverse path, which must let the answers through (D-69).
+        for rule in own.egress:
+            via = rule.parsed_via
+            if via.kind != "exit":
+                continue
+            target = int(via.target or 0)
+            if "exit" in roles.get(target, []):
+                found.append(TransitExit(target, (), view.sessions.get(target)))
         for node in view.nodes:
             if node.id == 1:
                 continue

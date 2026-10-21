@@ -4,6 +4,7 @@ from pathlib import Path
 
 from kornode.config.models import AppConfig
 from kornode.config.reserved import CLIENTS_GROUP
+from kornode.net.model import Source
 from kornode.registry.db import migrate, open_registry
 from kornode.registry.repository import Registry
 from kornode.services.config import ConfigService
@@ -145,9 +146,10 @@ def test_user_files_carry_iroute_route_and_transport(tmp_path: Path) -> None:
     registry.create_node(id=4, name="gone", state="revoked")
     registry.set_prefixes(2, [{"prefix": "192.168.2.0/24", "kind": "lan", "export": True}])
     registry.set_prefixes(3, [{"prefix": "192.168.3.0/24", "kind": "lan", "export": True}])
-    registry.set_prefixes(3, registry.list_prefixes(3) + [
-        {"prefix": "192.168.30.0/24", "kind": "lan", "export": False}
-    ])
+    registry.set_prefixes(
+        3,
+        registry.list_prefixes(3) + [{"prefix": "192.168.30.0/24", "kind": "lan", "export": False}],
+    )
     registry.set_prefixes(4, [{"prefix": "192.168.4.0/24", "kind": "lan", "export": True}])
     service = FabricGroupsService(config)
 
@@ -187,3 +189,26 @@ def test_sync_reloads_ocserv_only_when_an_existing_file_changes(tmp_path: Path) 
     assert reloads == [1]
     service.sync()
     assert reloads == [1]
+
+
+def test_user_files_route_exported_hub_sources_only(tmp_path: Path) -> None:
+    config = _config(tmp_path).model_copy(
+        update={
+            "sources": (
+                Source(name="wg", interface="wg0", cidr="10.8.1.0/24"),
+                Source(name="hidden", interface="wg1", cidr="10.8.2.0/24", export=False),
+            )
+        }
+    )
+    registry = _registry(config)
+    registry.create_node(id=1, name="hub", state="active")
+    registry.create_node(id=2, name="a", state="active")
+    service = FabricGroupsService(config)
+
+    rendered = {
+        item.path.name: item.content
+        for item in service.render_files(registry.list_nodes(), registry.list_prefixes())
+    }
+
+    assert "route = 10.8.1.0/24" in rendered["agent-2"].splitlines()
+    assert "10.8.2.0/24" not in rendered["agent-2"]

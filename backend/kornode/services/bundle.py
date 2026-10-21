@@ -275,6 +275,10 @@ class BundleService:
             {"prefix": fabric.cidr, "node_id": HUB_NODE_ID, "kind": "fabric"},
             {"prefix": str(hub.client_pool), "node_id": HUB_NODE_ID, "kind": "pool"},
         ]
+        prefixes.extend(
+            {"prefix": cidr, "node_id": HUB_NODE_ID, "kind": "source"}
+            for cidr in self.config.exported_source_cidrs()
+        )
         for other in registry.list_nodes():
             if other.id == node.id or other.state != "active":
                 continue

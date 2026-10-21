@@ -1,0 +1,5 @@
+net.ipv4.conf.all.rp_filter=2
+net.ipv4.conf.all.src_valid_mark=1
+net.ipv4.conf.vpns1.rp_filter=2
+net.ipv4.conf.wg0.rp_filter=2
+net.ipv4.ip_forward=1

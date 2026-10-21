@@ -26,7 +26,12 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "docs" / "spec" / "examples"
 GOLDEN = Path(__file__).resolve().parent / "golden"
 
-from tests.test_net_transit import agent_exit_case, exit_node_case, hub_transit_case  # noqa: E402
+from tests.test_net_transit import (  # noqa: E402
+    agent_exit_case,
+    exit_node_case,
+    hub_egress_exit_case,
+    hub_transit_case,
+)
 
 
 def n(text: str) -> Any:
@@ -107,6 +112,7 @@ def _render(compiled: Compiled) -> dict[str, str]:
         ("hub", hub_case),
         ("node3", node3_case),
         ("hub_transit", hub_transit_case),
+        ("hub_egress_exit", hub_egress_exit_case),
         ("agent_exit", agent_exit_case),
         ("exit_node", exit_node_case),
     ],
@@ -400,7 +406,7 @@ def test_session_routes_become_kornode_owned_main_routes() -> None:
 
     routes = compile_policy(policy, facts).desired.routes
 
-    assert Route(
-        table=MAIN_TABLE, dst="192.168.3.0/24", dev="vpns0", proto=KORNODE_RTPROTO
-    ) in routes
+    assert (
+        Route(table=MAIN_TABLE, dst="192.168.3.0/24", dev="vpns0", proto=KORNODE_RTPROTO) in routes
+    )
     assert not any(r.table == MAIN_TABLE for r in compile_policy(*hub_case()).desired.routes)

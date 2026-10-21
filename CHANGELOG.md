@@ -4,7 +4,9 @@
 
 ### Added (hub egress model, P4-06 part 2 / P5-03, slice 1; branch `redesign/p4-06b-hub-egress`)
 
-- Top-level `egress`, `sources`, `sets` keys in the hub config (the agent policy model). Config-level checks: references, source CIDR inside `fabric.source_pool` (or `allow_outside_pool`), no overlap with the client pool/fabric/enroll pool/other sources, unique interfaces, `host` and non-exported sources cannot use `exit:<n>`. Registry/upstream checks: `services/hub_egress.py`. Not wired into the compiler yet (slice 2); legacy keys stay until the removal block.
+- Top-level `egress`, `sources`, `sets` keys in the hub config (the agent policy model). Config-level checks: references, source CIDR inside `fabric.source_pool` (or `allow_outside_pool`), no overlap with the client pool/fabric/enroll pool/other sources, unique interfaces, `host` and non-exported sources cannot use `exit:<n>`. Registry/upstream checks: `services/hub_egress.py`. Legacy keys stay until the removal block.
+- Slice 2: `HubNetInputs.policy()` is now the config policy (no `legacy_policy` merge, D-70). Without an explicit `egress` the hub gets one rule `clients → any via local` (D-72 candidate); an explicit list replaces it. Hub sources are facts (`SourceFact`), local prefixes, bundle prefixes of node 1 and per-user `route` lines for agents. Hub `exit:<n>` uses node n's ocserv session (no session → fails closed) and lets the answers through the strict reverse path. `DomainResolverService` resolves set and inline-rule domains of the new model.
+- Removed with the behaviour (v1 tests rewritten to the new model): runtime-switched upstream profile drives the policy (`test_runtime_switched_profile_drives_the_policy`, `test_disabled_runtime_profile_leaves_no_active_upstream`), pushed-DNS host sets and `client_policy`/`host_split` domain groups in `test_domain_resolver.py`.
 
 ### Removed (`fabric.enabled`, D-71; branch `redesign/p4-fabric-always-on`)
 

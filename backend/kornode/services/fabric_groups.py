@@ -102,6 +102,7 @@ class FabricGroupsService:
                             f"explicit-ipv4 = {address}",
                             *(f"iroute = {p.prefix}" for p in exported if p.node_id == node.id),
                             *(f"route = {p.prefix}" for p in exported if p.node_id != node.id),
+                            *(f"route = {cidr}" for cidr in self.config.exported_source_cidrs()),
                             *_transport_lines(node),
                             "",
                         ]
