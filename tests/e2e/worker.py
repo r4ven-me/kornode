@@ -468,6 +468,11 @@ class Worker:
         self.directory.mkdir(mode=0o711)
         atomic(self.directory / "owner.json", self.owner())
         config_path = self.directory / "config.json"
+        if self.role == "hub" and self.case == "routed":
+            # The hub rewrites its own config (`source add`, `egress set`); the case directory
+            # is mounted read-only, so the file lives in a writable bucket of its own.
+            (self.directory / "config").mkdir(mode=0o700)
+            config_path = self.directory / "config" / "config.json"
         state = {"config": str(config_path), "image": image}
         atomic(self.directory / "state.json", state)
         if self.role in {"hub", "ext"}:
@@ -542,11 +547,20 @@ class Worker:
                 }
             )
         else:
-            for bucket in ("data", "generated", "secrets", "logs", "recovery"):
+            buckets = ["data", "generated", "secrets", "logs", "recovery"]
+            for bucket in buckets:
                 path = self.directory / bucket
                 path.mkdir(mode=0o711 if bucket == "recovery" else 0o700)
                 service["volumes"].append(
                     {"type": "bind", "source": str(path), "target": str(path)}
+                )
+            if config_path.parent != self.directory:
+                service["volumes"].append(
+                    {
+                        "type": "bind",
+                        "source": str(config_path.parent),
+                        "target": str(config_path.parent),
+                    }
                 )
             service["environment"] = {"KORNODE_CONFIG": str(config_path)}
             service["ports"] = ["443:443/tcp"] + (["18444:18444/tcp"] if self.role == "hub" else [])
