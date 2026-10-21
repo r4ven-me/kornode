@@ -302,7 +302,7 @@ def test_e2e_07_client_of_agent_a_leaves_through_agent_b_and_fails_closed_when_i
         cluster.call("agent-b", "access_client_stop")
 
 
-HUB_SOURCE_CLIENT = "10.8.9.20"
+HUB_SOURCE_CLIENT = "10.8.1.20"
 
 
 @pytest.mark.e2e_case("routed")

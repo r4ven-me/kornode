@@ -44,9 +44,9 @@ SOURCE_CIDR = "10.8.3.0/24"
 SOURCE_NODE_ADDRESS = "10.8.3.2"
 SOURCE_CLIENT_ADDRESS = "10.8.3.20"
 # E2E-07 (spec edition): the same shape on the hub, standing in for an attached wg-easy.
-HUB_SOURCE_CIDR = "10.8.9.0/24"
-HUB_SOURCE_NODE_ADDRESS = "10.8.9.2"
-HUB_SOURCE_CLIENT_ADDRESS = "10.8.9.20"
+HUB_SOURCE_CIDR = "10.8.1.0/24"
+HUB_SOURCE_NODE_ADDRESS = "10.8.1.2"
+HUB_SOURCE_CLIENT_ADDRESS = "10.8.1.20"
 IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(?:@sha256:[0-9a-f]{64})?$")
 
 PROXY = """import select, socket, socketserver
