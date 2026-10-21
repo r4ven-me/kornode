@@ -244,3 +244,21 @@ def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rul
 
     stub.inputs.active = None
     assert Agent._exit_sets(stub) == {}  # type: ignore[arg-type]
+
+
+def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implicit_rules(
+    world: Any,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    """The bundle gets `to-fabric` in front of the operator's rules, so the agent reports its
+    inline destination as `rule1`; the hub must read the same key (D-79)."""
+    env, service = make(world)
+    service.set_policy(
+        "node2",
+        {"egress": [{"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "exit:3"}]},
+    )
+    env.registry.add_report(2, {"applied_version": 1, "exit_sets": {"rule1": ["203.0.113.9"]}})
+
+    facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
+
+    assert [t.dest for t in facts.transit_exits] == [frozenset({"203.0.113.9/32"})]

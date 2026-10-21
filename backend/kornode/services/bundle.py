@@ -341,7 +341,7 @@ class BundleService:
     def _policy(self, registry: Registry, node: Node) -> dict[str, Any]:
         """The node's policy with the implicit rules; `exit:<n>` must name another active
         agent with role `exit` (spec 07), whatever wrote the registry."""
-        policy = _policy_with_fabric_rule(node.policy, node.roles)
+        policy = policy_with_implicit_rules(node.policy, node.roles)
         for rule in policy["egress"]:
             via = str(rule.get("via", ""))
             if not via.startswith("exit:"):
@@ -430,7 +430,7 @@ def _external_aad(node_id: int, name: str) -> bytes:
     return f"kornode-external-secrets-v1|{node_id}|{name}".encode()
 
 
-def _policy_with_fabric_rule(policy: dict[str, Any], roles: list[str]) -> dict[str, Any]:
+def policy_with_implicit_rules(policy: dict[str, Any], roles: list[str]) -> dict[str, Any]:
     """A bundle must keep the agent's path to the hub (spec 11): add the
     fabric rule when no rule gives `host` that path.
 

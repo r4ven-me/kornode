@@ -31,6 +31,7 @@ from kornode.net.state import DesiredState
 from kornode.registry.db import migrate, open_registry
 from kornode.registry.models import Node, NodePrefix
 from kornode.registry.repository import Registry
+from kornode.services.bundle import policy_with_implicit_rules
 from kornode.services.command import CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.network_stats import NetworkStatsService
@@ -261,7 +262,11 @@ class HubNetInputs:
             if node.id == 1:
                 continue
             try:
-                policy = EgressPolicy.model_validate(node.policy)
+                # The agent numbers inline destinations (`rule<N>`) in the policy it was
+                # given, implicit rules included: the hub must index the same list (D-79).
+                policy = EgressPolicy.model_validate(
+                    policy_with_implicit_rules(node.policy, node.roles)
+                )
             except ValueError:
                 continue
             addresses = derive_addresses(

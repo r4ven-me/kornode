@@ -153,6 +153,7 @@ class Agent:
             self.root,
             nameservers=self._hub_nameservers,
             policy=lambda: self.inputs.active.bundle.policy if self.inputs.active else None,
+            source=self._fabric_source,
         )
         self.inputs = AgentNetInputs(
             self.config,
@@ -206,6 +207,11 @@ class Agent:
     def _bundle_changed(self) -> None:
         self.reconciler.wake()
         self.set_resolver.changed.set()  # re-resolve the sets of the new policy now
+
+    def _fabric_source(self) -> str | None:
+        """The node's fabric address: queries to the hub resolver must come from it (D-66)."""
+        active = self.inputs.active
+        return str(active.bundle.node.fabric_address) if active else None
 
     def _hub_nameservers(self) -> list[str]:
         """The hub resolver the node's dnsmasq forwards the fabric zone to (D-66, D-78)."""

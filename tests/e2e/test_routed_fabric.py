@@ -356,3 +356,75 @@ def _peer_or_none(cluster: Cluster, listener: str, connector: str, host: str) ->
         return cluster.tcp_peer(listener, connector, host, client=True)
     except E2EError:
         return None
+
+
+@pytest.mark.e2e_case("routed")
+def test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed(
+    cluster: Cluster,
+) -> None:
+    """Spec E2E-07, domain half (D-79). The client of agent-a has `clients -> {domains: [x]}
+    via exit:3`, x being a name in the fabric zone that points at ext, the "internet". Agent-a
+    resolves x itself and reports the address; the hub marks the transit traffic by source
+    and destination, agent-b masquerades it. With agent-b gone nothing leaves."""
+    inventory = cluster.fleet.inventory
+    agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
+    ext = inventory.host("ext").address
+    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
+    password = secrets.token_hex(12)
+    cluster.call("hub", "dns_record", name="webdest", type="A", value=ext)
+    before = {role: cluster.status(role)["applied_version"] for role in ("agent-a", "agent-b")}
+    cluster.call("hub", "exit_role")
+    access = cluster.call(
+        "hub", "access_setup", name="agent-a", host=agent_a, port=ACCESS_PORT,
+        user="alice", password=password,
+    )  # fmt: skip
+    pin = access["certificate"]["pin"]
+    cluster.call("hub", "access_policy", via="exit:3", domain="webdest.kornode.internal")
+    for role in ("agent-a", "agent-b"):
+
+        def applied(role: str = role) -> bool:
+            return bool(cluster.status(role)["applied_version"] > before[role])
+
+        wait_for(applied, 60, f"{role} did not apply its bundle")
+
+    def login() -> None:
+        def attempt() -> bool:
+            try:
+                cluster.call(
+                    "agent-b", "access_client", host=agent_a, port=ACCESS_PORT, pin=pin,
+                    user="alice", password=password, routes=[], full=True,
+                )  # fmt: skip
+            except E2EError:
+                return False
+            return True
+
+        try:
+            wait_for(attempt, 90, "VPN login to the access server of agent-a failed")
+        except E2EError as exc:
+            diag = {role: cluster.call(role, "access_diag") for role in ("agent-a", "agent-b")}
+            raise E2EError(f"{exc}: {diag}") from None
+
+    try:
+        login()
+        # The agent resolves the name, reports the address, the hub matches it: ext sees agent-b.
+        try:
+            wait_for(
+                lambda: _peer_or_none(cluster, "ext", "agent-b", ext) == agent_b,
+                120,
+                "domain exit traffic did not leave through agent-b",
+            )
+        except E2EError as exc:
+            dumps = {role: cluster.call(role, "net_dump") for role in ("hub", "agent-a")}
+            dumps["resolved"] = cluster.call("agent-a", "resolved_sets")
+            dumps["dns"] = cluster.call(
+                "agent-a", "dns_resolve", name="webdest.kornode.internal", server=HUB_RESOLVER
+            )
+            raise E2EError(f"{exc}: {dumps}") from None
+        cluster.call("agent-b", "stop")
+        time.sleep(15)
+        assert cluster.tcp_unreachable("ext", "agent-b", ext, client=True), (
+            "traffic reached the internet while the exit node was down"
+        )
+    finally:
+        cluster.call("agent-b", "access_client_stop")
+        cluster.call("agent-b", "restart")

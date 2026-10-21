@@ -158,11 +158,24 @@ def test_refresh_records_every_dynamic_set_by_the_name_facts_read(tmp_path: Path
 
 def test_unresolvable_set_is_recorded_empty_and_stale_sets_are_removed(tmp_path: Path) -> None:
     resolver = make(tmp_path, Lookup({"example.org": (["203.0.113.5"], [], 5000)}))
-    assert resolver.refresh() == MAX_INTERVAL_SECONDS
+    # `feed` has domains but resolved to nothing: retry soon, not after an hour (D-79).
+    assert resolver.refresh() == MIN_INTERVAL_SECONDS
     assert resolver.read()["feed"] == frozenset()
     resolver.policy = lambda: None  # no active bundle
     resolver.refresh()
     assert resolver.read() == {}
+
+
+def test_resolved_sets_keep_the_long_interval(tmp_path: Path) -> None:
+    lookup = Lookup(
+        {
+            "example.org": (["203.0.113.5"], [], 5000),
+            "feed.example": (["198.51.100.7"], [], 5000),
+            "inline.example": (["203.0.113.9"], [], 5000),
+        }
+    )
+
+    assert make(tmp_path, lookup).refresh() == MAX_INTERVAL_SECONDS
 
 
 def test_interval_is_clamped_to_the_floor(tmp_path: Path) -> None:
@@ -185,3 +198,29 @@ def test_run_wakes_the_reconciler_only_when_addresses_change(tmp_path: Path) -> 
     stop.set()
     thread.join(5)
     assert not thread.is_alive()
+
+
+def test_udp_lookup_queries_from_the_pinned_source_address() -> None:
+    """The hub drops fabric queries from any address but the node's fabric address (D-47,
+    D-66), so the resolver must pin it; 127.0.0.2 stands in for that address."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.bind(("127.0.0.1", 0))
+    server.settimeout(2)
+    port = server.getsockname()[1]
+    peers: list[str] = []
+
+    def serve() -> None:
+        data, peer = server.recvfrom(512)
+        peers.append(peer[0])
+        server.sendto(response(data, [(TYPE_A, socket.inet_aton("203.0.113.5"), 60)]), peer)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        found = udp_lookup("example.org", ["127.0.0.1"], TYPE_A, port=port, source="127.0.0.2")
+    finally:
+        thread.join()
+        server.close()
+
+    assert found == (["203.0.113.5"], 60)
+    assert peers == ["127.0.0.2"]
