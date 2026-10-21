@@ -256,10 +256,11 @@ P0-03 с kill-switch (D-20, D-21).
 D-66), PR #3 (P4-04, D-67), а также P4-05 (источники агентов, D-68), P4-06 часть 1 (`via: exit:<n>` для
 трафика агентов, D-69), фикс CI (`vite` 8.3.x), **S-07 / D-71** (vhost фабрики по SNI), **удаление
 `fabric.enabled`** (хаб всегда запускает фабрику), ветка `redesign/p4-06b-hub-egress` (`95b0b62`: модель
-egress хаба D-72 и удаление v1-маршрутизации D-73, P4-06 часть 2 + P5-03) и ветка `redesign/p4-07-fabric`
-(`5f3a6d8`: раздел Fabric, D-74). Всё после PR #3 слито локальным `git merge --no-ff`/fast-forward и запушено:
+egress хаба D-72 и удаление v1-маршрутизации D-73, P4-06 часть 2 + P5-03), ветка `redesign/p4-07-fabric`
+(`5f3a6d8`: раздел Fabric, D-74) и ветка `redesign/p5-05-docs` (`421c465`: документация v2). Всё после PR #3 слито локальным `git merge --no-ff`/fast-forward и запушено:
 `gh` не работает, пока заблокирован gnome-keyring, поэтому PR-объектов у этих слияний нет. **CI на `main`
-(`95b0b62`) зелёный: backend, frontend, netlab.** Push и слияние задач P4 владелец разрешил 2026-10-20 (после
+(`95b0b62`) зелёный: backend, frontend, netlab**; на `421c465` backend и frontend зелёные, netlab на момент
+записи ещё шёл — проверить. Push и слияние задач P4 владелец разрешил 2026-10-20 (после
 зелёных проверок, без обхода).
 
 **Флаг-день D-71:** хаб и агенты обновляются вместе — новый хаб не пускает агента, который идёт на хост
@@ -268,7 +269,7 @@ egress хаба D-72 и удаление v1-маршрутизации D-73, P4-
 **Не сделано:** set/доменные выходы через `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05,
 NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спецификации, упорядоченный редактор правил с перетаскиванием и
 inline-explain (P5-01, сейчас JSON), URL-источники `sets` на хабе (`route_urls`/`domain_urls` →
-`runtime_unsupported`), README / `docs/architecture.md` / `docs/networking.md` в формате v2 (P5-05), свёртка
+`runtime_unsupported`), свёртка
 `POST /api/config/fabric-settings` в `FabricService`, прогон `e2e.yml` через GitHub Actions, пересборка образов
 E2E-06. Накопительная передача — [CLAUDE-HANDOFF.md](CLAUDE-HANDOFF.md), детали P3 — [P3-07](P3-07-REVIEW.md),
 [P3-08](P3-08-REVIEW.md), [P3-09](P3-09-REVIEW.md), [P3-10](P3-10-REVIEW.md); решения — D-55…D-74;
@@ -278,7 +279,7 @@ E2E-06. Накопительная передача — [CLAUDE-HANDOFF.md](CLAU
 PR #1 был большим (≈90 коммитов); его промежуточные коммиты по отдельности зелёными не проверялись —
 зелёным был только HEAD.
 
-Что реализовано в фазе 4:
+Что реализовано в фазах 4–5:
 
 - **P4-01/P4-02** (D-63, D-65): per-user файлы ocserv (`FabricGroupsService.render_files`:
   `explicit-ipv4`, `iroute`, `route`, `dpd`/`keepalive`, `occtl reload` только при изменении);
@@ -324,6 +325,12 @@ PR #1 был большим (≈90 коммитов); его промежуто�
   parity `fabric.show`/`fabric.settings`. Ядро не тронуто, netlab/E2E не гонялись. Открыто:
   `POST /api/config/fabric-settings` (ещё задаёт `node.id`) не свёрнут в `FabricService`; префиксы и источники
   хаба во вкладке Fabric только читаются.
+- **P5-05** (`421c465`, документация v2): README, `docs/architecture.md`, `docs/networking.md` переписаны под
+  v2 (hub + agents, fabric, egress, sources, reconciler); разделы «Routing/Split Routes» и «Middle-Server Mode»
+  заменены на «Fabric, Agents and Egress» и «Upstreams», справочник конфигурации в README — ссылка на
+  `examples/config.full.yaml`; устаревшие строки убраны из `docs/features.md` и `docs/configuration.md`.
+  `tests/test_docs_v2.py` падает, если в этих документах снова появятся удалённые v1-термины. Команды `korctl`
+  в README сверены с `--help` выборочно.
 
 Что реализовано в P3-07…P3-10:
 
@@ -362,7 +369,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
 Хвосты P2 закрыты (D-60, пункт 2 ниже). `Dockerfile.agent` собран: 396 МБ; цель spec 06
 пересмотрена до ≤400 МБ (D-61).
 
-Фактические проверки (2026-10-21, после модели egress хаба, удаления v1 и P4-07):
+Фактические проверки (2026-10-21, после модели egress хаба, удаления v1, P4-07 и P5-05):
 
 - dev-машина (`.venv`): `make lint typecheck test render parity` зелёные на Python 3.13 и 3.12 —
   **1150 passed / 92 skipped** после `95b0b62` (число упало из-за удаления тестов v1, список — в CHANGELOG),
@@ -375,7 +382,10 @@ PR #1 был большим (≈90 коммитов); его промежуто�
   NL-03, NL-04, NL-06, E2E-07 (как до изменений). Остальной набор (NL-10/11/12, E2E-01…05, NL-13) в последний
   раз зелёный на 2026-10-19 (D-62); E2E-04 в цикле из 5 прогонов — 5 passed. E2E-06 работает на образах из
   слияния PR #1 (registry-контейнер на hub-VM), после D-71 они несовместимы — см. пункт 5 ниже.
-- CI на `main` (`95b0b62`): backend, frontend, netlab — зелёные.
+- P5-05 (только документация и `tests/test_docs_v2.py`): `make lint typecheck test render parity` на
+  Python 3.13 — код 0; Python 3.12, netlab и E2E не гонялись (код не менялся).
+- CI на `main` (`95b0b62`): backend, frontend, netlab — зелёные. На `421c465` backend и frontend зелёные,
+  netlab на момент записи ещё шёл.
 
 **Порядок дальнейших работ:**
 
@@ -408,7 +418,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
    `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрение деплоя. Раннер в
    последний раз был `offline` (подключается, но брокер GitHub из VM отвечает медленно) — проверять
    `gh api repos/r4ven-me/kornode/actions/runners`, логи — `~/actions-runner/_diag/` на hub-VM.
-8. **Остаток фазы 5** (P5-01, P5-05): упорядоченный редактор правил egress в панели с перетаскиванием и
+8. **Остаток фазы 5** (P5-01): упорядоченный редактор правил egress в панели с перетаскиванием и
    inline-explain (сейчас редактор JSON); документация v2 готова (P5-05); URL-источники `sets` на хабе (`route_urls`/`domain_urls`
    сейчас `runtime_unsupported`). P5-02 и P5-04 сняты (D-70), P5-03 сделан (D-73).
 9. Известные мелочи: нестабильный по таймауту netlab-тест
@@ -511,7 +521,7 @@ PR #1 был большим (≈90 коммитов); его промежуто�
 
 **5. Что нужно от владельца.** Разблокировать gnome-keyring, чтобы `gh` снова работал (PR, `gh workflow run`); одобрить деплой окружения `kornode-e2e` для первого прогона `e2e.yml`; решить, нужен ли отдельный `E2E_HUB_ADDRESS` (сейчас — адрес hub-VM); обновить `E2E_PREVIOUS_*_IMAGE` после пересборки базы E2E-06 (флаг-день D-71). GitHub настроен 2026-10-20: environment `kornode-e2e` (required reviewer — владелец, только protected-ветки), секреты `E2E_SSH_KEY`/`E2E_SSH_KNOWN_HOSTS` (отдельный ключ из `~/.e2e` на hub-VM), переменные `E2E_*_HOST`, `E2E_SSH_USER/PORT`, `E2E_PREVIOUS_*_IMAGE`, `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true`, self-hosted runner `kornode-e2e-hub` (метка `kornode-e2e`); `main` защищена от force-push и удаления. Раннер на hub включать **только** пока workflow без `pull_request` (сейчас — только `workflow_dispatch`).
 
-**6. После P3.** «Готово, когда» фазы 3 закрыто четырёхмашинным E2E (D-62). Фаза 4: P4-01…P4-05, P4-06 части 1–2 (без доменных/set-выходов), P4-07 и S-07 (D-71) готовы; в `tests/e2e/test_routed_fabric.py` остаются 7 skip с причинами: E2E-07 в редакции спецификации (хаб-источник и доменные выходы; реальный сценарий выхода агентов — `test_e2e_07_client_of_agent_a_...` — проходит), NL-05, NL-07…NL-09, NL-13-forwarding и E2E-06-clients (клиентский трафик); фаза 5 — P5-03 сделан (D-73), остальное по плану выше.
+**6. После P3.** «Готово, когда» фазы 3 закрыто четырёхмашинным E2E (D-62). Фаза 4: P4-01…P4-05, P4-06 части 1–2 (без доменных/set-выходов), P4-07 и S-07 (D-71) готовы; в `tests/e2e/test_routed_fabric.py` остаются 7 skip с причинами: E2E-07 в редакции спецификации (хаб-источник и доменные выходы; реальный сценарий выхода агентов — `test_e2e_07_client_of_agent_a_...` — проходит), NL-05, NL-07…NL-09, NL-13-forwarding и E2E-06-clients (клиентский трафик); фаза 5 — P5-03 (D-73) и P5-05 сделаны, остальное по плану выше.
 
 ## Тестирование
 
