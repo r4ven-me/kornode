@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (URL-sourced sets on the hub, D-75; branch `redesign/p5-url-sets`)
+
+- `sets.*.route_urls` / `domain_urls` are accepted on the hub: `DomainResolverService` downloads them (hourly, cached, last good copy kept on failure) and records them in `resolved/<set>.txt`. Agents still reject URL sets.
+
 ### Changed (documentation v2, P5-05; branch `redesign/p5-05-docs`)
 
 - README, `docs/architecture.md`, `docs/networking.md` rewritten for hub + agents, the fabric, the declarative egress model, sources and the reconciler; the v1 routing/middle-server sections (`client_policy`, `split`, `fwmark`, `korctl routes|nft|upstream sync`, per-profile host routing) are gone. Stale rows removed from `docs/features.md`, `docs/configuration.md`. New `tests/test_docs_v2.py` fails if removed v1 terms reappear in these docs.

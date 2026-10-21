@@ -36,12 +36,6 @@ def validate_hub_policy(
 ) -> None:
     by_id = {node.id: node for node in nodes}
     known_upstreams = set(upstreams)
-    for name, dest in policy.sets.items():
-        if dest.route_urls or dest.domain_urls:
-            # Nothing fetches them on the hub yet; a silent no-op set would be worse.
-            raise HubEgressError(
-                "runtime_unsupported", f"set {name!r}: route_urls/domain_urls are not supported yet"
-            )
     for index, rule in enumerate(policy.egress):
         via = rule.parsed_via
         if via.kind == "upstream" and via.target not in known_upstreams:

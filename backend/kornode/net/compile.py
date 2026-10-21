@@ -210,7 +210,9 @@ def _dest_members(
     if isinstance(to, SetRef):
         dest = policy.sets[to.set]
         resolved = facts.resolved.get(to.set, frozenset())
-        return frozenset(dest.routes) | resolved, bool(dest.domains or dest.domain_urls)
+        return frozenset(dest.routes) | resolved, bool(
+            dest.domains or dest.domain_urls or dest.route_urls
+        )
     assert isinstance(to, InlineDest)
     resolved = facts.resolved.get(f"rule{index}", frozenset())
     return frozenset(to.routes) | resolved, bool(to.domains)
