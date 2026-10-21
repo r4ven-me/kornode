@@ -1,4 +1,4 @@
-# Prompt for the next session — P4-07, остаток P4-06, P5-05, `e2e.yml`
+# Prompt for the next session — остаток P4-06, P5-01/P5-05, `e2e.yml`
 
 > **Состояние на 2026-10-21 (пятая сессия).** В `main` влита ветка `redesign/p4-06b-hub-egress` (`95b0b62`, три
 > среза + удаление v1): модель egress хаба (**D-72**), `HubEgressService` (`korctl egress|source`, `/api/egress`,
@@ -13,7 +13,14 @@
 > фронтенд 32 теста + сборка; netlab на hub-VM 69 passed (golden `hub_egress_exit` загружается в ядро). E2E `routed` на
 > четырёх VM после этих изменений (harness переведён на `egress: []`): 6 passed, 7 skipped — как до них.
 >
-> **Не сделано:** P4-07 (раздел Fabric: топология/префиксы/DNS/источники в одном месте), set/domain-выходы через
+> **P4-07 сделан (2026-10-21, D-74, ветка `redesign/p4-07-fabric`, влита в `main`):** `FabricService` (`show`, `set`),
+> `korctl fabric show|set`, `GET/PATCH /api/fabric`, вкладка Fabric в панели (Topology, Fabric settings, Fabric DNS —
+> панель DNS перенесена из Agents), строки parity `fabric.show`/`fabric.settings`. `make lint typecheck test render
+> parity` на Python 3.13 и 3.12 — 1155 passed / 92 skipped; фронтенд 34 теста + сборка. Netlab/E2E не гонялись (ядро не
+> тронуто). Открыто: `POST /api/config/fabric-settings` (ещё задаёт `node.id`) не свёрнут в `FabricService`; префиксы и
+> источники хаба во вкладке Fabric только читаются.
+>
+> **Не сделано:** set/domain-выходы через
 > `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спеки,
 > упорядоченный редактор правил с drag и inline-explain (P5-01, сейчас JSON), URL-источники `sets` на хабе
 > (`route_urls`/`domain_urls` отвергаются как `runtime_unsupported`), README / `docs/architecture.md` /
