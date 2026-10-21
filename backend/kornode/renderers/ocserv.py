@@ -7,24 +7,32 @@ from typing import Any
 from kornode.config.models import AppConfig, GroupPolicyConfig
 from kornode.renderers.base import TemplateRenderer, default_template_dir
 
-_FABRIC_GUARD = """# Fabric guard (D-43): enable-auth = certificate lets any certificate of the
-# hub CA in without a password. Agent certificates carry OU=agents; refuse
-# sessions without a group (OU-less client certificates), agents sessions whose
-# user is not agent-<id>, and enroll sessions whose user is not enroll-*.
-case "$GROUPNAME" in
-  "") exit 1 ;;
-  agents)
-    case "$USERNAME" in
-      agent-[1-9] | agent-[1-9][0-9] | agent-[1-9][0-9][0-9]) ;;
+_FABRIC_GUARD = """# Fabric guard (D-43, D-71). ocserv passes the virtual host in $VHOST. The fabric
+# vhost accepts certificates of the hub CA, so an OU-less client certificate would
+# get a session there: only the groups agents (user agent-<id>, known to the
+# registry) and enroll (user enroll-*) may log in, everything else is refused. The
+# default host serves clients: it must never place a session in a fabric group.
+case "$VHOST" in
+  __FABRIC_VHOST__)
+    case "$GROUPNAME" in
+      agents)
+        case "$USERNAME" in
+          agent-[1-9] | agent-[1-9][0-9] | agent-[1-9][0-9][0-9]) ;;
+          *) exit 1 ;;
+        esac
+        # Second line behind the CRL: only agents the registry knows about (their
+        # config-per-user file exists while the node is active) get in.
+        [ -f __USER_DIR__/"$USERNAME" ] || exit 1 ;;
+      enroll)
+        case "$USERNAME" in
+          enroll-?*) ;;
+          *) exit 1 ;;
+        esac ;;
       *) exit 1 ;;
-    esac
-    # Second line behind the CRL: only agents the registry knows about (their
-    # config-per-user file exists while the node is active) get in.
-    [ -f __USER_DIR__/"$USERNAME" ] || exit 1 ;;
-  enroll)
-    case "$USERNAME" in
-      enroll-?*) ;;
-      *) exit 1 ;;
+    esac ;;
+  *)
+    case "$GROUPNAME" in
+      agents | enroll) exit 1 ;;
     esac ;;
 esac
 
@@ -68,6 +76,7 @@ class OcservConfigRenderer(TemplateRenderer):
             "server_key": server_key,
             "ca_cert": ca_cert,
             "crl": config.cert_path("crl.pem"),
+            "fabric_vhost": _fabric_vhost(config),
             "occtl_socket_file": config.generated_path("occtl.sock"),
             "socket_file": config.system.generated_dir / "ocserv.sock",
         }
@@ -87,7 +96,9 @@ class OcservConfigRenderer(TemplateRenderer):
         user_dir = config.identity.config_per_user_dir or (
             config.system.generated_dir / "config-per-user"
         )
-        guard = _FABRIC_GUARD.replace("__USER_DIR__", shlex.quote(str(user_dir)))
+        guard = _FABRIC_GUARD.replace("__USER_DIR__", shlex.quote(str(user_dir))).replace(
+            "__FABRIC_VHOST__", shlex.quote(config.fabric.server_name)
+        )
         return content.replace(marker, "\n" + guard + "korctl_bin=", 1)
 
     def target_path(self, config: AppConfig) -> Path:
@@ -123,6 +134,19 @@ class OcservConfigRenderer(TemplateRenderer):
         if group.no_udp is not None:
             lines.append(f"no-udp = {_bool_value(group.no_udp)}")
         return "\n".join(lines) + "\n"
+
+
+def _fabric_vhost(config: AppConfig) -> dict[str, Any] | None:
+    if not config.fabric.enabled:
+        return None
+    return {
+        "name": config.fabric.server_name,
+        "server_cert": config.cert_path("fabric.crt"),
+        "server_key": config.cert_path("fabric.key"),
+        # Always the hub CA, also with an external (Let's Encrypt) client certificate.
+        "ca_cert": config.cert_path("ca.crt"),
+        "passwd": config.secret_path("ocpasswd-enroll"),
+    }
 
 
 def _oidc_auth_line(config: AppConfig) -> str:

@@ -44,6 +44,7 @@ class Hub(_Model):
     port: Annotated[StrictInt, Field(ge=1, le=65535)]
     pin: Annotated[StrictStr, Field(pattern=r"^pin-sha256:")]
     control_url: Annotated[StrictStr, Field(pattern=r"^https://")]
+    server_name: StrictStr | None = None
 
 
 class NodeInfo(_Model):

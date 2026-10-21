@@ -21,6 +21,7 @@ class HubConfig(_Model):
     pin: str
     control_url: str
     camouflage: str | None = None
+    server_name: str | None = None
 
 
 class FabricConfig(_Model):

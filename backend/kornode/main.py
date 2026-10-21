@@ -44,6 +44,8 @@ def initialize_runtime(config_path: Path | None = None) -> None:
     certs = CertificateService(config, files=files)
     if not config.cert_path("ca.key").exists() or not config.cert_path("ca.crt").exists():
         certs.init_ca()
+    if config.fabric.enabled:
+        certs.ensure_fabric_certificate()
 
     if config.certificates.mode == "auto":
         server_key_missing = not config.cert_path("server.key").exists()

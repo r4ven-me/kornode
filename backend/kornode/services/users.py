@@ -237,6 +237,9 @@ class UserService:
         self.runner = runner or CommandRunner()
         self.files = files or FileManager()
         self.passwd_file = config.secret_path("ocpasswd")
+        # Enroll accounts live in their own file: the fabric vhost reads it, the
+        # client host never does (S-07, D-71).
+        self.enroll_passwd_file = config.secret_path("ocpasswd-enroll")
 
     def validate_username(self, username: str) -> str:
         if not USERNAME_RE.match(username):
@@ -596,7 +599,7 @@ class UserService:
             raise ValueError(f"enroll username '{username}' is malformed")
         self.files.ensure_dir(self.config.system.secrets_dir, mode=0o700)
         return self.runner.run(
-            self._passwd_argv("-g", ENROLL_GROUP, username),
+            ["ocpasswd", "-c", str(self.enroll_passwd_file), "-g", ENROLL_GROUP, username],
             input_text=f"{password}\n{password}\n",
             timeout=30,
             dry_run=dry_run,
@@ -606,15 +609,16 @@ class UserService:
     def delete_enroll_user(self, username: str) -> bool:
         if not ENROLL_USER_RE.fullmatch(username):
             raise ValueError(f"enroll username '{username}' is malformed")
-        return self._remove_passwd_entry(username)
+        return self._remove_passwd_entry(username, self.enroll_passwd_file)
 
     def delete_user(self, username: str) -> bool:
         self.validate_username(username)
         return self._remove_passwd_entry(username)
 
-    def _remove_passwd_entry(self, username: str) -> bool:
+    def _remove_passwd_entry(self, username: str, path: Path | None = None) -> bool:
+        path = path or self.passwd_file
         with _PASSWD_REWRITE_LOCK:
-            lines = self.files.read_lines(self.passwd_file)
+            lines = self.files.read_lines(path)
             kept = [
                 line
                 for line in lines
@@ -623,7 +627,7 @@ class UserService:
             changed = len(kept) != len(lines)
             if changed:
                 self.files.atomic_write_private_text(
-                    self.passwd_file,
+                    path,
                     "\n".join(kept) + ("\n" if kept else ""),
                 )
         return changed

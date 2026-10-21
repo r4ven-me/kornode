@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from ipaddress import ip_address, ip_network
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.netlab.helpers import tcp_check
@@ -32,8 +33,11 @@ from tests.netlab.kornode_nodes import (
 from tests.netlab.lab import Lab, Namespace
 from tests.netlab.ocserv_peers import LISTENER, Peer, issue_client_cert, read_env
 
+from kornode.tunnels.pin import certificate_file_pin
+
 pytestmark = pytest.mark.netlab
 
+FABRIC_HOST = "fabric.kornode.internal"  # vhost of agents and enrollment (S-07, D-71)
 HUB_FABRIC_ADDR = "10.99.0.1"
 HUB_LAN_ADDR = "172.30.1.1"
 INET_ADDR = "198.51.100.2"
@@ -66,6 +70,7 @@ class RenderedHub:
     hub: Namespace
     root: KornodeRoot
     pin: str
+    fabric_pin: str
     client: Peer
     agent: Peer
     enroll: Peer
@@ -73,6 +78,10 @@ class RenderedHub:
     agent_cert: tuple[Path, Path]
     client_cert: tuple[Path, Path]
     processes: list[subprocess.Popen[bytes]]
+
+    def connect_fabric(self, peer: Peer, **kwargs: Any) -> bool:
+        """Dial the hub the way an agent does: its address, the fabric vhost name as SNI."""
+        return peer.connect(self.fabric_pin, sni=FABRIC_HOST, **kwargs)
 
     def stop(self) -> None:
         for peer in (self.client, self.agent, self.enroll, self.rogue):
@@ -154,7 +163,7 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
     korctl(hub, root.config_path, "config", "render")
     # Enroll users are created by P3-03; until then straight into ocpasswd.
     hub.run(
-        ["ocpasswd", "-c", str(root.secrets_dir / "ocpasswd"), "-g", "enroll", ENROLL_USER],
+        ["ocpasswd", "-c", str(root.secrets_dir / "ocpasswd-enroll"), "-g", "enroll", ENROLL_USER],
         input_text=f"{ENROLL_PASSWORD}\n{ENROLL_PASSWORD}\n",
     )
     korctl(hub, root.config_path, "net", "apply")
@@ -166,12 +175,14 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
     agent_cert = issue_client_cert(hub, *ca, out, f"agent-{AGENT_ID}", unit="agents")
     client_cert = issue_client_cert(hub, *ca, out, CLIENT_USER, unit=None)
     pin = json.loads(korctl(hub, root.config_path, "certificates", "pin").stdout)["pin"]
+    fabric_pin = certificate_file_pin(certs / "fabric.crt").pin
 
     processes: list[subprocess.Popen[bytes]] = []
     handle = RenderedHub(
         hub=hub,
         root=root,
         pin=pin,
+        fabric_pin=fabric_pin,
         client=peers["client"],
         agent=peers["agent"],
         enroll=peers["enroll"],
@@ -239,7 +250,7 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
 def test_rendered_groups_lease_from_their_pools(rendered_hub: RenderedHub) -> None:
     hub = rendered_hub
     assert hub.client.connect(hub.pin, user=CLIENT_USER, password=CLIENT_PASSWORD)
-    assert hub.agent.connect(hub.pin, cert=hub.agent_cert)
+    assert hub.connect_fabric(hub.agent, cert=hub.agent_cert)
 
     client_addr = hub.client.address()
     assert client_addr is not None and ip_address(client_addr) in ip_network(CLIENT_POOL)
@@ -254,14 +265,26 @@ def test_rendered_groups_lease_from_their_pools(rendered_hub: RenderedHub) -> No
 
 
 def test_client_certificate_without_password_is_refused(rendered_hub: RenderedHub) -> None:
-    assert not rendered_hub.rogue.connect(rendered_hub.pin, cert=rendered_hub.client_cert)
+    assert not rendered_hub.connect_fabric(rendered_hub.rogue, cert=rendered_hub.client_cert)
     assert rendered_hub.rogue.address() is None
+
+
+def test_agent_certificate_and_enroll_password_are_refused_on_the_client_host(
+    rendered_hub: RenderedHub,
+) -> None:
+    """D-71, the other direction: agents and enrollment exist only on the fabric vhost."""
+    hub = rendered_hub
+    assert not hub.rogue.connect(hub.pin, cert=hub.agent_cert)
+    assert not hub.rogue.connect(hub.pin, user=ENROLL_USER, password=ENROLL_PASSWORD)
+    assert hub.rogue.address() is None
+    assert not hub.connect_fabric(hub.rogue, user=CLIENT_USER, password=CLIENT_PASSWORD)
+    assert hub.rogue.address() is None
 
 
 def test_enroll_session_reaches_only_the_control_api(rendered_hub: RenderedHub) -> None:
     hub = rendered_hub
-    assert hub.enroll.connect(
-        hub.pin,
+    assert hub.connect_fabric(
+        hub.enroll,
         user=ENROLL_USER,
         password=ENROLL_PASSWORD,
         extra_routes=(f"{HUB_LAN_ADDR}/32", f"{INET_ADDR}/32"),

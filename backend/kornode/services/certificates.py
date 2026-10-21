@@ -251,6 +251,63 @@ class CertificateService:
             template.unlink(missing_ok=True)
         return True
 
+    def ensure_fabric_certificate(self, *, dry_run: bool = False) -> bool:
+        """Server certificate of the fabric virtual host (S-07, D-71), signed by the hub
+        CA with the vhost name as SAN. Agents pin its public key, so an existing key is
+        kept when the certificate is renewed (under 30 days left). True when issued."""
+        crt = self.config.cert_path("fabric.crt")
+        key = self.config.cert_path("fabric.key")
+        name = self.config.fabric.server_name
+        if crt.exists() and key.exists() and not dry_run:
+            parsed = x509.load_pem_x509_certificate(crt.read_bytes())
+            left = parsed.not_valid_after_utc - datetime.now(UTC)
+            if left > timedelta(days=30) and name in _certificate_dns_names(parsed):
+                return False
+        self.files.ensure_dir(self.cert_dir, mode=0o700)
+        template = self._write_template(
+            self._template_path("fabric.tmpl"),
+            "\n".join(
+                [
+                    f"cn = {name}",
+                    "tls_www_server",
+                    "encryption_key",
+                    "signing_key",
+                    f"dns_name = {name}",
+                    "expiration_days = 825",
+                    "",
+                ]
+            ),
+        )
+        try:
+            if not key.exists():
+                self.runner.run(
+                    ["certtool", "--generate-privkey", "--ecc", "--outfile", str(key)],
+                    timeout=60,
+                    dry_run=dry_run,
+                )
+                self._chmod_private_key(key, dry_run=dry_run)
+            self.runner.run(
+                [
+                    "certtool",
+                    "--generate-certificate",
+                    "--load-privkey",
+                    str(key),
+                    "--load-ca-certificate",
+                    str(self.config.cert_path("ca.crt")),
+                    "--load-ca-privkey",
+                    str(self.config.cert_path("ca.key")),
+                    "--template",
+                    str(template),
+                    "--outfile",
+                    str(crt),
+                ],
+                timeout=60,
+                dry_run=dry_run,
+            )
+        finally:
+            template.unlink(missing_ok=True)
+        return True
+
     def create_user_certificate(
         self,
         username: str,
@@ -582,6 +639,14 @@ def _certificate_identities(value: str) -> list[str]:
     except ValueError:
         return [f"dns_name = {value}"]
     return [f"ip_address = {value}"]
+
+
+def _certificate_dns_names(certificate: x509.Certificate) -> list[str]:
+    try:
+        extension = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+    except x509.ExtensionNotFound:
+        return []
+    return extension.value.get_values_for_type(x509.DNSName)
 
 
 def _parse_certificate_info(output: str) -> dict[str, str]:

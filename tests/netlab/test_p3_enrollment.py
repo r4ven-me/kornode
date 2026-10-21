@@ -176,7 +176,7 @@ def _enroll_agent(hub: RenderedHub, node_tmp_dir: Path) -> tuple[Path, Path]:
     doc = _decode(_hub_call(hub, "token", str(NEW_ID)).strip())
     doc_path = node_tmp_dir / "token.json"
     doc_path.write_text(json.dumps(doc), encoding="utf-8")
-    assert hub.enroll.connect(hub.pin, user=doc["user"], password=doc["secret"])
+    assert hub.connect_fabric(hub.enroll, user=doc["user"], password=doc["secret"])
     key, csr = _csr(node_tmp_dir, f"agent-{NEW_ID}")
     request = node_tmp_dir / "enroll-request.json"
     request.write_text(
@@ -212,7 +212,7 @@ def test_enroll_by_csr_then_certificate_joins_agents_group(
 
     # the one-shot enroll user is gone: the same credentials no longer log in
     assert hub.enroll.address() is None
-    assert hub.agent.connect(hub.pin, cert=(crt, key))
+    assert hub.connect_fabric(hub.agent, cert=(crt, key))
     assert hub.agent.address() == f"10.99.0.{NEW_ID}"
     assert hub.agent.pushed_routes() == [FABRIC_CIDR]
     assert tcp_check(hub.agent.ns, HUB_FABRIC_ADDR, CONTROL_PORT)
@@ -223,7 +223,7 @@ def test_agent_polls_its_bundle_over_the_fabric_and_revocation_gives_403(
 ) -> None:
     hub = rendered_hub
     crt, key = _enroll_agent(hub, node_tmp)
-    assert hub.agent.connect(hub.pin, cert=(crt, key))
+    assert hub.connect_fabric(hub.agent, cert=(crt, key))
 
     status, body = _http(hub, hub.agent.ns, "GET", "/agent/v1/poll?since=0", cert=(crt, key))
     assert status == 200, body
@@ -243,7 +243,7 @@ def test_enroll_session_cannot_use_the_agent_api_without_a_certificate(
     rendered_hub: RenderedHub,
 ) -> None:
     hub = rendered_hub
-    assert hub.enroll.connect(hub.pin, user=ENROLL_USER, password=ENROLL_PASSWORD)
+    assert hub.connect_fabric(hub.enroll, user=ENROLL_USER, password=ENROLL_PASSWORD)
 
     status, body = _http(hub, hub.enroll.ns, "GET", "/agent/v1/poll?since=0")
 
@@ -255,14 +255,14 @@ def test_revoked_certificate_cannot_connect_and_live_session_is_cut(
 ) -> None:
     hub = rendered_hub
     crt, key = _enroll_agent(hub, node_tmp)
-    assert hub.agent.connect(hub.pin, cert=(crt, key))
+    assert hub.connect_fabric(hub.agent, cert=(crt, key))
     assert f"agent-{NEW_ID}" in _agent_sessions(hub)
 
     _hub_call(hub, "revoke", str(NEW_ID))
 
     _wait_until(lambda: f"agent-{NEW_ID}" not in _agent_sessions(hub), "session cut", timeout=15)
     hub.agent.stop()
-    assert not hub.agent.connect(hub.pin, cert=(crt, key))
+    assert not hub.connect_fabric(hub.agent, cert=(crt, key))
     assert f"agent-{NEW_ID}" not in _agent_sessions(hub)
 
 
@@ -270,12 +270,12 @@ def test_agent_removed_from_registry_cannot_connect_with_a_live_certificate(
     rendered_hub: RenderedHub,
 ) -> None:
     hub = rendered_hub
-    assert hub.agent.connect(hub.pin, cert=hub.agent_cert)  # registered, active
+    assert hub.connect_fabric(hub.agent, cert=hub.agent_cert)  # registered, active
     hub.agent.stop()
 
     _hub_call(hub, "delete", "3")
 
-    assert not hub.agent.connect(hub.pin, cert=hub.agent_cert)
+    assert not hub.connect_fabric(hub.agent, cert=hub.agent_cert)
 
 
 def test_enroll_session_cannot_spoof_a_source_outside_its_pool(
@@ -319,7 +319,7 @@ def test_enroll_session_cannot_spoof_a_source_outside_its_pool(
                 ["python3", "-c", SPOOFED_SYN, spoofed, host, str(port)], check=False, timeout=15
             )
 
-    assert hub.agent.connect(hub.pin, cert=hub.agent_cert, extra_routes=(f"{INET_ADDR}/32",))
+    assert hub.connect_fabric(hub.agent, cert=hub.agent_cert, extra_routes=(f"{INET_ADDR}/32",))
     send(hub.agent)
     control = counters()
     assert control[0] > 0 and control[1] > 0, control
@@ -328,8 +328,8 @@ def test_enroll_session_cannot_spoof_a_source_outside_its_pool(
     # drop sources without any route).
     hub.hub.run(["nft", "reset", "rules", "table", "ip", "spoofprobe"])
 
-    assert hub.enroll.connect(
-        hub.pin,
+    assert hub.connect_fabric(
+        hub.enroll,
         user="enroll-3-k2f9",
         password="enroll-secret",
         extra_routes=(f"{INET_ADDR}/32", f"{HUB_FABRIC_ADDR}/32"),

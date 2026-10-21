@@ -278,6 +278,7 @@ def _enroll_session(root: Path, token: EnrollToken):  # type: ignore[no-untyped-
         password=token.secret,
         server_cert_pin=token.pin,
         camouflage_secret=token.camouflage,
+        server_name=token.server_name,
     )
     config_path = None
     lines = []

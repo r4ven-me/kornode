@@ -204,6 +204,15 @@ class FabricConfig(StrictModel):
     enroll_pool: str = "10.99.255.240/28"
     reserved: list[str] = Field(default_factory=list)
 
+    @property
+    def server_name(self) -> str:
+        """Name of the ocserv virtual host for agents and enrollment (S-07, D-71).
+
+        Selected by TLS SNI on the same 443/tcp as the client host; agents dial the hub
+        address but present this name.
+        """
+        return f"fabric.{self.domain}"
+
     @field_validator("cidr", "enroll_pool")
     @classmethod
     def validate_cidr(cls, value: str) -> str:
@@ -1449,33 +1458,6 @@ class AppConfig(StrictModel):
             raise ValueError("control.enabled requires fabric.enabled")
         if self.control.signing_key is None:
             self.control.signing_key = self.system.data_dir / "control" / "signing.ed25519"
-        return self
-
-    @model_validator(mode="after")
-    def validate_fabric_auth(self) -> AppConfig:
-        if not self.fabric.enabled:
-            return self
-        if not self.auth.password.enabled:
-            raise ValueError(
-                "fabric.enabled requires auth.password.enabled "
-                "(enroll users are password users, D-43)"
-            )
-        if self.auth.certificate.enabled:
-            raise ValueError(
-                "auth.certificate.enabled cannot be combined with fabric.enabled: "
-                "agents log in with certificates only, which would let client certificates "
-                "in without a password (D-43)"
-            )
-        if self.auth.oidc.enabled:
-            raise ValueError(
-                "auth.oidc.enabled cannot be combined with fabric.enabled: "
-                "ocserv would require it from enroll users too (D-43)"
-            )
-        if self.auth.otp.enabled and self.auth.otp.ocserv_oath_auth:
-            raise ValueError(
-                "auth.otp.ocserv_oath_auth cannot be combined with fabric.enabled: "
-                "ocserv would require it from enroll users too (D-43)"
-            )
         return self
 
     @model_validator(mode="after")

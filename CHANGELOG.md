@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed (S-07 passed, D-71; branch `redesign/p4-s07-vhosts`)
+
+- Agents and enrollment log in on an ocserv virtual host `fabric.<fabric.domain>` (selected by TLS SNI on the same 443/tcp); the client host keeps every `auth.*` method. The D-43 rejection of `auth.certificate`/`auth.oidc`/`ocserv_oath_auth` with `fabric.enabled` is gone.
+- New fabric server certificate `certs/fabric.crt` (hub CA, stable pin), enroll accounts in `ocpasswd-enroll`, connect-script guard keyed on `$VHOST`.
+- Token `sni`, bundle `hubs[].server_name`; the token and bundle `pin` is the fabric certificate pin; the agent dials the hub address under the vhost name (`--resolve`). **Hub and agents upgrade together** (D-71); rebuild the E2E-06 baseline images.
+- Spike test `tests/netlab/test_spike_p4_vhosts.py` (12 scenarios).
+
 ### Changed (plan, D-70)
 
 - No v1 compatibility: legacy routing keys will be deleted outright (no translation, no `korctl config migrate`, no `korctl migrate-to-agent`; ROADMAP P5-02/P5-04 removed). Hub ⇄ agent version compatibility within v2 stays.

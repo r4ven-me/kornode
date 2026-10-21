@@ -32,6 +32,12 @@ def _token(hub: Hub, node_id: int = 3):  # type: ignore[no-untyped-def]
     return dataclasses.replace(token, control_url=f"https://{HOST}:{hub.port}")
 
 
+def test_the_token_carries_the_fabric_vhost_name_into_the_agent_config(hub: Hub) -> None:
+    token = _token(hub)
+
+    assert token.server_name == "fabric.kornode.internal"
+
+
 def test_parse_token_rejects_garbage_and_missing_control_url() -> None:
     with pytest.raises(TokenError):
         parse_token("not-a-token")

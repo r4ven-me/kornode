@@ -22,7 +22,8 @@
           "host": { "type": "string" },
           "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
           "pin": { "type": "string", "pattern": "^pin-sha256:" },
-          "control_url": { "type": "string", "pattern": "^https://" }
+          "control_url": { "type": "string", "pattern": "^https://" },
+          "server_name": { "type": "string", "description": "TLS SNI of the fabric vhost (S-07, D-71); the agent dials `host` but presents this name" }
         }
       }
     },

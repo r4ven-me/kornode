@@ -34,7 +34,7 @@ def test_cli_management_without_web(rendered_hub: RenderedHub) -> None:
     token = created["token"]
     doc = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
     assert doc["user"].startswith("enroll-4-")
-    passwd = hub.root.secrets_dir / "ocpasswd"
+    passwd = hub.root.secrets_dir / "ocpasswd-enroll"  # D-71: the fabric vhost reads its own file
     assert doc["user"] in passwd.read_text()
     assert token not in json.dumps(call("agent", "list"))
     replacement = call("agent", "token", "branch")["token"]

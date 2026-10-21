@@ -48,3 +48,23 @@ def test_password_profile_takes_stdin_and_positional_server() -> None:
 def test_carrier_literal_and_empty() -> None:
     assert resolve_carrier_addresses("203.0.113.5") == ["203.0.113.5"]
     assert resolve_carrier_addresses(None) == []
+
+
+def test_server_name_selects_the_vhost_by_sni_while_dialling_the_address() -> None:
+    """S-07/D-71: the hub is dialled at its address but presented under the fabric vhost name."""
+    spec = _spec(server="192.0.2.7", server_name="fabric.kornode.internal")
+    argv = openconnect_argv(spec)
+    assert "--resolve=fabric.kornode.internal:192.0.2.7" in argv
+    assert argv[-1] == "fabric.kornode.internal:443"
+
+
+def test_server_name_with_camouflage_moves_into_the_config_file() -> None:
+    spec = _spec(server="192.0.2.7", server_name="fabric.kornode.internal", camouflage_secret="s")
+    assert config_lines(spec) == ["server=fabric.kornode.internal:443/?s"]
+    assert "--resolve=fabric.kornode.internal:192.0.2.7" in openconnect_argv(spec)
+
+
+def test_without_server_name_the_argv_is_unchanged() -> None:
+    argv = openconnect_argv(_spec(server="192.0.2.7"))
+    assert not any(item.startswith("--resolve") for item in argv)
+    assert argv[-1] == "192.0.2.7:443"

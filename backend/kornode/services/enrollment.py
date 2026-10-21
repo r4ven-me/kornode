@@ -123,11 +123,12 @@ class EnrollmentService:
                 raise
             for item in old:
                 self._drop_enroll_user_quietly(item.ocserv_user)
-        pin = certificate_file_pin(self.config.cert_path("server.crt")).pin
+        pin = certificate_file_pin(self.config.cert_path("fabric.crt")).pin
         document: dict[str, Any] = {
             "v": 1,
             "hub": self.hub,
             "pin": pin,
+            "sni": self.config.fabric.server_name,
             "id": token_id,
             "user": username,
             "secret": secret,

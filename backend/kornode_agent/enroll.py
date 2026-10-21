@@ -46,6 +46,7 @@ class EnrollToken:
     secret: str = field(repr=False)
     expires: datetime
     camouflage: str | None = field(repr=False)
+    server_name: str | None = None
 
 
 def parse_token(text: str) -> EnrollToken:
@@ -70,6 +71,7 @@ def parse_token(text: str) -> EnrollToken:
             secret=str(doc["secret"]),
             expires=datetime.fromisoformat(str(doc["exp"]).replace("Z", "+00:00")),
             camouflage=str(doc["camouflage"]) if doc.get("camouflage") else None,
+            server_name=str(doc["sni"]) if doc.get("sni") else None,
         )
     except TokenError:
         raise
@@ -188,6 +190,7 @@ async def enroll(
                 pin=token.pin,
                 control_url=token.control_url,
                 camouflage=token.camouflage,
+                server_name=token.server_name,
             ),
             fabric=FabricConfig(),
         ),

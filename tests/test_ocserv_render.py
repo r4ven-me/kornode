@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from kornode.config.loader import load_config
+from kornode.config.models import AppConfig
 from kornode.renderers.ocserv import OcservConfigRenderer
 from kornode.services.config import ConfigService
 
@@ -134,8 +135,8 @@ auth:
     assert "cert-user-oid = 0.9.2342.19200300.100.1.1" in rendered
 
 
-def test_ocserv_render_adds_fabric_certificate_auth(tmp_path: Path) -> None:
-    config = load_config(
+def _fabric_config(tmp_path: Path, **overrides: object) -> AppConfig:
+    return load_config(
         tmp_path / "missing.yaml",
         cli_overrides={
             "system": {
@@ -144,17 +145,66 @@ def test_ocserv_render_adds_fabric_certificate_auth(tmp_path: Path) -> None:
                 "secrets_dir": str(tmp_path / "secrets"),
             },
             "fabric": {"enabled": True},
-            "auth": {"password": {"enabled": True}},
+            **overrides,
         },
         environ={},
     )
 
-    rendered = OcservConfigRenderer().render(config)
 
-    assert f'auth = "plain[passwd={config.secret_path("ocpasswd")}]"' in rendered
-    assert 'enable-auth = "certificate"' in rendered
-    assert "cert-user-oid = 2.5.4.3" in rendered
-    assert "cert-group-oid = 2.5.4.11" in rendered
+def test_ocserv_render_puts_agents_on_a_fabric_vhost(tmp_path: Path) -> None:
+    config = _fabric_config(
+        tmp_path,
+        auth={
+            "password": {"enabled": True},
+            "certificate": {"enabled": True},
+            "oidc": {"enabled": True, "connector": "pam"},
+        },
+    )
+
+    rendered = OcservConfigRenderer().render(config)
+    head, _, vhost = rendered.partition("[vhost:fabric.kornode.internal]")
+
+    # The client host keeps every client login method and none of the fabric ones.
+    assert f'auth = "plain[passwd={config.secret_path("ocpasswd")}]"' in head
+    assert 'auth = "certificate"' in head
+    assert 'auth = "pam[' in head
+    assert "enable-auth" not in head
+    assert "cert-group-oid" not in head
+    # The vhost is the last section: its options end the file.
+    assert vhost
+    assert f'auth = "plain[passwd={config.secret_path("ocpasswd-enroll")}]"' in vhost
+    assert 'enable-auth = "certificate"' in vhost
+    assert "cert-user-oid = 2.5.4.3" in vhost
+    assert "cert-group-oid = 2.5.4.11" in vhost
+    assert f"server-cert = {config.cert_path('fabric.crt')}" in vhost
+    assert f"ca-cert = {config.cert_path('ca.crt')}" in vhost
+    assert "pam[" not in vhost
+    assert "[vhost:" not in vhost
+
+
+def test_ocserv_render_vhost_repeats_udp_port(tmp_path: Path) -> None:
+    """S-07: a vhost without its own udp-port sends no DTLS address (TCP only)."""
+    config = _fabric_config(tmp_path)
+
+    _, _, vhost = OcservConfigRenderer().render(config).partition("[vhost:")
+
+    assert f"udp-port = {config.server.port}" in vhost
+
+
+def test_ocserv_render_without_fabric_has_no_vhost(tmp_path: Path) -> None:
+    config = load_config(
+        tmp_path / "missing.yaml",
+        cli_overrides={
+            "system": {
+                "data_dir": str(tmp_path / "data"),
+                "generated_dir": str(tmp_path / "generated"),
+                "secrets_dir": str(tmp_path / "secrets"),
+            }
+        },
+        environ={},
+    )
+
+    assert "[vhost:" not in OcservConfigRenderer().render(config)
 
 
 def test_connect_script_is_template_without_fabric(tmp_path: Path) -> None:
@@ -177,22 +227,10 @@ def test_connect_script_is_template_without_fabric(tmp_path: Path) -> None:
 
 
 def test_connect_script_fabric_guard(tmp_path: Path) -> None:
-    config = load_config(
-        tmp_path / "missing.yaml",
-        cli_overrides={
-            "system": {
-                "data_dir": str(tmp_path / "data"),
-                "generated_dir": str(tmp_path / "generated"),
-                "secrets_dir": str(tmp_path / "secrets"),
-            },
-            "fabric": {"enabled": True},
-            "auth": {"password": {"enabled": True}},
-        },
-        environ={},
-    )
+    config = _fabric_config(tmp_path, auth={"password": {"enabled": True}})
 
     rendered = OcservConfigRenderer().render_connect_script(config)
-    assert "# Fabric guard (D-43)" in rendered
+    assert "# Fabric guard (D-43, D-71)" in rendered
     assert "hook failures here are deliberately swallowed" in rendered
     assert rendered.index("# Fabric guard") < rendered.index("korctl_bin=")
 
@@ -204,15 +242,24 @@ def test_connect_script_fabric_guard(tmp_path: Path) -> None:
     user_dir = tmp_path / "generated" / "config-per-user"
     user_dir.mkdir(parents=True)
     (user_dir / "agent-3").write_text("explicit-ipv4 = 10.99.0.3\n", encoding="utf-8")
+    fabric = config.fabric.server_name
     cases = [
-        ({"GROUPNAME": ""}, 1),
-        ({"GROUPNAME": "agents", "USERNAME": "agent-3"}, 0),
-        ({"GROUPNAME": "agents", "USERNAME": "agent-4"}, 1),
-        ({"GROUPNAME": "agents", "USERNAME": "alice"}, 1),
-        ({"GROUPNAME": "agents", "USERNAME": "agent-03"}, 1),
-        ({"GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 0),
-        ({"GROUPNAME": "enroll", "USERNAME": "bob"}, 1),
-        ({"GROUPNAME": "clients", "USERNAME": "alice"}, 0),
+        # fabric vhost: only agents and enroll sessions
+        ({"VHOST": fabric, "GROUPNAME": ""}, 1),
+        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "agent-3"}, 0),
+        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "agent-4"}, 1),
+        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "alice"}, 1),
+        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "agent-03"}, 1),
+        ({"VHOST": fabric, "GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 0),
+        ({"VHOST": fabric, "GROUPNAME": "enroll", "USERNAME": "bob"}, 1),
+        ({"VHOST": fabric, "GROUPNAME": "clients", "USERNAME": "alice"}, 1),
+        # client host: any login except a session in a fabric group; a user without
+        # a group (OIDC) is fine there
+        ({"VHOST": "", "GROUPNAME": "clients", "USERNAME": "alice"}, 0),
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "alice"}, 0),
+        ({"GROUPNAME": "", "USERNAME": "alice"}, 0),
+        ({"VHOST": "", "GROUPNAME": "agents", "USERNAME": "agent-3"}, 1),
+        ({"VHOST": "", "GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 1),
     ]
     for env, expected in cases:
         result = subprocess.run(

@@ -158,35 +158,21 @@ def test_explicit_server_network_rejects_enroll_pool_overlap(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
-    ("auth", "message"),
+    "auth",
     [
-        (
-            {"password": {"enabled": False}, "oidc": {"enabled": True}},
-            "fabric.enabled requires auth.password.enabled",
-        ),
-        (
-            {"password": {"enabled": True}, "certificate": {"enabled": True}},
-            "auth.certificate.enabled cannot be combined with fabric.enabled",
-        ),
-        (
-            {"password": {"enabled": True}, "oidc": {"enabled": True}},
-            "auth.oidc.enabled cannot be combined with fabric.enabled",
-        ),
-        (
-            {
-                "password": {"enabled": True},
-                "otp": {"enabled": True, "ocserv_oath_auth": True},
-            },
-            "auth.otp.ocserv_oath_auth cannot be combined with fabric.enabled",
-        ),
+        {"password": {"enabled": False}, "oidc": {"enabled": True}},
+        {"password": {"enabled": True}, "certificate": {"enabled": True}},
+        {"password": {"enabled": True}, "oidc": {"enabled": True}},
+        {"password": {"enabled": True}, "otp": {"enabled": True, "ocserv_oath_auth": True}},
     ],
 )
-def test_fabric_auth_rejects_forbidden_combinations(
-    auth: dict[str, object],
-    message: str,
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        AppConfig.model_validate({"fabric": {"enabled": True}, "auth": auth})
+def test_fabric_accepts_every_client_auth_method(auth: dict[str, object]) -> None:
+    """D-70/D-71: agents log in on their own virtual host, so client login by
+    certificate, OIDC or OTP no longer conflicts with the fabric (was D-43)."""
+    config = AppConfig.model_validate({"fabric": {"enabled": True}, "auth": auth})
+
+    assert config.fabric.enabled is True
+    assert config.fabric.server_name == "fabric.kornode.internal"
 
 
 def test_fabric_auth_accepts_password_only() -> None:

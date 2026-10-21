@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from kornode.tunnels.carrier import resolve_carrier_addresses
+
 
 @dataclass(frozen=True)
 class DialSpec:
@@ -24,6 +26,9 @@ class DialSpec:
     camouflage_secret: str | None = field(default=None, repr=False)
     transport: Literal["tcp", "auto"] = "auto"
     pfs: bool = False
+    # TLS server name (SNI) presented instead of `server`: selects the ocserv virtual
+    # host while `server` stays the address that is dialled (S-07, D-71).
+    server_name: str | None = None
 
 
 def config_lines(spec: DialSpec) -> list[str]:
@@ -35,7 +40,9 @@ def config_lines(spec: DialSpec) -> list[str]:
     """
     lines: list[str] = []
     if spec.camouflage_secret:
-        lines.append(f"server={spec.server}:{spec.port}/?{spec.camouflage_secret}")
+        lines.append(
+            f"server={spec.server_name or spec.server}:{spec.port}/?{spec.camouflage_secret}"
+        )
     if spec.auth_type in {"cert", "p12"} and spec.cert_path and spec.cert_pass:
         lines.append(f"key-password={spec.cert_pass}")
     return lines
@@ -77,8 +84,12 @@ def openconnect_argv(
         argv.extend(["--certificate", str(spec.cert_path)])
         if spec.key_path:
             argv.extend(["--sslkey", str(spec.key_path)])
+    if spec.server_name:
+        addresses = resolve_carrier_addresses(spec.server)
+        if addresses:
+            argv.append(f"--resolve={spec.server_name}:{addresses[0]}")
     if config_path is not None:
         argv.append(f"--config={config_path}")
     if not spec.camouflage_secret:
-        argv.append(f"{spec.server}:{spec.port}")
+        argv.append(f"{spec.server_name or spec.server}:{spec.port}")
     return argv

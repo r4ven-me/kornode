@@ -100,10 +100,10 @@ def specs_for(
         interface = fabric_cfg.interface
         camouflage = validated.secrets.get("/tunnels/fabric/camouflage", camouflage)
         transport = fabric_cfg.transport
-        pins = [(hub.host, hub.port, hub.pin) for hub in bundle.hubs]
+        pins = [(hub.host, hub.port, hub.pin, hub.server_name) for hub in bundle.hubs]
     else:
         transport = fabric.transport
-        pins = [(config.hub.host, config.hub.port, config.hub.pin)]
+        pins = [(config.hub.host, config.hub.port, config.hub.pin, config.hub.server_name)]
     dials = tuple(
         DialSpec(
             server=host,
@@ -118,8 +118,9 @@ def specs_for(
             camouflage_secret=camouflage,
             transport="tcp" if transport == "tcp" else "auto",
             pfs=True,
+            server_name=server_name,
         )
-        for host, port, pin in pins
+        for host, port, pin, server_name in pins
     )
     specs = {"fabric": TunnelSpec("fabric", dials)}
     if validated:

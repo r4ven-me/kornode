@@ -311,6 +311,7 @@ class BundleService:
                     "port": self.config.server.port,
                     "pin": self._pin(),
                     "control_url": self.control_url(),
+                    "server_name": self.config.fabric.server_name,
                 }
             ],
             "node": node_info,
@@ -406,7 +407,7 @@ class BundleService:
     def _pin(self) -> str:
         if self._hub_pin is not None:
             return self._hub_pin
-        return certificate_file_pin(self.config.cert_path("server.crt")).pin
+        return certificate_file_pin(self.config.cert_path("fabric.crt")).pin
 
     def _upstreams(self, registry: Registry, node_id: int) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

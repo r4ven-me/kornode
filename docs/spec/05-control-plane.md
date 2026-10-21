@@ -188,11 +188,12 @@ prefixes report their runtime boundary; access roles/users are delivered since P
    `pending` + token. Panel: "Add agent" dialog, same service.
 2. Token (shown once), base64url of:
    ```json
-   {"v":1,"hub":"vpn.example.com:443","pin":"pin-sha256:…","id":"k2f9a1b0",
+   {"v":1,"hub":"vpn.example.com:443","pin":"pin-sha256:…","sni":"fabric.kornode.internal","id":"k2f9a1b0",
     "user":"enroll-3-k2f9a1b0","secret":"<32 random bytes b64>",
     "control":"https://10.99.0.1:8444","camouflage":"<optional>","exp":"2026-10-11T16:41:00Z"}
    ```
-   `id` is the token id (also the suffix of `user`); a node has one live token,
+   `pin` is the pin of the fabric vhost certificate and `sni` its name (D-71): the agent
+   dials `hub` but presents `sni` (07-fabric). `id` is the token id (also the suffix of `user`); a node has one live token,
    issuing a new one revokes the previous one. Hub stores `sha256(secret)` and
    creates an ocserv user `enroll-3-k2f9a1b0` with the
    same password in group `enroll` (restricted to `10.99.0.1/32` tcp/8444 by

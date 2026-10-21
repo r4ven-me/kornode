@@ -17,20 +17,16 @@ log-level = {{ config.server.debug_level }}
 server-cert = {{ server_cert }}
 server-key = {{ server_key }}
 ca-cert = {{ ca_cert }}
-{% if config.auth.certificate.enabled or config.fabric.enabled %}
+{% if config.auth.certificate.enabled %}
 cert-user-oid = {{ config.server.cert_user_oid }}
 {% endif %}
 {% if config.fabric.enabled %}
-cert-group-oid = 2.5.4.11
 crl = {{ crl }}
 {% endif %}
 
 {% for item in auth_lines %}
 auth = "{{ item }}"
 {% endfor %}
-{% if config.fabric.enabled %}
-enable-auth = "certificate"
-{% endif %}
 {% if config.identity.config_per_user_dir %}
 config-per-user = {{ config.identity.config_per_user_dir }}
 {% endif %}
@@ -116,4 +112,26 @@ camouflage_realm = {{ config.server.camouflage.realm }}
 {% for line in config.advanced.raw_ocserv_options %}
 {{ line }}
 {% endfor %}
+{% endif %}
+{% if fabric_vhost %}
+
+# Agents and enrollment (S-07, D-71): a virtual host selected by TLS SNI on the same
+# port. Everything below belongs to it, so it stays the last section of the file.
+[vhost:{{ fabric_vhost.name }}]
+{% if config.server.udp_enabled %}
+udp-port = {{ config.server.port }}
+{% endif %}
+server-cert = {{ fabric_vhost.server_cert }}
+server-key = {{ fabric_vhost.server_key }}
+ca-cert = {{ fabric_vhost.ca_cert }}
+crl = {{ crl }}
+auth = "plain[passwd={{ fabric_vhost.passwd }}]"
+enable-auth = "certificate"
+cert-user-oid = 2.5.4.3
+cert-group-oid = 2.5.4.11
+{% if config.identity.config_per_user_dir %}
+config-per-user = {{ config.identity.config_per_user_dir }}
+{% endif %}
+config-per-group = {{ config.identity.config_per_group_dir }}
+ipv4-network = {{ config.server.ipv4_network }}
 {% endif %}

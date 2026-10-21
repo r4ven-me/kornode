@@ -28,6 +28,7 @@ from kornode.services.enrollment import (
     EnrollmentService,
     hash_secret,
 )
+from kornode.tunnels.pin import certificate_file_pin
 
 pytestmark = pytest.mark.skipif(shutil.which("certtool") is None, reason="certtool not installed")
 
@@ -47,7 +48,8 @@ class FakeRunner(CommandRunner):
         if argv[0] == "ocpasswd":
             user = argv[-1]
             group = argv[argv.index("-g") + 1] if "-g" in argv else ""
-            with self.passwd.open("a", encoding="utf-8") as handle:
+            target = Path(argv[argv.index("-c") + 1]) if "-c" in argv else self.passwd
+            with target.open("a", encoding="utf-8") as handle:
                 handle.write(f"{user}:{group}:$hash\n")
             return CommandResult(tuple(argv), 0, "", "")
         if argv[0] == "occtl":
@@ -91,12 +93,13 @@ def _config(tmp_path: Path) -> AppConfig:
 class Env:
     def __init__(self, tmp_path: Path) -> None:
         self.config = _config(tmp_path)
-        self.runner = FakeRunner(self.config.secret_path("ocpasswd"))
+        self.runner = FakeRunner(self.config.secret_path("ocpasswd-enroll"))
         self.clock = Clock()
         self.reloads = 0
         certs = CertificateService(self.config, runner=self.runner)
         certs.init_ca()
         certs.create_server_certificate()
+        certs.ensure_fabric_certificate()
         conn = open_registry(self.config.system.data_dir / "registry.db")
         migrate(conn)
         self.registry = Registry(conn)
@@ -119,7 +122,7 @@ class Env:
         return json.loads(base64.urlsafe_b64decode(padded))
 
     def passwd_lines(self) -> list[str]:
-        path = self.config.secret_path("ocpasswd")
+        path = self.config.secret_path("ocpasswd-enroll")
         return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
     def enroll(self, doc: Mapping[str, Any], csr: str | None = None) -> dict[str, Any]:
@@ -163,13 +166,32 @@ def test_issue_token_document_and_enroll_user(env: Env) -> None:
 
     assert doc["v"] == 1
     assert doc["hub"] == "vpn.example.com:443"
-    assert doc["pin"].startswith("pin-sha256:")
+    # The agent pins the fabric vhost certificate and presents its name as SNI (D-71).
+    assert doc["pin"] == certificate_file_pin(env.config.cert_path("fabric.crt")).pin
+    assert doc["pin"] != certificate_file_pin(env.config.cert_path("server.crt")).pin
+    assert doc["sni"] == "fabric.kornode.internal"
     assert doc["user"] == f"enroll-3-{doc['id']}"
     assert doc["exp"] == (env.clock.now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     assert env.passwd_lines() == [f"{doc['user']}:enroll:$hash"]
     stored = env.registry.get_enroll_token(doc["id"])
     assert stored.secret_hash == hash_secret(doc["secret"])
     assert doc["secret"] not in json.dumps(stored.__dict__)
+
+
+def test_fabric_certificate_keeps_its_key_and_pin_when_reissued(env: Env) -> None:
+    crt = env.config.cert_path("fabric.crt")
+    pin = certificate_file_pin(crt).pin
+    parsed = x509.load_pem_x509_certificate(crt.read_bytes())
+
+    assert parsed.extensions.get_extension_for_class(
+        x509.SubjectAlternativeName
+    ).value.get_values_for_type(x509.DNSName) == ["fabric.kornode.internal"]
+    # Valid and named correctly: nothing to do.
+    assert env.service.certificates.ensure_fabric_certificate() is False
+    # A renewal (here: forced by removing the certificate) keeps the key, hence the pin.
+    crt.unlink()
+    assert env.service.certificates.ensure_fabric_certificate() is True
+    assert certificate_file_pin(crt).pin == pin
 
 
 def test_issue_token_replaces_previous_and_requires_pending(env: Env) -> None:
