@@ -144,7 +144,7 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
                 "otp": {"enabled": False},
                 "oidc": {"enabled": False},
             },
-            "routing": {"client_policy": "off", "host_policy": "off"},
+            "egress": [],
         },
     )
     initialize_runtime(hub, root.config_path)

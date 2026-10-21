@@ -2,8 +2,7 @@
 
 Every save endpoint that touches routing or DNS settings goes through here,
 so a change takes effect immediately instead of waiting for a manual Apply
-or the next restart. Before this module, `routing.split.tunnel_dns` changed
-`dns_tunnel_active()` without starting/stopping dnsmasq or reloading ocserv.
+or the next restart.
 
 RUNTIME: this module starts/stops dnsmasq, reloads ocserv, kicks sessions
 and rewrites nftables state. Dry-run is not threaded through the save path.

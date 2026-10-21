@@ -7,11 +7,7 @@ from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
 from kornode.api.routes_config import apply_config_patch
-from kornode.api.routes_routing import ListUrlRefreshRequest
 from kornode.config.models import AppConfig, UpstreamProfileConfig
-from kornode.services.config import ConfigService
-from kornode.services.external_lists import ExternalListFetchResult
-from kornode.services.routing import RoutingService
 from kornode.services.secrets import is_secret_key
 from kornode.services.upstream import UpstreamService
 from kornode.tunnels.pin import fetch_server_pin
@@ -74,33 +70,12 @@ class UpstreamProfileRequest(BaseModel):
     server_cert_pin: str | None = None
     check_host: str | None = None
     camouflage_secret: str | None = None
-    # Route these specific CIDRs/domains through this profile specifically,
-    # regardless of which profile is active/default -- see
-    # RoutingService.list_targets().
-    route_clients_enabled: bool = True
-    routes: list[str] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-    routes_urls: list[str] = Field(default_factory=list)
-    domains_urls: list[str] = Field(default_factory=list)
-    route_host_enabled: bool = False
-    host_routes: list[str] = Field(default_factory=list)
-    host_domains: list[str] = Field(default_factory=list)
-    # Server-pushed host routing (UpstreamProfileConfig.accept_server_routes/
-    # sync_*): the routes/split-DNS the upstream server hands this profile.
-    accept_server_routes: bool = False
-    sync_url: str | None = None
-    sync_interval: int = 60
-    sync_verify_tls: bool = False
     # Per-profile: whether the watchdog should keep this profile dialed at
     # all (UpstreamProfileConfig.enabled). Saving a profile never touches the
     # global upstream.enabled toggle -- that one is only changed through
     # POST /api/upstream/settings, so editing a profile can't take down the
     # tunnels (and with them the panel, when it is only reachable over one).
     enabled: bool = True
-    # Explicit fwmark/table_id offset override (UpstreamProfileConfig.
-    # routing_offset). Omitted from the request -> an existing profile keeps
-    # its saved value; an explicit null clears it back to position-derived.
-    routing_offset: int | None = None
 
 
 @router.get("")
@@ -196,14 +171,12 @@ def save_profile(
         _preserve_unset_secret(data, existing, "camouflage_secret")
         _preserve_unset_file_field(data, existing, "cert_file", "cert_file_base64")
         _preserve_unset_file_field(data, existing, "key_file", "key_file_base64")
-        for field in ("interface", "routing_offset"):
-            if field not in payload.model_fields_set and getattr(existing, field) is not None:
-                data[field] = getattr(existing, field)
+        if "interface" not in payload.model_fields_set and existing.interface is not None:
+            data["interface"] = existing.interface
     profile = UpstreamProfileConfig.model_validate(data)
-    # Edit in place: a profile's tunnel interface and fwmark/table_id offset
-    # are derived from its position in upstream.profiles (see
-    # UpstreamConfig.profile_interface()/profile_routing_offset()), so moving
-    # an edited profile to the end would silently renumber live tunnels.
+    # Edit in place: a profile's tunnel interface is derived from its position in
+    # upstream.profiles (see UpstreamConfig.profile_interface()), so moving an
+    # edited profile to the end would silently renumber live tunnels.
     profiles = [profile if item.name == profile.name else item for item in config.upstream.profiles]
     if existing is None:
         profiles.append(profile)
@@ -212,9 +185,8 @@ def save_profile(
     }
     # Only pick a default profile automatically when there isn't one yet
     # (the very first profile ever saved). Once one is active, saving --
-    # whether creating another profile or editing an existing one to add
-    # its own routes/domains as a named target -- must never silently
-    # switch it; that's what POST /switch is for.
+    # whether creating another profile or editing an existing one -- must never
+    # silently switch it; that's what POST /switch is for.
     if config.upstream.active_profile is None:
         patch["active_profile"] = profile.name
     loaded_config, written = apply_config_patch(request, {"upstream": patch})
@@ -222,116 +194,6 @@ def save_profile(
         "status": "saved",
         "written": written,
         "profiles": [_safe_profile_dump(item) for item in loaded_config.upstream.profiles],
-    }
-
-
-def _profile_or_404(config: AppConfig, name: str) -> UpstreamProfileConfig:
-    profile = next((item for item in config.upstream.profiles if item.name == name), None)
-    if profile is None:
-        raise HTTPException(status_code=404, detail=f"unknown upstream profile: {name}")
-    return profile
-
-
-@router.get("/profiles/{name}/routes-sources/status")
-def profile_routes_sources_status(request: Request, name: str) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    profile = _profile_or_404(config, name)
-    service = RoutingService(config)
-    return {"urls": service.profile_routes_urls_status(profile)}
-
-
-@router.get("/profiles/{name}/domains-sources/status")
-def profile_domains_sources_status(request: Request, name: str) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    profile = _profile_or_404(config, name)
-    service = RoutingService(config)
-    return {"urls": service.profile_domains_urls_status(profile)}
-
-
-def _profile_refresh_response(
-    result: ExternalListFetchResult, *, preview: bool, written: list[str]
-) -> dict[str, object]:
-    return {
-        "status": "previewed" if preview else "refreshed",
-        "url": result.url,
-        "total_lines": result.total_lines,
-        "valid": result.valid,
-        "skipped": result.skipped,
-        "sample": result.sample,
-        "saved": result.saved,
-        "written": written,
-    }
-
-
-@router.post("/profiles/{name}/routes-sources/refresh")
-def refresh_profile_routes_url(
-    request: Request, name: str, payload: ListUrlRefreshRequest
-) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    profile = _profile_or_404(config, name)
-    if payload.url not in profile.routes_urls:
-        raise HTTPException(
-            status_code=400,
-            detail="url is not one of the saved profile routes_urls; save it first",
-        )
-    result = RoutingService(config).refresh_profile_route_url(
-        profile, payload.url, preview=payload.preview
-    )
-    written = (
-        [str(path) for path in ConfigService().write_rendered_files(config)] if result.saved else []
-    )
-    return _profile_refresh_response(result, preview=payload.preview, written=written)
-
-
-@router.post("/profiles/{name}/domains-sources/refresh")
-def refresh_profile_domains_url(
-    request: Request, name: str, payload: ListUrlRefreshRequest
-) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    profile = _profile_or_404(config, name)
-    if payload.url not in profile.domains_urls:
-        raise HTTPException(
-            status_code=400,
-            detail="url is not one of the saved profile domains_urls; save it first",
-        )
-    result = RoutingService(config).refresh_profile_domain_url(
-        profile, payload.url, preview=payload.preview
-    )
-    written = (
-        [str(path) for path in ConfigService().write_rendered_files(config)] if result.saved else []
-    )
-    return _profile_refresh_response(result, preview=payload.preview, written=written)
-
-
-@router.post("/profiles/{name}/sync")
-def sync_profile(request: Request, name: str) -> dict[str, object]:
-    """Pull this profile's routes/split-DNS from its upstream panel now
-    (UpstreamProfileConfig.sync_url) and apply whatever changed. RUNTIME:
-    network, through the profile's own tunnel."""
-    config: AppConfig = request.app.state.config
-    profile = next((item for item in config.upstream.profiles if item.name == name), None)
-    if profile is None:
-        raise HTTPException(status_code=404, detail=f"unknown upstream profile: {name}")
-    if not profile.sync_url:
-        raise HTTPException(status_code=400, detail=f"profile {name!r} has no sync_url")
-    service = UpstreamService(config)
-    synced = service.sync_server_routes(profile)
-    if synced.sync_error:
-        raise HTTPException(status_code=502, detail=f"sync failed: {synced.sync_error}")
-    results = service.apply_server_routing_if_changed()
-    return {
-        "status": "synced",
-        "server_routing": service.server_routing_status(profile),
-        "results": [
-            {
-                "argv": list(result.argv),
-                "returncode": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "dry_run": result.dry_run,
-            }
-            for result in results
-        ],
     }
 
 

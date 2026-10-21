@@ -244,28 +244,6 @@ def test_client_dns_uses_server_dns_when_vpn_server_disabled(tmp_path: Path) -> 
     assert "tunnel-all-dns" not in rendered
 
 
-def test_dns_tunnel_active_when_a_named_upstream_target_has_domains(tmp_path: Path) -> None:
-    config = _config(
-        tmp_path,
-        {
-            "upstream": {
-                "enabled": True,
-                "profiles": [
-                    {
-                        "name": "finance",
-                        "server": "finance.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "domains": ["finance-internal.corp"],
-                    }
-                ],
-            }
-        },
-    )
-
-    assert config.dns_tunnel_active()
-
-
 def test_dns_tunnel_active_when_forward_domains_configured_alone(tmp_path: Path) -> None:
     # forward_upstreams/forward_domains must start dnsmasq on their own --
     # otherwise the forwarding config they describe is silently dead, since
@@ -404,38 +382,6 @@ def test_each_internal_dns_feature_activates_dnsmasq_on_its_own(tmp_path: Path) 
         assert config.dnsmasq_active_reasons() == [flag]
         # No VPN server means no VPN clients to push the resolver to.
         assert config.client_dns_servers() == ["1.1.1.1", "8.8.8.8"]
-
-
-def test_host_profile_domains_do_not_need_dnsmasq(tmp_path: Path) -> None:
-    # A profile's plain host_domains (not server-pushed) are resolved into
-    # their nftables set by DomainResolverService now -- see
-    # tests/test_domain_resolver.py -- so unlike before, this alone no
-    # longer has to keep dnsmasq running.
-    config = _config(
-        tmp_path,
-        {
-            "server": {"enabled": False},
-            "upstream": {
-                "enabled": True,
-                "profiles": [
-                    {
-                        "name": "host-only",
-                        "server": "vpn.example.com",
-                        "auth_type": "password",
-                        "username": "user",
-                        "route_clients_enabled": False,
-                        "route_host_enabled": True,
-                        "host_domains": ["host.corp"],
-                    }
-                ],
-            },
-        },
-    )
-
-    assert config.dnsmasq_active_reasons() == []
-    assert config.client_dns_servers() == ["1.1.1.1", "8.8.8.8"]
-    rendered_paths = [str(item.path) for item in ConfigService().render_files(config)]
-    assert str(config.generated_path("dnsmasq.conf")) not in rendered_paths
 
 
 def test_blocklist_and_local_records_require_their_own_flags(tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ from tests.netlab.helpers import tcp_check
 from tests.netlab.lab import Lab, Namespace
 from tests.netlab.topology import HUB_ADDR, INET_HTTP_ADDR, Topology
 
+from kornode.config.models import profile_slug
 from kornode.net.reconciler import control_request
 from kornode.renderers.base import default_template_dir
 from kornode.services.command import CommandResult
@@ -127,7 +128,7 @@ def start_hub_server(lab: Lab, topology: Topology, tmp: Path) -> HubServerHandle
                 "otp": {"enabled": False},
                 "oidc": {"enabled": False},
             },
-            "routing": {"client_policy": "off", "host_policy": "off"},
+            "egress": [],
         },
     )
     initialize_runtime(topology.hub, root.config_path)
@@ -214,11 +215,21 @@ def connect_node_upstream(
                     }
                 ],
             },
-            "routing": {
-                "client_policy": client_policy,
-                "host_policy": host_policy,
-                "main_interface": "auto",
-            },
+            "routing": {"main_interface": "auto"},
+            # "full" sends that class through the upstream (D-70: explicit egress rules).
+            "egress": [
+                {
+                    "from": [
+                        name
+                        for name, policy in (("clients", client_policy), ("host", host_policy))
+                        if policy == "full"
+                    ],
+                    "to": "any",
+                    "via": f"upstream:{profile_slug(UPSTREAM_PROFILE)}",
+                }
+            ]
+            if "full" in (client_policy, host_policy)
+            else [],
         },
     )
     initialize_runtime(ns, root.config_path)
@@ -302,16 +313,6 @@ def write_kornode_config(
         "identity": {
             "config_per_group_dir": str(generated_dir / "config-per-group"),
             "config_per_user_dir": str(generated_dir / "config-per-user"),
-        },
-        "routing": {
-            "split": {
-                "routes_file": str(generated_dir / "routes.txt"),
-                "domains_file": str(generated_dir / "domains.txt"),
-            },
-            "host_split": {
-                "routes_file": str(generated_dir / "host-routes.txt"),
-                "domains_file": str(generated_dir / "host-domains.txt"),
-            },
         },
         "web": {
             "enabled": False,

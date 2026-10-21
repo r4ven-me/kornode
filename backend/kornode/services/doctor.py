@@ -6,7 +6,6 @@ from typing import Any
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.net import NetService
-from kornode.services.upstream_pushed import PushedRoutingStore
 
 
 class DoctorService:
@@ -73,14 +72,6 @@ class DoctorService:
                 continue  # this node's own VPN pool route, not a conflict with itself
             if network.overlaps(pool):
                 conflicts.append(tokens[0])
-        for profile in self.config.upstream.profiles:
-            for route in PushedRoutingStore(self.config).load(profile).routes:
-                try:
-                    network = ipaddress.ip_network(route, strict=False)
-                except ValueError:
-                    continue
-                if network.overlaps(pool):
-                    conflicts.append(f"{route} (pushed by upstream profile '{profile.name}')")
         if conflicts:
             return CommandResult(
                 argv, 1, "", f"overlaps VPN pool {pool}: {', '.join(conflicts)}", False

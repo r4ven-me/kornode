@@ -499,7 +499,7 @@ class Worker:
                     "long_poll_seconds": 5,
                 },
                 "web": {"enabled": False},
-                "routing": {"client_policy": "off", "host_policy": "off"},
+                "egress": [],
             }
             atomic(config_path, config)
         agent = self.role.startswith("agent-")

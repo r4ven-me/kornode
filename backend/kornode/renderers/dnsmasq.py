@@ -10,7 +10,6 @@ from kornode.renderers.base import TemplateRenderer
 class DnsmasqConfigRenderer(TemplateRenderer):
     def render(self, config: AppConfig) -> str:
         from kornode.services.internal_dns import InternalDnsService
-        from kornode.services.routing import RoutingService
 
         listen = config.internal_dns.listen
         # internal_dns.upstreams is what the resolver itself forwards
@@ -30,29 +29,12 @@ class DnsmasqConfigRenderer(TemplateRenderer):
         )
         forward_upstreams = config.internal_dns.forward_upstreams
         forward_domains = config.internal_dns.forward_domains
-        routing_service = RoutingService(config)
-        # Named per-profile targets' server-pushed domains
-        # (UpstreamProfileConfig.accept_server_routes, target.server_domains):
-        # these are usually internal-only names nothing but the upstream's
-        # own DNS can answer, so they still need a `server=/domain/...`
-        # override here -- unlike every other domain list (routing.split's,
-        # a profile's own plain domains/host_domains, routing.host_split's),
-        # which all resolve through the normal upstream DNS already and
-        # need nothing special from dnsmasq. DomainResolverService
-        # (services/domain_resolver.py) is what feeds all of those into
-        # their nftables *_dynamic sets now, independent of any query
-        # dnsmasq itself ever answers.
-        targets = routing_service.list_targets(default_interface=config.routing.main_interface)
-        named_targets_with_server_domains = [
-            target for target in targets if target.host_enabled and target.server_domains
-        ]
         context: dict[str, Any] = {
             "config": config,
             "upstream_dns": upstream_dns,
             "forward_upstreams": forward_upstreams,
             "forward_domains": forward_domains,
             "forward_domain_names": set(forward_domains),
-            "named_targets_with_server_domains": named_targets_with_server_domains,
             "blocklist_conf": InternalDnsService(config).blocklist_conf_path(),
             "local_records": local_records,
             "fabric_zone": _fabric_zone(config),

@@ -4,7 +4,6 @@ import {
   Plus,
   Power,
   RadioTower,
-  RefreshCw,
   Settings,
   Star,
   Trash2,
@@ -14,12 +13,11 @@ import { LastCommandPanel } from "../../components/CommandOutput";
 import { Table } from "../../components/Table";
 import { ActionButton, IconButton, Pill } from "../../components/ui";
 import { formatDuration } from "../../lib/format";
-import type { CommandResult, ServerRouting, UpstreamProfile, UpstreamStatus } from "../../api";
+import type { CommandResult, UpstreamProfile, UpstreamStatus } from "../../api";
 
 // Config → Upstream → Profiles: the outbound OpenConnect connections
-// themselves (config key upstream.profiles) and the host's own traffic
-// through them. Relaying VPN users' traffic through a profile is the
-// sibling Routing tab, see views/upstream/UpstreamView.tsx.
+// themselves (config key upstream.profiles). Which traffic leaves through a
+// profile is declared as egress, see views/network/HubEgress.tsx.
 export function UpstreamProfilesView({
   status,
   profiles,
@@ -34,8 +32,7 @@ export function UpstreamProfilesView({
   onEditProfile,
   onOpenSettings,
   onConnectProfile,
-  onDisconnectProfile,
-  onSyncProfile
+  onDisconnectProfile
 }: {
   status: UpstreamStatus | null;
   profiles: UpstreamProfile[];
@@ -51,7 +48,6 @@ export function UpstreamProfilesView({
   onOpenSettings: () => void;
   onConnectProfile: (profile: string) => void;
   onDisconnectProfile: (profile: string) => void;
-  onSyncProfile: (profile: string) => void;
 }) {
   const enabled = Boolean(status?.enabled);
   const hasProfile = profiles.length > 0;
@@ -95,14 +91,12 @@ export function UpstreamProfilesView({
         </div>
       </div>
       <p className="muted-line">
-        Outbound OpenConnect connections from this host to other VPN servers. A profile can
-        carry this host&rsquo;s own traffic (host routing, optionally with the routes and
-        split-DNS domains the server pushes) and serve as the default target for the Routing
-        tab&rsquo;s relay.
+        Outbound OpenConnect connections from this host to other VPN servers. Which traffic
+        leaves through a profile is set under Network → Hub egress.
       </p>
       <div data-capability="upstream.list">
       <Table
-        columns={["Name", "Server", "Interface", "Status", "Server lists", "Actions"]}
+        columns={["Name", "Server", "Interface", "Status", "Actions"]}
         empty="No profiles yet"
       >
         {sortedProfiles.map((profile) => {
@@ -151,14 +145,6 @@ export function UpstreamProfilesView({
                     </>
                   )}
                 </div>
-              </td>
-              <td>
-                <ServerRoutingCell
-                  routing={connection?.server_routing}
-                  canSync={Boolean(profile.sync_url) && profileConnected}
-                  busy={busy === `upstream-profile-sync-${profile.name}`}
-                  onSync={() => onSyncProfile(profile.name)}
-                />
               </td>
               <td>
                 <div className="toolbar">
@@ -240,52 +226,5 @@ export function UpstreamProfilesView({
         />
       )}
     </section>
-  );
-}
-
-function ServerRoutingCell({
-  routing,
-  canSync,
-  busy,
-  onSync
-}: {
-  routing: ServerRouting | undefined;
-  canSync: boolean;
-  busy: boolean;
-  onSync: () => void;
-}) {
-  if (!routing?.accept) {
-    return <span className="muted-line">not used</span>;
-  }
-  const received = routing.routes.length + routing.domains.length > 0;
-  return (
-    <div className="upstream-status-cell" data-capability="upstream.server_routes">
-      {!routing.active ? (
-        <Pill kind="warning">host routing off</Pill>
-      ) : received ? (
-        <Pill kind="ok">{routing.source === "sync" ? "synced" : "received"}</Pill>
-      ) : (
-        <Pill kind="muted">nothing received</Pill>
-      )}
-      <span
-        className="muted-line"
-        title={[...routing.routes, ...routing.domains].join("\n") || undefined}
-      >
-        {`${routing.routes.length} routes / ${routing.domains.length} domains`}
-      </span>
-      {routing.sync_error && (
-        <span className="muted-line" title={routing.sync_error}>
-          sync failed
-        </span>
-      )}
-      {routing.warnings.map((warning) => (
-        <span key={warning} className="muted-line" title={warning}>
-          {`⚠ ${warning}`}
-        </span>
-      ))}
-      {canSync && (
-        <IconButton label="Sync server lists now" icon={RefreshCw} busy={busy} onClick={onSync} data-capability="upstream.sync" />
-      )}
-    </div>
   );
 }

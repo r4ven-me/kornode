@@ -480,47 +480,6 @@ capabilities:
     api: "DELETE /api/upstream/profiles/{name}"
     ui: upstream.profile.delete
     exempt: "v1 gap: profile deletion is panel/API-only; no CLI delete command yet."
-  - id: upstream.server_routes
-    service: kornode.services.upstream.UpstreamService.server_routing_status
-    cli: "upstream server-routes"
-    api: null
-    ui: upstream.server_routes
-    exempt: "v1 gap: server-pushed routing status is shown in the panel but has no dedicated API endpoint matching the CLI payload."
-  - id: upstream.sync
-    service: kornode.services.upstream.UpstreamService.sync_server_routes
-    cli: "upstream sync"
-    api: "POST /api/upstream/profiles/{name}/sync"
-    ui: upstream.sync
-  - id: upstream.profile.routes_sources.status
-    service: kornode.services.routing.RoutingService.profile_routes_urls_status
-    cli: null
-    api: "GET /api/upstream/profiles/{name}/routes-sources/status"
-    ui: upstream.profile.routes_sources
-    exempt: "v1 gap: profile routes URL source status is panel/API-only; no CLI status command."
-  - id: upstream.profile.routes_sources.refresh
-    service: kornode.services.routing.RoutingService.refresh_profile_route_url
-    cli: null
-    api: "POST /api/upstream/profiles/{name}/routes-sources/refresh"
-    ui: upstream.profile.routes_sources.refresh
-    exempt: "v1 gap: profile routes URL refresh is panel/API-only; no CLI refresh command."
-  - id: upstream.profile.domains_sources.status
-    service: kornode.services.routing.RoutingService.profile_domains_urls_status
-    cli: null
-    api: "GET /api/upstream/profiles/{name}/domains-sources/status"
-    ui: upstream.profile.domains_sources
-    exempt: "v1 gap: profile domains URL source status is panel/API-only; no CLI status command."
-  - id: upstream.profile.domains_sources.refresh
-    service: kornode.services.routing.RoutingService.refresh_profile_domain_url
-    cli: null
-    api: "POST /api/upstream/profiles/{name}/domains-sources/refresh"
-    ui: upstream.profile.domains_sources.refresh
-    exempt: "v1 gap: profile domains URL refresh is panel/API-only; no CLI refresh command."
-  - id: upstream.hook
-    service: kornode.services.upstream.UpstreamService.record_vpnc_event
-    cli: "upstream hook"
-    api: null
-    ui: null
-    exempt: "Internal vpnc-script entrypoint, not an admin management capability."
   - id: upstream.watch
     service: kornode.services.upstream.UpstreamService.recover
     cli: "upstream watch"
@@ -528,84 +487,12 @@ capabilities:
     ui: null
     exempt: "Supervisor watchdog entrypoint, not an admin management capability."
 
-  - id: routes.list
-    service: kornode.services.routing.RoutingService.list_routes
-    cli: "routes list"
-    api: "GET /api/routing/routes"
-    ui: routes.list
-  - id: routes.add
-    service: kornode.services.routing.RoutingService.add_route
-    cli: "routes add"
-    api: "POST /api/routing/routes"
-    ui: routes.add
-  - id: routes.delete
-    service: kornode.services.routing.RoutingService.delete_route
-    cli: "routes delete"
-    api: "DELETE /api/routing/routes"
-    ui: routes.delete
-  - id: routes.set
-    service: null
-    cli: null
-    api: "PUT /api/routing/routes"
-    ui: routes.set
-    exempt: "v1 gap: bulk route replacement is panel/API-only; CLI has add/delete/list."
-  - id: routes.status
-    service: kornode.services.routing.RoutingService.routes_urls_status
-    cli: null
-    api: "GET /api/routing/routes/status"
-    ui: routes.sources
-    exempt: "v1 gap: route URL source status is panel/API-only; no CLI status command."
-  - id: routes.refresh
-    service: kornode.services.routing.RoutingService.refresh_route_url
-    cli: null
-    api: "POST /api/routing/routes/refresh"
-    ui: routes.sources.refresh
-    exempt: "v1 gap: route URL refresh is panel/API-only; no CLI refresh command."
-  - id: routes.reload
-    service: kornode.services.net.NetService.apply
-    cli: "routes reload"
-    api: "POST /api/routing/reload"
-    ui: null
-    exempt: "route reload is not exposed as a separate panel action; Network apply covers runtime convergence."
-  - id: domains.list
-    service: kornode.services.routing.RoutingService.list_domains
-    cli: "domains list"
-    api: "GET /api/routing/domains"
-    ui: domains.list
-  - id: domains.add
-    service: kornode.services.routing.RoutingService.add_domain
-    cli: "domains add"
-    api: "POST /api/routing/domains"
-    ui: domains.add
-  - id: domains.delete
-    service: kornode.services.routing.RoutingService.delete_domain
-    cli: "domains delete"
-    api: "DELETE /api/routing/domains"
-    ui: domains.delete
-  - id: domains.set
-    service: null
-    cli: null
-    api: "PUT /api/routing/domains"
-    ui: domains.set
-    exempt: "v1 gap: bulk domain replacement is panel/API-only; CLI has add/delete/list."
-  - id: domains.status
-    service: kornode.services.routing.RoutingService.domains_urls_status
-    cli: null
-    api: "GET /api/routing/domains/status"
-    ui: domains.sources
-    exempt: "v1 gap: domain URL source status is panel/API-only; no CLI status command."
-  - id: domains.refresh
-    service: kornode.services.routing.RoutingService.refresh_domain_url
-    cli: null
-    api: "POST /api/routing/domains/refresh"
-    ui: domains.sources.refresh
-    exempt: "v1 gap: domain URL refresh is panel/API-only; no CLI refresh command."
   - id: domains.reload
     service: kornode.services.net.NetService.apply
     cli: "domains reload"
     api: null
     ui: null
-    exempt: "CLI-specific convenience wrapper; API/UI use routes.reload."
+    exempt: "CLI-specific convenience wrapper; API/UI use net.apply."
   - id: domains.resolve
     service: kornode.services.domain_resolver.DomainResolverService.refresh
     cli: "domains resolve"
@@ -618,54 +505,6 @@ capabilities:
     api: null
     ui: null
     exempt: "Supervisor resolver loop entrypoint, not an admin management capability."
-  - id: routing.host_routes.show
-    service: kornode.services.routing.RoutingService.list_host_routes
-    cli: null
-    api: "GET /api/routing/host-routes"
-    ui: host_routes.list
-    exempt: "v1 gap: host route lists are panel/API-only; CLI only manages client split routes."
-  - id: routing.host_routes.set
-    service: kornode.services.routing.RoutingService.set_host_routes
-    cli: null
-    api: "PUT /api/routing/host-routes"
-    ui: host_routes.set
-    exempt: "v1 gap: host route lists are panel/API-only; CLI only manages client split routes."
-  - id: routing.host_routes.status
-    service: kornode.services.routing.RoutingService.host_routes_urls_status
-    cli: null
-    api: "GET /api/routing/host-routes/status"
-    ui: host_routes.sources
-    exempt: "v1 gap: host route URL source status is panel/API-only."
-  - id: routing.host_routes.refresh
-    service: kornode.services.routing.RoutingService.refresh_host_route_url
-    cli: null
-    api: "POST /api/routing/host-routes/refresh"
-    ui: host_routes.sources.refresh
-    exempt: "v1 gap: host route URL refresh is panel/API-only."
-  - id: routing.host_domains.show
-    service: kornode.services.routing.RoutingService.list_host_domains
-    cli: null
-    api: "GET /api/routing/host-domains"
-    ui: host_domains.list
-    exempt: "v1 gap: host domain lists are panel/API-only; CLI only manages client split domains."
-  - id: routing.host_domains.set
-    service: kornode.services.routing.RoutingService.set_host_domains
-    cli: null
-    api: "PUT /api/routing/host-domains"
-    ui: host_domains.set
-    exempt: "v1 gap: host domain lists are panel/API-only; CLI only manages client split domains."
-  - id: routing.host_domains.status
-    service: kornode.services.routing.RoutingService.host_domains_urls_status
-    cli: null
-    api: "GET /api/routing/host-domains/status"
-    ui: host_domains.sources
-    exempt: "v1 gap: host domain URL source status is panel/API-only."
-  - id: routing.host_domains.refresh
-    service: kornode.services.routing.RoutingService.refresh_host_domain_url
-    cli: null
-    api: "POST /api/routing/host-domains/refresh"
-    ui: host_domains.sources.refresh
-    exempt: "v1 gap: host domain URL refresh is panel/API-only."
   - id: routing.settings
     service: null
     cli: null

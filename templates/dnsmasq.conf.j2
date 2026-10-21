@@ -29,16 +29,6 @@ server=/{{ domain }}/{{ dns }}
 {% endfor %}
 {% endfor %}
 
-{% for target in named_targets_with_server_domains %}
-{% for domain in target.server_domains %}
-{% if domain not in forward_domain_names %}
-{% for dns in target.server_dns %}
-server=/{{ domain }}/{{ dns }}
-{% endfor %}
-{% endif %}
-{% endfor %}
-{% endfor %}
-
 {% if fabric_zone %}
 # Fabric zone (D-66): answered from local data only, never forwarded.
 local=/{{ fabric_zone.domain }}/

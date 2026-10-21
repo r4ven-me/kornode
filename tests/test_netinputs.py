@@ -73,7 +73,7 @@ UPSTREAM = {
 
 
 def test_facts_from_runtime(tmp_path: Path) -> None:
-    config = _config(tmp_path, upstream=UPSTREAM, routing={"client_policy": "full"})
+    config = _config(tmp_path, upstream=UPSTREAM)
     carrier = carrier_state_dir(config)
     carrier.mkdir(parents=True)
     (carrier / "main.addrs").write_text("203.0.113.2\n", encoding="utf-8")

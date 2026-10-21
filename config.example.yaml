@@ -164,21 +164,26 @@ upstream:
   profiles: []
 
 routing:
-  # Policy for VPN clients' traffic: off (plain NAT), full (everything via
-  # Upstream) or split (only the routes/domains below).
-  client_policy: full
-  # Same policy for the server host's own traffic, independent of
-  # client_policy. full matches ALL host traffic; prefer split.
-  host_policy: off
   main_interface: auto
-  fwmark: "0x0c01"
-  table_id: 1201
-  nft_prefix: kornode
-  split:
-    routes_file: /var/lib/kornode/routes.txt
-    domains_file: /var/lib/kornode/domains.txt
-    routes: []
-    domains: []
+  host_dns: "off"
+
+# What leaves the hub and where (docs/spec/02-egress-and-sources.md). First match
+# wins; traffic of clients and sources that no rule matches is dropped. Without
+# this key the hub uses one rule: clients -> any via local. `via` is local,
+# fabric, drop, upstream:<profile> or exit:<node>.
+# egress:
+#   - from: [clients]
+#     to: any
+#     via: local
+# Attached access servers (wg-easy, Amnezia) and named destination sets:
+# sources:
+#   - name: wg
+#     interface: wg0
+#     cidr: 10.8.1.0/24
+# sets:
+#   corp:
+#     routes: [10.20.0.0/16]
+#     domains: [corp.example.com]
 
 # The project-owned dnsmasq instance (listen:port below) is mandatory, not
 # opt-in, whenever server.enabled -- VPN clients always use it, no opt-out

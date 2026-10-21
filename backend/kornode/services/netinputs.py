@@ -13,8 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kornode.config.legacy import profile_slug, upstream_exit
-from kornode.config.models import AppConfig, UpstreamProfileConfig
+from kornode.config.models import AppConfig, UpstreamProfileConfig, profile_slug
 from kornode.net.addressing import derive_addresses
 from kornode.net.compile import (
     Compiled,
@@ -33,8 +32,6 @@ from kornode.registry.repository import Registry
 from kornode.services.command import CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.network_stats import NetworkStatsService
-from kornode.services.routing import RoutingService
-from kornode.services.upstream_pushed import PushedRoutingStore
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 
@@ -67,55 +64,6 @@ def selected_profile(config: AppConfig, files: FileManager) -> UpstreamProfileCo
             profile = profiles[name]
             return profile if profile.enabled else None
     return config.upstream.selected_profile()
-
-
-class RoutingLists:
-    """LegacyLists backed by RoutingService: inline config + runtime files +
-    URL caches + (for host lists) what an upstream pushed, exactly the lists
-    v1 rendered into its nft sets."""
-
-    def __init__(self, config: AppConfig, files: FileManager | None = None) -> None:
-        self.routing = RoutingService(config, files)
-        self.pushed = PushedRoutingStore(config, self.routing.files)
-
-    def split_routes(self) -> list[str]:
-        return self.routing.list_routes()
-
-    def split_domains(self) -> list[str]:
-        return self.routing.list_domains()
-
-    def host_split_routes(self) -> list[str]:
-        return self.routing.list_host_routes()
-
-    def host_split_domains(self) -> list[str]:
-        return self.routing.list_host_domains()
-
-    def profile_routes(self, profile: UpstreamProfileConfig) -> list[str]:
-        return self.routing.list_profile_routes(profile)
-
-    def profile_domains(self, profile: UpstreamProfileConfig) -> list[str]:
-        return self.routing.list_profile_domains(profile)
-
-    def profile_host_routes(self, profile: UpstreamProfileConfig) -> list[str]:
-        pushed = self.pushed.effective(profile)
-        return _merge(
-            profile.host_routes,
-            pushed.routes,
-            pushed.dns_host_routes() if pushed.domains else [],
-        )
-
-    def profile_host_domains(self, profile: UpstreamProfileConfig) -> list[str]:
-        return _merge(profile.host_domains, self.pushed.effective(profile).domains)
-
-
-def _merge(*sources: list[str]) -> list[str]:
-    seen: dict[str, None] = {}
-    for source in sources:
-        for item in source:
-            stripped = item.strip()
-            if stripped and not stripped.startswith("#"):
-                seen.setdefault(stripped, None)
-    return list(seen)
 
 
 @dataclass(frozen=True)
@@ -154,7 +102,7 @@ class HubNetInputs:
         if config.upstream.enabled:
             for profile in config.upstream.profiles:
                 interface = config.upstream.profile_interface(profile)
-                tunnels[upstream_exit(profile)] = TunnelFact(
+                tunnels[f"upstream:{profile_slug(profile.name)}"] = TunnelFact(
                     interface=interface,
                     up=links.get(interface, False),
                     carrier=tuple(self._carrier(profile)),

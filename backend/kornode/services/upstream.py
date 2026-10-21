@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import dataclasses
 import fcntl
-import ipaddress
 import json
 import os
 import re
@@ -20,12 +18,6 @@ from kornode.services.command import CommandError, CommandResult, CommandRunner
 from kornode.services.files import FileManager
 from kornode.services.net import NetApplyError, NetService
 from kornode.services.netinputs import active_profile_file, carrier_state_dir, selected_profile
-from kornode.services.upstream_pushed import (
-    PushedRouting,
-    PushedRoutingStore,
-    parse_sync_payload,
-    parse_vpnc_environment,
-)
 from kornode.tunnels import vpnc_script_source
 from kornode.tunnels.argv import DialSpec
 from kornode.tunnels.argv import config_lines as tunnel_config_lines
@@ -74,7 +66,6 @@ class UpstreamService:
         self.runner = runner or CommandRunner()
         self.files = files or FileManager()
         self.net = net or NetService(config, runner=self.runner)
-        self.pushed = PushedRoutingStore(config, self.files)
         self.active_profile_file = active_profile_file(config)
         self.log_file = config.system.log_dir / "upstream.log"
         self._lock_path = config.system.generated_dir / ".upstream.lock"
@@ -157,8 +148,8 @@ class UpstreamService:
     ) -> list[str]:
         """Record the addresses this profile's own carrier connection dials,
         so the reconciler keeps them out of its policy table: without this,
-        host_policy: full can route openconnect's (or the cert-pin probe's)
-        TCP session to the server back into a tunnel, looping or
+        a host rule `via: upstream:<p>` can route openconnect's (or the cert-pin
+        probe's) TCP session to the server back into a tunnel, looping or
         mis-routing the carrier connection (root cause 7).
 
         Resolves `profile.server` fresh every call; a no-longer-current
@@ -208,7 +199,6 @@ class UpstreamService:
                     "remote": remote,
                     "connected_since": connected_since,
                     "connected_for_seconds": connected_for_seconds,
-                    "server_routing": self.server_routing_status(profile),
                 }
             )
             if selected and profile.name == selected.name:
@@ -580,13 +570,6 @@ class UpstreamService:
                     stdout=f"profile '{profile.name}' is already connected",
                     stderr="",
                 )
-            # The applied marker is persisted, unlike kernel/NFT runtime
-            # state.  Remember whether it could suppress the post-connect
-            # restore after a service/container restart.
-            pushed_fingerprint = self.pushed.fingerprint()
-            pushed_was_marked_applied = bool(pushed_fingerprint) and (
-                pushed_fingerprint == self.pushed.applied_fingerprint()
-            )
             # Must happen before any TCP to the server -- including the
             # cert-pin probe below -- and before the reconciler pass right
             # after, which reads the recorded carrier addresses to exempt
@@ -622,11 +605,6 @@ class UpstreamService:
                 # installs the routes via it (active exit and named targets
                 # alike -- the reconciler derives them all).
                 self.net.converge()
-                # The vpnc-script hook has already stored whatever routes/
-                # split-DNS domains the server pushed in this handshake
-                # (openconnect runs it before backgrounding); apply them now
-                # rather than on the watchdog's next tick.
-                self.apply_server_routing_if_changed(force=pushed_was_marked_applied)
             return result
 
     def _verify_backgrounded(self, profile: UpstreamProfileConfig, result: CommandResult) -> None:
@@ -966,195 +944,3 @@ class UpstreamService:
                 return True
             self._append_log("all reconnect attempts failed")
             return False
-
-    # --- server-pushed routing (accept_server_routes / sync_url) ---------
-
-    def profile_for_interface(self, interface: str) -> UpstreamProfileConfig | None:
-        for profile in self.config.upstream.profiles:
-            if self.profile_interface(profile) == interface:
-                return profile
-        return None
-
-    def record_vpnc_event(
-        self, reason: str, environ: dict[str, str] | None = None
-    ) -> UpstreamProfileConfig | None:
-        """Store what the server pushed in a connect/reconnect handshake.
-
-        Called by `korctl upstream hook` from the vpnc-script, i.e. inside
-        openconnect's own connect sequence -- while connect() may still hold
-        the upstream lock in another process. So this only writes the
-        profile's pushed-routing file and takes no lock; applying it is
-        apply_server_routing_if_changed()'s job (connect() right after the
-        dial, or the watchdog's next tick after an internal reconnect).
-        """
-        env = dict(os.environ if environ is None else environ)
-        if reason not in VPNC_CONNECT_REASONS:
-            return None
-        profile = self.profile_for_interface(env.get("TUNDEV", ""))
-        if profile is None:
-            return None
-        self.pushed.save_handshake(profile, parse_vpnc_environment(env))
-        return profile
-
-    def server_routing_status(self, profile: UpstreamProfileConfig) -> dict[str, object]:
-        pushed = self.pushed.load(profile)
-        return {
-            "accept": profile.accept_server_routes,
-            "active": profile.accept_server_routes and profile.route_host_enabled,
-            "routes": pushed.routes,
-            "domains": pushed.domains,
-            "dns": pushed.dns,
-            "source": pushed.source,
-            "version": pushed.version,
-            "updated_at": pushed.updated_at,
-            "synced_at": pushed.synced_at,
-            "sync_error": pushed.sync_error,
-            "warnings": self._server_routing_warnings(profile, pushed),
-        }
-
-    def _server_routing_warnings(
-        self, profile: UpstreamProfileConfig, pushed: PushedRouting
-    ) -> list[str]:
-        warnings: list[str] = []
-        if profile.accept_server_routes and not profile.route_host_enabled:
-            warnings.append(
-                "accept_server_routes has no effect until host routing "
-                "(route_host_enabled) is on for this profile"
-            )
-        # Everything inside server.ipv4_network is exempt from host marking
-        # (nftables output chain) and the internal DNS address sits on the
-        # loopback -- an upstream using the same subnet (both default to
-        # 10.100.1.0/24) would be unreachable through the tunnel.
-        own_network = ipaddress.ip_network(self.config.server.ipv4_network, strict=False)
-        overlapping = [
-            item for item in [*pushed.routes, *pushed.dns] if _overlaps(item, own_network)
-        ]
-        if overlapping:
-            warnings.append(
-                "the upstream pushes addresses inside this server's own "
-                f"server.ipv4_network ({own_network}): {', '.join(overlapping)}; they "
-                "can't be reached through the tunnel -- change server.ipv4_network "
-                "(and internal_dns.listen) to a subnet the upstream doesn't use"
-            )
-        return warnings
-
-    def apply_server_routing_if_changed(self, *, force: bool = False) -> list[CommandResult]:
-        """Converge the reconciler and re-render dnsmasq when any profile's
-        effective server-pushed lists changed since the last apply.
-
-        Cheap when nothing changed (one fingerprint comparison), so the
-        watchdog runs it on every tick.
-        """
-        fingerprint = self.pushed.fingerprint()
-        if not force and fingerprint == self.pushed.applied_fingerprint():
-            return []
-        from kornode.renderers.dnsmasq import DnsmasqConfigRenderer
-        from kornode.services.internal_dns import InternalDnsService
-        from kornode.services.server import ServerService
-
-        with self._locked():
-            # The pushed lists are a reconciler input; only dnsmasq.conf
-            # needs an explicit re-render here (the rest of the generated
-            # config doesn't depend on pushed lists).
-            results: list[CommandResult] = []
-            try:
-                self.net.converge()
-            except NetApplyError as exc:
-                self._append_log(f"applying server-pushed routes failed: {exc}")
-                raise
-            if self.config.dns_tunnel_active():
-                renderer = DnsmasqConfigRenderer()
-                self.files.atomic_write_text(
-                    renderer.target_path(self.config), renderer.render(self.config)
-                )
-                try:
-                    results.append(InternalDnsService(self.config).ensure_listen_address())
-                    results.append(ServerService(self.config).process_action("restart", "dnsmasq"))
-                except Exception as exc:  # noqa: BLE001 - supervisor may be absent
-                    self._append_log(f"could not restart dnsmasq for pushed domains: {exc}")
-            self.pushed.mark_applied(fingerprint)
-            self._append_log(f"applied server-pushed routes/domains ({fingerprint})")
-            return results
-
-    def sync_server_routes(self, profile: UpstreamProfileConfig) -> PushedRouting:
-        """Pull `profile`'s current routes/split-DNS from the upstream panel.
-
-        RUNTIME: network. The request goes out through the profile's own
-        tunnel (curl --interface binds the socket to the device), so it
-        carries the tunnel address the upstream's /api/client/routing uses
-        to identify us. Stores the result; apply_server_routing_if_changed()
-        does the rest.
-        """
-        if not profile.sync_url:
-            raise ValueError(f"profile {profile.name!r} has no sync_url")
-        previous = self.pushed.load(profile)
-        now = int(time.time())
-        argv = [
-            "curl",
-            "--silent",
-            "--show-error",
-            "--fail",
-            "--max-time",
-            str(SYNC_TIMEOUT_SECONDS),
-            "--max-filesize",
-            str(SYNC_MAX_BYTES),
-            "--interface",
-            self.profile_interface(profile),
-            "--user-agent",
-            SYNC_USER_AGENT,
-            "--header",
-            "Accept: application/json",
-        ]
-        if not profile.sync_verify_tls:
-            argv.append("--insecure")
-        argv.append(f"{profile.sync_url}/api/client/routing")
-        result = self.runner.run(argv, timeout=SYNC_TIMEOUT_SECONDS + 5, check=False)
-        try:
-            if not result.ok:
-                raise ValueError(result.stderr.strip() or f"curl exited {result.returncode}")
-            routes, domains, version = parse_sync_payload(json.loads(result.stdout or "null"))
-        except ValueError as exc:
-            failed = dataclasses.replace(previous, synced_at=now, sync_error=str(exc)[:500])
-            self.pushed.save(profile, failed)
-            return failed
-        updated = dataclasses.replace(
-            previous,
-            routes=routes,
-            domains=domains,
-            source="sync",
-            version=version,
-            interface=self.profile_interface(profile),
-            updated_at=now if version != previous.version else previous.updated_at,
-            synced_at=now,
-            sync_error="",
-        )
-        self.pushed.save(profile, updated)
-        return updated
-
-    def refresh_server_routes(self, *, now: float | None = None) -> list[CommandResult]:
-        """Watchdog tick: sync every connected profile whose sync_interval
-        elapsed, then apply whatever changed (handshake or sync)."""
-        current = time.time() if now is None else now
-        for profile in self.config.upstream.profiles:
-            if not (
-                profile.enabled
-                and profile.accept_server_routes
-                and profile.route_host_enabled
-                and profile.sync_url
-            ):
-                continue
-            if not self._profile_connected(profile):
-                continue
-            if current - self.pushed.load(profile).synced_at < profile.sync_interval:
-                continue
-            synced = self.sync_server_routes(profile)
-            if synced.sync_error:
-                self._append_log(f"routing sync for '{profile.name}' failed: {synced.sync_error}")
-        return self.apply_server_routing_if_changed()
-
-
-def _overlaps(item: str, network: ipaddress.IPv4Network | ipaddress.IPv6Network) -> bool:
-    try:
-        return ipaddress.ip_network(item, strict=False).overlaps(network)
-    except (ValueError, TypeError):
-        return False

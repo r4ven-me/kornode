@@ -5,24 +5,11 @@ import pytest
 from kornode.config.models import AppConfig
 
 
-def test_split_mode_requires_listen_ip_inside_vpn_subnet() -> None:
-    with pytest.raises(ValueError, match="internal_dns.listen must be inside"):
-        AppConfig.model_validate(
-            {
-                "routing": {"client_policy": "split"},
-                "internal_dns": {"listen": "192.0.2.1"},
-            }
-        )
-
-
-def test_full_mode_also_requires_listen_ip_inside_vpn_subnet() -> None:
+def test_listen_ip_must_be_inside_the_vpn_subnet() -> None:
     # The built-in resolver is mandatory, not opt-in, whenever the VPN
-    # server is enabled (AppConfig.client_dns_servers()) -- full mode is no
-    # exception, since it still pushes internal_dns.listen to clients.
+    # server is enabled (AppConfig.client_dns_servers()): it is pushed to clients.
     with pytest.raises(ValueError, match="internal_dns.listen must be inside"):
-        AppConfig.model_validate(
-            {"routing": {"client_policy": "full"}, "internal_dns": {"listen": "192.0.2.1"}}
-        )
+        AppConfig.model_validate({"internal_dns": {"listen": "192.0.2.1"}})
 
 
 def test_client_only_deployment_does_not_require_listen_ip_inside_vpn_subnet() -> None:

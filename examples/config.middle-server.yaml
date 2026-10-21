@@ -72,26 +72,25 @@ upstream:
       check_host: 10.11.11.1
 
 routing:
-  mode: split
-  # The middle server's own traffic also follows the split routes/domain
-  # masks (marked in the nftables output hook), so the host reaches the
-  # private networks without connecting to its own ocserv as a client.
-  # host_mode is independent of the client-facing mode above.
-  host_traffic: true
-  host_mode: split
   main_interface: auto
-  fwmark: "0x0c01"
-  table_id: 1201
-  nft_prefix: kornode
-  split:
-    tunnel_dns: true
-    routes_file: /var/lib/kornode/routes.txt
-    domains_file: /var/lib/kornode/domains.txt
+
+# VPN clients and this host's own traffic reach the private networks and domains through
+# the upstream; everything else leaves directly. First match wins; the hub drops traffic
+# of clients that no rule matches, so the last rule is the plain exit.
+sets:
+  private:
     routes:
       - 192.168.25.0/24
       - 10.20.0.0/16
     domains:
       - corp.example.com
+egress:
+  - from: [clients, host]
+    to: {set: private}
+    via: upstream:private-main
+  - from: [clients]
+    to: any
+    via: local
 
 internal_dns:
   listen: 10.10.10.1

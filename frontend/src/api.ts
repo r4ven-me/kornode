@@ -92,19 +92,6 @@ export type UpstreamProfile = {
   key_file?: string | null;
   server_cert_pin?: string | null;
   check_host?: string | null;
-  route_clients_enabled?: boolean;
-  routes?: string[];
-  domains?: string[];
-  routes_urls?: string[];
-  domains_urls?: string[];
-  route_host_enabled?: boolean;
-  host_routes?: string[];
-  host_domains?: string[];
-  accept_server_routes?: boolean;
-  sync_url?: string | null;
-  sync_interval?: number;
-  sync_verify_tls?: boolean;
-  routing_offset?: number | null;
   enabled: boolean;
 };
 
@@ -126,45 +113,7 @@ export type UpstreamProfileDraft = {
   server_cert_pin: string;
   check_host: string;
   camouflage_secret: string;
-  // Route these specific CIDRs/domains through this profile specifically,
-  // regardless of which profile is active/default. Newline/comma-separated
-  // in the form, same convention as GroupPolicyDraft's routes/dns.
-  route_clients_enabled: boolean;
-  routes: string;
-  domains: string;
-  routesUrlsText: string;
-  domainsUrlsText: string;
-  // Same idea, for the HOST's own traffic through this specific profile --
-  // independent toggle and lists.
-  route_host_enabled: boolean;
-  host_routes: string;
-  host_domains: string;
-  // Server-driven host routing: add the routes/split-DNS domains the
-  // upstream server pushes (and, with a sync URL, keeps updating) to the
-  // host lists above.
-  accept_server_routes: boolean;
-  sync_url: string;
-  sync_interval: string;
-  sync_verify_tls: boolean;
-  // Explicit fwmark/table_id offset override; blank derives it from the
-  // profile's position in upstream.profiles.
-  routing_offset: string;
   enabled: boolean;
-};
-
-// What the upstream server pushed to one profile (handshake or sync).
-export type ServerRouting = {
-  accept: boolean;
-  active: boolean;
-  routes: string[];
-  domains: string[];
-  dns: string[];
-  source: string;
-  version: string;
-  updated_at: number;
-  synced_at: number;
-  sync_error: string;
-  warnings: string[];
 };
 
 export type UpstreamConnection = {
@@ -175,7 +124,6 @@ export type UpstreamConnection = {
   remote: string | null;
   connected_since: string | null;
   connected_for_seconds: number | null;
-  server_routing?: ServerRouting;
 };
 
 export type UpstreamStatus = {
@@ -920,197 +868,9 @@ export function kickSession(
   });
 }
 
-export function fetchRoutes(token: string): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/routes", token);
-}
-
-export function setRoutes(token: string, items: string[]): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/routes", token, {
-    method: "PUT",
-    body: body({ items })
-  });
-}
-
-export function fetchDomains(token: string): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/domains", token);
-}
-
-export function setDomains(token: string, items: string[]): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/domains", token, {
-    method: "PUT",
-    body: body({ items })
-  });
-}
-
-export function fetchHostRoutes(token: string): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/host-routes", token);
-}
-
-export function setHostRoutes(token: string, items: string[]): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/host-routes", token, {
-    method: "PUT",
-    body: body({ items })
-  });
-}
-
-export function fetchHostDomains(token: string): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/host-domains", token);
-}
-
-export function setHostDomains(token: string, items: string[]): Promise<string[]> {
-  return requestJson<string[]>("/api/routing/host-domains", token, {
-    method: "PUT",
-    body: body({ items })
-  });
-}
-
-export type RoutingListUrlStatus = {
-  url: string;
-  count: number;
-  meta: {
-    url?: string;
-    fetched_at?: number;
-    valid?: number;
-    skipped?: number;
-  } | null;
-};
-
-export type RoutingListStatus = {
-  urls: RoutingListUrlStatus[];
-};
-
-export type RoutingListRefreshResult = {
-  status: string;
-  url: string;
-  total_lines: number;
-  valid: number;
-  skipped: number;
-  sample: string[];
-  saved: boolean;
-  written: string[];
-};
-
-export function fetchRoutesStatus(token: string): Promise<RoutingListStatus> {
-  return requestJson<RoutingListStatus>("/api/routing/routes/status", token);
-}
-
-export function fetchDomainsStatus(token: string): Promise<RoutingListStatus> {
-  return requestJson<RoutingListStatus>("/api/routing/domains/status", token);
-}
-
-export function refreshRoutesUrl(
-  token: string,
-  url: string,
-  preview: boolean
-): Promise<RoutingListRefreshResult> {
-  return requestJson<RoutingListRefreshResult>("/api/routing/routes/refresh", token, {
-    method: "POST",
-    body: body({ url, preview })
-  });
-}
-
-export function refreshDomainsUrl(
-  token: string,
-  url: string,
-  preview: boolean
-): Promise<RoutingListRefreshResult> {
-  return requestJson<RoutingListRefreshResult>("/api/routing/domains/refresh", token, {
-    method: "POST",
-    body: body({ url, preview })
-  });
-}
-
-export function fetchHostRoutesStatus(token: string): Promise<RoutingListStatus> {
-  return requestJson<RoutingListStatus>("/api/routing/host-routes/status", token);
-}
-
-export function fetchHostDomainsStatus(token: string): Promise<RoutingListStatus> {
-  return requestJson<RoutingListStatus>("/api/routing/host-domains/status", token);
-}
-
-export function refreshHostRoutesUrl(
-  token: string,
-  url: string,
-  preview: boolean
-): Promise<RoutingListRefreshResult> {
-  return requestJson<RoutingListRefreshResult>("/api/routing/host-routes/refresh", token, {
-    method: "POST",
-    body: body({ url, preview })
-  });
-}
-
-export function refreshHostDomainsUrl(
-  token: string,
-  url: string,
-  preview: boolean
-): Promise<RoutingListRefreshResult> {
-  return requestJson<RoutingListRefreshResult>("/api/routing/host-domains/refresh", token, {
-    method: "POST",
-    body: body({ url, preview })
-  });
-}
-
-export function fetchProfileRoutesSourcesStatus(
-  token: string,
-  name: string
-): Promise<RoutingListStatus> {
-  return requestJson<RoutingListStatus>(
-    `/api/upstream/profiles/${encodeURIComponent(name)}/routes-sources/status`,
-    token
-  );
-}
-
-export function fetchProfileDomainsSourcesStatus(
-  token: string,
-  name: string
-): Promise<RoutingListStatus> {
-  return requestJson<RoutingListStatus>(
-    `/api/upstream/profiles/${encodeURIComponent(name)}/domains-sources/status`,
-    token
-  );
-}
-
-export function refreshProfileRoutesUrl(
-  token: string,
-  name: string,
-  url: string,
-  preview: boolean
-): Promise<RoutingListRefreshResult> {
-  return requestJson<RoutingListRefreshResult>(
-    `/api/upstream/profiles/${encodeURIComponent(name)}/routes-sources/refresh`,
-    token,
-    { method: "POST", body: body({ url, preview }) }
-  );
-}
-
-export function refreshProfileDomainsUrl(
-  token: string,
-  name: string,
-  url: string,
-  preview: boolean
-): Promise<RoutingListRefreshResult> {
-  return requestJson<RoutingListRefreshResult>(
-    `/api/upstream/profiles/${encodeURIComponent(name)}/domains-sources/refresh`,
-    token,
-    { method: "POST", body: body({ url, preview }) }
-  );
-}
-
 export function saveRoutingSettings(
   token: string,
-  payload: {
-    client_policy: string;
-    host_policy: string;
-    host_dns: string;
-    main_interface: string;
-    fwmark: string;
-    table_id: number;
-    nft_prefix: string;
-    routes_urls: string[];
-    domains_urls: string[];
-    host_routes_urls: string[];
-    host_domains_urls: string[];
-  }
+  payload: { host_dns?: string; main_interface?: string }
 ): Promise<{ status: string; host_dns?: { mode: string; changed: boolean; detail: string } }> {
   return requestJson<{
     status: string;
@@ -1118,13 +878,6 @@ export function saveRoutingSettings(
   }>("/api/routing/settings", token, {
     method: "POST",
     body: body(payload)
-  });
-}
-
-export function reloadRouting(token: string, dryRun: boolean): Promise<CommandResult[]> {
-  return requestJson<CommandResult[]>("/api/routing/reload", token, {
-    method: "POST",
-    body: dryRunBody(dryRun)
   });
 }
 
@@ -1402,32 +1155,9 @@ export function saveUpstreamProfile(
       cert_pass: payload.cert_pass || null,
       server_cert_pin: payload.server_cert_pin || null,
       check_host: payload.check_host || null,
-      camouflage_secret: payload.camouflage_secret || null,
-      routes: payload.routes.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      domains: payload.domains.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      routes_urls: payload.routesUrlsText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      domains_urls: payload.domainsUrlsText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      host_routes: payload.host_routes.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean),
-      host_domains: payload.host_domains
-        .split(/[\n,]+/)
-        .map((item) => item.trim())
-        .filter(Boolean),
-      sync_url: payload.sync_url.trim() || null,
-      sync_interval: Number(payload.sync_interval) || 60,
-      routing_offset: payload.routing_offset.trim() ? Number(payload.routing_offset) : null
+      camouflage_secret: payload.camouflage_secret || null
     })
   });
-}
-
-export function syncUpstreamProfile(
-  token: string,
-  name: string
-): Promise<{ status: string; server_routing: ServerRouting }> {
-  return requestJson<{ status: string; server_routing: ServerRouting }>(
-    `/api/upstream/profiles/${encodeURIComponent(name)}/sync`,
-    token,
-    { method: "POST" }
-  );
 }
 
 export function setUpstreamProfileEnabled(

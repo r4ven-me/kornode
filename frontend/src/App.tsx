@@ -39,8 +39,7 @@ import { GroupsView } from "./views/groups/GroupsView";
 import { UserConfigDialog } from "./views/groups/UserConfigDialog";
 import { UpstreamProfileDialog } from "./views/upstream/UpstreamProfileDialog";
 import { UpstreamProfilesSettingsDialog } from "./views/upstream/UpstreamProfilesSettingsDialog";
-import { UpstreamRelayDialog } from "./views/upstream/UpstreamRelayDialog";
-import { UpstreamView } from "./views/upstream/UpstreamView";
+import { UpstreamProfilesView } from "./views/upstream/UpstreamProfilesView";
 import { P12Base64Dialog } from "./views/users/P12Base64Dialog";
 import { RevokedCertsDialog } from "./views/users/RevokedCertsDialog";
 import { CertificateContentDialog } from "./views/certificates/CertificateContentDialog";
@@ -349,12 +348,12 @@ export function App() {
 
         {tab === "config" && configSection === "upstream" && (
           <div className="view-stack">
-            <UpstreamView
+            <UpstreamProfilesView
               status={state.upstream}
               profiles={state.upstreamProfiles}
-              profilesBusy={busy}
-              profilesCommandOutput={commandOutputs.upstream ?? null}
-              onClearProfilesCommand={() => clearCommand("upstream")}
+              busy={busy}
+              commandOutput={commandOutputs.upstream ?? null}
+              onClearCommand={() => clearCommand("upstream")}
               onSetEnabled={(enabled) => void upstream.saveSettings(enabled)}
               onSetProfileEnabled={(profile, enabled) =>
                 void upstream.setProfileEnabled(profile, enabled)
@@ -365,43 +364,9 @@ export function App() {
               onEditProfile={upstream.editProfile}
               onConnectProfile={upstream.connectProfile}
               onDisconnectProfile={upstream.disconnectProfile}
-              onSyncProfile={(profile) => void upstream.syncProfile(profile)}
               onOpenSettings={upstream.openSettings}
-              serverEnabled={readBoolean(readRecord(state.config?.server).enabled, true)}
-              routingDraft={routing.routingDraft}
-              routes={state.routes}
-              domains={state.domains}
-              routesStatus={state.routesStatus}
-              domainsStatus={state.domainsStatus}
-              busy={busy}
-              commandOutput={commandOutputs.routing ?? null}
-              onClearCommand={() => clearCommand("routing")}
-              onRoutingDraftChange={routing.setRoutingDraft}
-              onSaveSettings={() => void routing.saveRoutingSettings()}
-              onSaveRoutes={routing.saveRoutes}
-              onSaveDomains={routing.saveDomains}
-              onPreviewRoutesUrl={(url) => routing.refreshRoutesUrl(url, true)}
-              onRefreshRoutesUrl={(url) => routing.refreshRoutesUrl(url, false)}
-              onPreviewDomainsUrl={(url) => routing.refreshDomainsUrl(url, true)}
-              onRefreshDomainsUrl={(url) => routing.refreshDomainsUrl(url, false)}
-              onEditRelay={upstream.editRelay}
             />
           </div>
-        )}
-        {upstream.relayDraft && (
-          <UpstreamRelayDialog
-            draft={upstream.relayDraft}
-            busy={busy}
-            routesStatus={upstream.relayRoutesStatus}
-            domainsStatus={upstream.relayDomainsStatus}
-            onDraftChange={upstream.setRelayDraft}
-            onClose={upstream.closeRelay}
-            onSave={(event) => void upstream.saveRelay(event)}
-            onPreviewRoutesUrl={upstream.previewRelayRoutesUrl}
-            onRefreshRoutesUrl={upstream.refreshRelayRoutesUrl}
-            onPreviewDomainsUrl={upstream.previewRelayDomainsUrl}
-            onRefreshDomainsUrl={upstream.refreshRelayDomainsUrl}
-          />
         )}
         {upstream.profileModalOpen && (
           <UpstreamProfileDialog
@@ -409,11 +374,6 @@ export function App() {
             draft={upstream.upstreamDraft}
             isEdit={upstream.editingProfile}
             busy={busy}
-            serverRouting={
-              state.upstream?.connections.find(
-                (connection) => connection.profile === upstream.upstreamDraft.name
-              )?.server_routing
-            }
             onDraftChange={upstream.setUpstreamDraft}
             onClose={upstream.closeProfileDialog}
             onSave={upstream.saveProfile}
@@ -430,11 +390,6 @@ export function App() {
             connectOnBoot={upstream.connectOnBoot}
             checkHost={upstream.checkHost}
             hasActiveProfile={Boolean(state.upstream?.active_profile)}
-            upstreamEnabled={Boolean(state.upstream?.enabled)}
-            hostRoutes={state.hostRoutes}
-            hostDomains={state.hostDomains}
-            hostRoutesStatus={state.hostRoutesStatus}
-            hostDomainsStatus={state.hostDomainsStatus}
             routingDraft={routing.routingDraft}
             busy={busy}
             onInterfaceChange={upstream.setUpstreamInterface}
@@ -445,12 +400,6 @@ export function App() {
             onConnectOnBootChange={upstream.setConnectOnBoot}
             onCheckHostChange={upstream.setCheckHost}
             onRoutingDraftChange={routing.setRoutingDraft}
-            onSaveHostRoutes={routing.saveHostRoutes}
-            onSaveHostDomains={routing.saveHostDomains}
-            onPreviewHostRoutesUrl={(url) => routing.refreshHostRoutesUrl(url, true)}
-            onRefreshHostRoutesUrl={(url) => routing.refreshHostRoutesUrl(url, false)}
-            onPreviewHostDomainsUrl={(url) => routing.refreshHostDomainsUrl(url, true)}
-            onRefreshHostDomainsUrl={(url) => routing.refreshHostDomainsUrl(url, false)}
             onClose={upstream.closeSettings}
             onSave={upstream.submitSettings}
           />

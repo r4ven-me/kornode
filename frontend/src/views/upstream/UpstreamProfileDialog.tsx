@@ -1,15 +1,14 @@
-import { ChevronDown, ChevronUp, Fingerprint, Save, X } from "lucide-react";
+import { Fingerprint, Save, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { CertSourceField, type CertSourceMode } from "../../components/CertSourceField";
 import { SettingsTabs } from "../../components/SettingsTabs";
-import { ActionButton, IconButton, Pill } from "../../components/ui";
-import type { ServerRouting, UpstreamProfileDraft } from "../../api";
+import { ActionButton, IconButton } from "../../components/ui";
+import type { UpstreamProfileDraft } from "../../api";
 
 export function UpstreamProfileDialog({
   draft,
   isEdit,
   busy,
-  serverRouting,
   onDraftChange,
   onClose,
   onSave,
@@ -22,10 +21,6 @@ export function UpstreamProfileDialog({
   // (disabling the Name field below) after the first character typed.
   isEdit: boolean;
   busy: string | null;
-  // What the upstream server has actually pushed to this profile so far
-  // (handshake and/or sync_url) -- undefined for a brand-new/unsaved
-  // profile, or one with no connection history yet.
-  serverRouting?: ServerRouting;
   onDraftChange: (value: UpstreamProfileDraft) => void;
   onClose: () => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
@@ -102,7 +97,7 @@ export function UpstreamProfileDialog({
                 <label
                   title={
                     draft.kind === "external_interface"
-                      ? "Device already brought up outside kornode (e.g. an externally-managed WireGuard interface). kornode never creates, brings up, or tears this down -- only applies routing on top of it."
+                      ? "Device already brought up outside kornode (e.g. an externally-managed WireGuard interface). kornode never creates, brings up, or tears this down."
                       : "Tunnel device for this profile's own connection; each profile needs its own so several can stay connected at once. Leave empty for an auto-assigned name."
                   }
                 >
@@ -112,19 +107,6 @@ export function UpstreamProfileDialog({
                     onChange={(event) => onDraftChange({ ...draft, interface: event.target.value })}
                     placeholder={draft.kind === "external_interface" ? "wg0" : "auto"}
                     required={draft.kind === "external_interface"}
-                  />
-                </label>
-                <label title="fwmark/table id offset for this profile's own host/relay routes, added to the routing fwmark/table id. Leave empty to derive it from the profile's position in the list; each profile needs a distinct value.">
-                  <span>Routing offset</span>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={draft.routing_offset}
-                    onChange={(event) =>
-                      onDraftChange({ ...draft, routing_offset: event.target.value })
-                    }
-                    placeholder="auto"
                   />
                 </label>
                 {draft.kind === "openconnect" && (
@@ -304,111 +286,6 @@ export function UpstreamProfileDialog({
                 )}
               </div>
             </details>
-
-            <details className="settings-details">
-              <summary>Host traffic &amp; sync</summary>
-              <div className="settings-details-body">
-                <label
-                  className="switch"
-                  title="Route this host's own traffic (not VPN users) through this profile, on its own subnet/domain lists -- independent of the relay lists in the Routing tab and of the default host routing in Upstream profiles settings."
-                >
-                  <input
-                    checked={draft.route_host_enabled}
-                    onChange={(event) =>
-                      onDraftChange({ ...draft, route_host_enabled: event.target.checked })
-                    }
-                    type="checkbox"
-                  />
-                  <span>Route this host&rsquo;s traffic through this profile</span>
-                </label>
-                {draft.route_host_enabled && (
-                  <div className="settings-grid">
-                    <label>
-                      <span>Host routes</span>
-                      <textarea
-                        value={draft.host_routes}
-                        onChange={(event) =>
-                          onDraftChange({ ...draft, host_routes: event.target.value })
-                        }
-                        rows={3}
-                      />
-                    </label>
-                    <label>
-                      <span>Host domains</span>
-                      <textarea
-                        value={draft.host_domains}
-                        onChange={(event) =>
-                          onDraftChange({ ...draft, host_domains: event.target.value })
-                        }
-                        rows={3}
-                      />
-                    </label>
-                  </div>
-                )}
-                {draft.route_host_enabled && draft.kind === "openconnect" && (
-                  <label
-                    className="switch"
-                    title="Also route whatever the server pushes to this account: its route = lines (CISCO_SPLIT_INC) and split-dns = domains (CISCO_SPLIT_DNS), set per user/group in that server's panel. Pushed domains resolve through the server's own DNS, so point this host's resolver at the built-in dnsmasq (Upstream profiles settings → Host traffic → Host DNS)."
-                  >
-                    <input
-                      checked={draft.accept_server_routes}
-                      onChange={(event) =>
-                        onDraftChange({ ...draft, accept_server_routes: event.target.checked })
-                      }
-                      type="checkbox"
-                    />
-                    <span>Use routes and domains pushed by the server</span>
-                  </label>
-                )}
-                {draft.route_host_enabled &&
-                  draft.kind === "openconnect" &&
-                  draft.accept_server_routes && (
-                    <div className="settings-grid">
-                      <label title="Optional: that server's Korvus panel address reachable through this tunnel, e.g. https://10.100.1.1:8443. Server-side changes then apply without reconnecting. Empty: lists are refreshed on (re)connect only.">
-                        <span>Sync URL</span>
-                        <input
-                          value={draft.sync_url}
-                          onChange={(event) =>
-                            onDraftChange({ ...draft, sync_url: event.target.value })
-                          }
-                          placeholder="https://10.100.1.1:8443"
-                        />
-                      </label>
-                      <label>
-                        <span>Sync interval (s)</span>
-                        <input
-                          type="number"
-                          min={10}
-                          value={draft.sync_interval}
-                          disabled={!draft.sync_url.trim()}
-                          onChange={(event) =>
-                            onDraftChange({ ...draft, sync_interval: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label
-                        className="switch"
-                        title="Verify the panel's TLS certificate against the system CA store. Off by default: the request already travels inside this profile's authenticated tunnel, and panels usually run on their own self-signed certificate."
-                      >
-                        <input
-                          checked={draft.sync_verify_tls}
-                          disabled={!draft.sync_url.trim()}
-                          onChange={(event) =>
-                            onDraftChange({ ...draft, sync_verify_tls: event.target.checked })
-                          }
-                          type="checkbox"
-                        />
-                        <span>Verify panel TLS</span>
-                      </label>
-                    </div>
-                  )}
-                {draft.route_host_enabled &&
-                  draft.kind === "openconnect" &&
-                  draft.accept_server_routes &&
-                  isEdit &&
-                  serverRouting && <PushedRoutingSummary routing={serverRouting} />}
-              </div>
-            </details>
           </SettingsTabs>
           </div>
 
@@ -451,79 +328,6 @@ export function UpstreamProfileDialog({
           </div>
         </form>
       </section>
-    </div>
-  );
-}
-
-function PushedRoutingSummary({ routing }: { routing: ServerRouting }) {
-  const received = routing.routes.length + routing.domains.length + routing.dns.length > 0;
-  return (
-    <div className="field-label field-full-width" data-capability="upstream.server_routes">
-      <span>Pushed by the server</span>
-      <div>
-        {!routing.active ? (
-          <Pill kind="warning">host routing off</Pill>
-        ) : received ? (
-          <Pill kind="ok">{routing.source === "sync" ? "synced" : "received"}</Pill>
-        ) : (
-          <Pill kind="muted">nothing received</Pill>
-        )}
-      </div>
-      {routing.routes.length > 0 && <PushedList title="Routes" items={routing.routes} />}
-      {routing.domains.length > 0 && <PushedList title="Domains" items={routing.domains} />}
-      {routing.dns.length > 0 && <PushedList title="Split-DNS servers" items={routing.dns} />}
-      {routing.sync_error && (
-        <p className="muted-line" title={routing.sync_error}>{`Sync failed: ${routing.sync_error}`}</p>
-      )}
-      {routing.warnings.map((warning) => (
-        <p key={warning} className="muted-line">{`⚠ ${warning}`}</p>
-      ))}
-      {routing.synced_at > 0 && (
-        <p className="muted-line">
-          {`Last synced ${new Date(routing.synced_at * 1000).toLocaleString()}`}
-        </p>
-      )}
-    </div>
-  );
-}
-
-// Initial preview before the admin asks for more; a hard ceiling on top of
-// that so even "Show all" can't ever try to mount hundreds of thousands of
-// list items at once (a pushed list this large is plausible -- a big
-// corporate domain blocklist/allowlist pushed as split-DNS, say).
-const PUSHED_LIST_PREVIEW_COUNT = 20;
-const PUSHED_LIST_HARD_CAP = 2000;
-
-function PushedList({ title, items }: { title: string; items: string[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? items.slice(0, PUSHED_LIST_HARD_CAP) : items.slice(0, PUSHED_LIST_PREVIEW_COUNT);
-  const hiddenByCap = items.length - visible.length;
-  return (
-    <div className="pushed-list-group">
-      <span className="muted-line">{`${title} (${items.length})`}</span>
-      <div className="pushed-list">
-        <ul>
-          {visible.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </div>
-      {items.length > PUSHED_LIST_PREVIEW_COUNT && (
-        <ActionButton
-          label={
-            expanded
-              ? "Show less"
-              : `Show all ${items.length}${
-                  items.length > PUSHED_LIST_HARD_CAP ? ` (capped at ${PUSHED_LIST_HARD_CAP})` : ""
-                }`
-          }
-          icon={expanded ? ChevronUp : ChevronDown}
-          onClick={() => setExpanded((value) => !value)}
-        />
-      )}
-      {expanded && hiddenByCap > 0 && (
-        <span className="muted-line">{`${hiddenByCap} more not shown`}</span>
-      )}
     </div>
   );
 }

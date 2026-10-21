@@ -1,34 +1,27 @@
 import { type FormEvent, useEffect, useState } from "react";
 import {
-  type RoutingListRefreshResult,
-  type RoutingListStatus,
   type UpstreamProfile,
   type UpstreamProfileDraft,
   connectUpstreamProfile,
   deleteUpstreamProfile,
   disconnectUpstreamProfile,
-  fetchProfileDomainsSourcesStatus,
-  fetchProfileRoutesSourcesStatus,
   fetchUpstreamProfiles,
   fetchUpstreamServerPin,
   fetchUpstreamStatus,
-  refreshProfileDomainsUrl,
-  refreshProfileRoutesUrl,
   saveUpstreamProfile,
   saveUpstreamSettings,
   setUpstreamProfileEnabled,
-  switchUpstream,
-  syncUpstreamProfile
+  switchUpstream
 } from "../../api";
 import { confirmAction } from "../../lib/async";
-import { syntheticCommand, urlRefreshSample } from "../../lib/commands";
+import { syntheticCommand } from "../../lib/commands";
 import { readBoolean, readNumber, readRecord } from "../../lib/read";
 import type { PanelCore } from "../core";
 import { emptyUpstreamProfileDraft, upstreamProfileToDraft } from "../state";
 import type { ConfigSection, Tab } from "../types";
 
 // `saveRoutingSettings` comes from useRouting(): the Upstream settings dialog
-// also holds the server-side routing controls and saves them together.
+// also holds host DNS / main interface and saves them together.
 export function useUpstream(
   core: PanelCore,
   tab: Tab,
@@ -52,11 +45,6 @@ export function useUpstream(
   const [profileDialogKey, setProfileDialogKey] = useState(0);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
-  // Routing tab: one profile's own relay lists (route_clients_enabled/
-  // routes/domains), edited separately from the Profiles tab's edit dialog.
-  const [relayDraft, setRelayDraft] = useState<UpstreamProfileDraft | null>(null);
-  const [relayRoutesStatus, setRelayRoutesStatus] = useState<RoutingListStatus | null>(null);
-  const [relayDomainsStatus, setRelayDomainsStatus] = useState<RoutingListStatus | null>(null);
   const [upstreamInterface, setUpstreamInterface] = useState("oc-middle0");
   const [checkInterval, setCheckInterval] = useState(5);
   const [checkThreshold, setCheckThreshold] = useState(3);
@@ -263,93 +251,6 @@ export function useUpstream(
     }
   };
 
-  const syncProfile = async (name: string) => {
-    const result = await runAction(
-      `upstream-profile-sync-${name}`,
-      `Server lists of ${name} synced`,
-      (token) => syncUpstreamProfile(token, name)
-    );
-    if (result !== null) {
-      const routing = result.server_routing;
-      recordCommand(
-        "upstream",
-        syntheticCommand(
-          ["korctl", "upstream", "sync", name],
-          `${routing.routes.length} routes, ${routing.domains.length} split-DNS domains` +
-            (routing.version ? ` (version ${routing.version})` : "")
-        )
-      );
-    }
-  };
-
-  const editRelay = (profile: UpstreamProfile) => {
-    setRelayDraft(upstreamProfileToDraft(profile));
-    setRelayRoutesStatus(null);
-    setRelayDomainsStatus(null);
-    if (authToken) {
-      void fetchProfileRoutesSourcesStatus(authToken, profile.name)
-        .then(setRelayRoutesStatus)
-        .catch(() => setRelayRoutesStatus(null));
-      void fetchProfileDomainsSourcesStatus(authToken, profile.name)
-        .then(setRelayDomainsStatus)
-        .catch(() => setRelayDomainsStatus(null));
-    }
-  };
-
-  const refreshRelayUrl = async (
-    kind: "routes" | "domains",
-    url: string,
-    preview: boolean
-  ) => {
-    if (!relayDraft) return;
-    const name = relayDraft.name;
-    const refresh = kind === "routes" ? refreshProfileRoutesUrl : refreshProfileDomainsUrl;
-    const fetchStatus =
-      kind === "routes" ? fetchProfileRoutesSourcesStatus : fetchProfileDomainsSourcesStatus;
-    const setStatus = kind === "routes" ? setRelayRoutesStatus : setRelayDomainsStatus;
-    const result: RoutingListRefreshResult | null = await runAction(
-      `relay-${kind}-${preview ? "preview" : "refresh"}-${url}`,
-      preview ? `Relay ${kind} URL validated` : `Relay ${kind} list downloaded and applied`,
-      (token) => refresh(token, name, url, preview),
-      { reload: false }
-    );
-    if (result !== null) {
-      recordCommand(
-        "upstream",
-        syntheticCommand(
-          ["korctl", "upstream", "profile", name, `${kind}-refresh`, "--url", url],
-          [
-            `url: ${result.url}`,
-            `valid: ${result.valid}`,
-            `skipped: ${result.skipped}`,
-            urlRefreshSample(result)
-          ].join("\n")
-        )
-      );
-      if (authToken) {
-        void fetchStatus(authToken, name).then(setStatus).catch(() => undefined);
-      }
-    }
-  };
-
-  const saveRelay = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!relayDraft) {
-      return;
-    }
-    const draft = relayDraft;
-    const result = await runAction("upstream-relay", `Relay lists of ${draft.name} saved`, (token) =>
-      saveUpstreamProfile(token, draft)
-    );
-    if (result !== null) {
-      recordCommand(
-        "upstream",
-        syntheticCommand(["korctl", "upstream", "profile", draft.name], "relay lists saved")
-      );
-      setRelayDraft(null);
-    }
-  };
-
   const openSettings = () => {
     setCheckHost(activeProfile()?.check_host ?? "");
     setSettingsModalOpen(true);
@@ -397,22 +298,6 @@ export function useUpstream(
     disconnectProfile,
     openSettings,
     submitSettings,
-    fetchDraftServerPin,
-    syncProfile,
-    relayDraft,
-    setRelayDraft,
-    relayRoutesStatus,
-    relayDomainsStatus,
-    editRelay,
-    saveRelay,
-    previewRelayRoutesUrl: (url: string) => void refreshRelayUrl("routes", url, true),
-    refreshRelayRoutesUrl: (url: string) => void refreshRelayUrl("routes", url, false),
-    previewRelayDomainsUrl: (url: string) => void refreshRelayUrl("domains", url, true),
-    refreshRelayDomainsUrl: (url: string) => void refreshRelayUrl("domains", url, false),
-    closeRelay: () => {
-      setRelayDraft(null);
-      setRelayRoutesStatus(null);
-      setRelayDomainsStatus(null);
-    }
+    fetchDraftServerPin
   };
 }

@@ -187,34 +187,40 @@ upstream:
     # the same routing/nftables/split-DNS automation on top of it that it
     # applies to an openconnect profile's own tunnel. `interface` is
     # required here (kornode can't invent a name for a device it doesn't
-    # own), and server/auth_type/accept_server_routes/sync_url don't apply.
+    # own), and server/auth_type don't apply.
     - name: site-b-wireguard
       kind: external_interface
       interface: wg0
-      route_host_enabled: true
-      host_routes:
-        - 10.30.0.0/16
-      host_domains:
-        - site-b.example.com
 
 routing:
-  mode: split # full | split
-  host_traffic: false
-  host_mode: full # full | split -- independent of the client-facing mode above
   main_interface: auto
-  fwmark: "0x0c01"
-  table_id: 1201
-  nft_prefix: kornode
-  split:
-    tunnel_dns: true
-    routes_file: /var/lib/kornode/routes.txt
-    domains_file: /var/lib/kornode/domains.txt
+
+# Destination sets and egress rules (docs/spec/02-egress-and-sources.md): first match wins,
+# traffic of clients and sources that no rule matches is dropped. `via` is local, fabric,
+# drop, upstream:<profile> or exit:<node>.
+sets:
+  private:
     routes:
       - 192.168.25.0/24
       - 10.20.0.0/16
     domains:
       - example.com
       - corp.example.com
+  site-b:
+    routes:
+      - 10.30.0.0/16
+    domains:
+      - site-b.example.com
+egress:
+  - from: [host]
+    to: {set: site-b}
+    via: upstream:site-b-wireguard
+  - from: [clients]
+    to: {set: private}
+    via: upstream:private-main
+  - from: [clients]
+    to: any
+    via: local
 
 internal_dns:
   resolver_enabled: true

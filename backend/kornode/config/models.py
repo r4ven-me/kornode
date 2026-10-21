@@ -36,45 +36,6 @@ BLOCKLIST_DOMAIN_RE = re.compile(
 
 _LOGGER = logging.getLogger(__name__)
 
-# Keys replaced by routing.client_policy / routing.host_policy; see
-# RoutingConfig.migrate_legacy_policy_keys.
-_LEGACY_ROUTING_KEYS = ("mode", "client_traffic", "host_mode", "host_traffic")
-
-
-def _is_truthy(value: object) -> bool:
-    # YAML 1.1 and parse_env_value() turn "off"/"no" into False, but a string
-    # may still arrive from an env override. Treat those spellings as off.
-    if isinstance(value, str):
-        return value.strip().lower() not in ("", "0", "false", "no", "off")
-    return bool(value)
-
-
-def _drop_removed_static_files(data: Any, label: str) -> Any:
-    """routes_files/domains_files -- admin-maintained external files kornode
-    just read, on top of the inline list/URLs/managed runtime file -- are
-    removed: a fourth source alongside three others doing the same job was
-    exactly the kind of knob proliferation this config is trying to cut
-    down on. No automatic migration: unlike the legacy keys above, their
-    actual content lives in files outside the config entirely, so moving
-    it into the inline list or the managed runtime file is left to the
-    admin, by hand.
-    """
-    if not isinstance(data, dict):
-        return data
-    present = [key for key in ("routes_files", "domains_files") if key in data]
-    if not present:
-        return data
-    data = dict(data)
-    paths = [str(path) for key in present for path in data.pop(key)]
-    _LOGGER.warning(
-        "%s: routes_files/domains_files are removed and were ignored (%s); move "
-        "their content into the inline list or the managed file by hand",
-        label,
-        ", ".join(paths) if paths else "no paths were configured",
-    )
-    return data
-
-
 def _default_hub_rule() -> Rule:
     return Rule.model_validate({"id": "default", "from": ["clients"], "to": "any", "via": "local"})
 
@@ -172,28 +133,17 @@ def _validate_interface_name(value: str) -> str:
     return value
 
 
-RESERVED_ROUTING_TABLE_IDS = frozenset({253, 254, 255})
+_MAX_SLUG = 22  # "upstream:" + slug stays within the 31 characters of an exit name
 
 
-def _validate_routing_table_id(value: int, *, field_name: str) -> int:
-    if value in RESERVED_ROUTING_TABLE_IDS:
-        raise ValueError(
-            f"{field_name} must not be one of the kernel-reserved routing "
-            f"table IDs {sorted(RESERVED_ROUTING_TABLE_IDS)} "
-            "(default/main/local) -- using one would corrupt the host's own "
-            "routing table"
-        )
-    return value
-
-
-def profile_safe_name(name: str) -> str:
-    """Normalize an upstream profile name into an nftables-safe identifier
-    for set names (e.g. "My-VPN" -> "my_vpn"). Shared with
-    RoutingService.list_targets() so the uniqueness check in
-    UpstreamConfig.validate_profiles() below stays in sync with what actually
-    gets rendered -- two profiles colliding on their normalized name would
-    otherwise make the whole nft ruleset load fail."""
-    return re.sub(r"[^a-z0-9_]", "_", name.lower())
+def profile_slug(name: str) -> str:
+    """Identifier of an upstream profile in `via: upstream:<slug>` and in nftables names
+    ("My-VPN" -> "my_vpn"; a leading non-letter gets a `p` prefix, since exit names start
+    with a letter). UpstreamConfig.validate_profiles keeps slugs unique."""
+    slug = re.sub(r"[^a-z0-9_]", "_", name.lower())
+    if not re.match(r"[a-z]", slug):
+        slug = f"p{slug}"
+    return slug[:_MAX_SLUG]
 
 
 class NodeConfig(StrictModel):
@@ -486,12 +436,6 @@ class AuthConfig(StrictModel):
 
 
 class UpstreamProfileConfig(StrictModel):
-    @model_validator(mode="before")
-    @classmethod
-    def drop_legacy_static_files(cls, data: Any) -> Any:
-        label = data.get("name", "?") if isinstance(data, dict) else "?"
-        return _drop_removed_static_files(data, f"upstream.profiles[{label!r}]")
-
     name: str
     # "openconnect" (default): kornode dials out itself and owns the whole
     # connect/disconnect/reconnect lifecycle, as every profile has always
@@ -533,56 +477,6 @@ class UpstreamProfileConfig(StrictModel):
     # part of the port number itself. Optional -- most upstreams don't use
     # camouflage.
     camouflage_secret: str | None = None
-    # Route these specific CIDRs/domains through THIS profile specifically,
-    # regardless of which profile is active/default. Distinct from
-    # routing.split.routes/domains, which target whichever profile is
-    # currently active. Gets its own fwmark/table/kill-switch, auto-derived
-    # -- see RoutingService.list_targets(). Only applied to CLIENT
-    # (VPN-subnet-forwarded) traffic when route_clients_enabled is set --
-    # default True so upgrading configs that already populated these lists
-    # keep working unchanged.
-    route_clients_enabled: bool = True
-    routes: list[str] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-    routes_urls: list[str] = Field(default_factory=list)
-    domains_urls: list[str] = Field(default_factory=list)
-    # Same idea as routes/domains above, but for the HOST's own traffic
-    # routed through this specific profile -- independent toggle and lists,
-    # since an admin may want a profile to carry client traffic, host
-    # traffic, or both, on entirely different route/domain sets. New in this
-    # release, so no compatibility default needed: off until explicitly
-    # enabled.
-    route_host_enabled: bool = False
-    host_routes: list[str] = Field(default_factory=list)
-    host_domains: list[str] = Field(default_factory=list)
-    # Server-driven host routing (the former korclient): take the routes
-    # (`route =`, CISCO_SPLIT_INC) and split-DNS domains (`split-dns =`,
-    # CISCO_SPLIT_DNS) the upstream server pushes in the connect handshake
-    # and add them to this profile's host routing on top of host_routes/
-    # host_domains. Pushed domains resolve through the upstream's own DNS
-    # (INTERNAL_IP4_DNS), itself routed through this tunnel. Only has an
-    # effect together with route_host_enabled. See services/upstream_pushed.py.
-    accept_server_routes: bool = False
-    # Mid-session refresh of those pushed lists: poll the upstream kornode
-    # panel's GET /api/client/routing through this profile's own tunnel
-    # (curl --interface), so edits made on the server apply without a
-    # reconnect. The endpoint identifies the caller by its VPN address, so
-    # point this at the panel address reachable inside the tunnel, e.g.
-    # https://10.100.1.1:8443. Unset -> handshake lists only.
-    sync_url: str | None = None
-    sync_interval: int = Field(default=60, ge=10)
-    # The request already travels inside this profile's authenticated
-    # tunnel, and an upstream panel usually runs on its own self-signed
-    # certificate, so TLS verification of the panel is opt-in.
-    sync_verify_tls: bool = False
-    # Explicit override for the fwmark/table_id offset this profile's named
-    # routing target uses (see RoutingService.list_targets()). Unset ->
-    # derived from this profile's fixed position in upstream.profiles, the
-    # same "explicit wins, otherwise stable by list position" pattern as
-    # `interface` above -- deriving it from a count of *other* profiles that
-    # currently have routes/domains would silently reassign this profile's
-    # live fwmark/table whenever an unrelated profile's routes/domains change.
-    routing_offset: int | None = Field(default=None, ge=1)
 
     @field_validator("name")
     @classmethod
@@ -597,54 +491,12 @@ class UpstreamProfileConfig(StrictModel):
             raise ValueError("upstream.profiles[].name must be a short identifier")
         return value
 
-    @field_validator("routes")
-    @classmethod
-    def validate_routes(cls, value: list[str]) -> list[str]:
-        return [_validate_cidr(item) for item in value]
-
-    @field_validator("domains")
-    @classmethod
-    def validate_domains(cls, value: list[str]) -> list[str]:
-        return [_validate_domain(item) for item in value]
-
-    @field_validator("routes_urls")
-    @classmethod
-    def validate_routes_urls(cls, value: list[str]) -> list[str]:
-        return _validate_http_url_list(value, field_name="upstream.profiles[].routes_urls")
-
-    @field_validator("domains_urls")
-    @classmethod
-    def validate_domains_urls(cls, value: list[str]) -> list[str]:
-        return _validate_http_url_list(value, field_name="upstream.profiles[].domains_urls")
-
-    @field_validator("host_routes")
-    @classmethod
-    def validate_host_routes(cls, value: list[str]) -> list[str]:
-        return [_validate_cidr(item) for item in value]
-
-    @field_validator("host_domains")
-    @classmethod
-    def validate_host_domains(cls, value: list[str]) -> list[str]:
-        return [_validate_domain(item) for item in value]
-
     @field_validator("check_host")
     @classmethod
     def validate_check_host(cls, value: str | None) -> str | None:
         if value is None or value == "":
             return None
         return _validate_ip(value)
-
-    @field_validator("sync_url")
-    @classmethod
-    def validate_sync_url(cls, value: str | None) -> str | None:
-        if value is None or value.strip() == "":
-            return None
-        candidate = value.strip().rstrip("/")
-        if not candidate.startswith(("https://", "http://")):
-            raise ValueError("upstream.profiles[].sync_url must be an HTTP(S) URL")
-        if any(char.isspace() for char in candidate):
-            raise ValueError("upstream.profiles[].sync_url must not contain whitespace")
-        return candidate
 
     @field_validator("interface")
     @classmethod
@@ -689,24 +541,15 @@ class UpstreamProfileConfig(StrictModel):
                 raise ValueError(
                     f"upstream profile {self.name!r}: set key_file or key_file_base64, not both"
                 )
-        else:
+        elif not self.interface:
             # external_interface: kornode can't invent a device name for an
             # interface it doesn't own, so unlike the openconnect case
             # (UpstreamConfig.profile_interface() derives oc-middle0/
             # oc-up<N> when unset) this must be given explicitly.
-            if not self.interface:
-                raise ValueError(
-                    f"upstream profile {self.name!r}: kind='external_interface' requires "
-                    "'interface' (the pre-existing device kornode should route through)"
-                )
-            # No vpnc-script handshake and no kornode panel on the other end
-            # of a plain externally-managed interface, so there's nothing
-            # for these to poll/parse.
-            if self.accept_server_routes or self.sync_url:
-                raise ValueError(
-                    f"upstream profile {self.name!r}: accept_server_routes/sync_url require "
-                    "kind='openconnect'"
-                )
+            raise ValueError(
+                f"upstream profile {self.name!r}: kind='external_interface' requires "
+                "'interface' (the pre-existing device kornode should route through)"
+            )
         return self
 
 
@@ -752,26 +595,14 @@ class UpstreamConfig(StrictModel):
                 "upstream profiles must use distinct interfaces so their "
                 "connections can be up simultaneously"
             )
-        # The nftables set name for a profile's named routing target is its
-        # name normalized to [a-z0-9_] (see RoutingService.list_targets());
-        # two distinct names colliding after normalization (e.g. "My-VPN" and
-        # "my_vpn") would render two identically-named nft sets and break the
-        # whole ruleset load.
-        safe_names = [profile_safe_name(profile.name) for profile in self.profiles]
+        # `via: upstream:<slug>` names a profile by its slug (profile_slug()); two
+        # names colliding after normalization (e.g. "My-VPN" and "my_vpn") would be
+        # one exit.
+        safe_names = [profile_slug(profile.name) for profile in self.profiles]
         if len(safe_names) != len(set(safe_names)):
             raise ValueError(
                 "upstream profile names must remain distinct once normalized to "
                 "a-z0-9_ for their nftables set names"
-            )
-        # Each profile's fwmark/table_id offset (explicit routing_offset, or
-        # derived from list position -- see profile_routing_offset()) must be
-        # unique so two profiles' named routing targets never share a
-        # fwmark/table.
-        offsets = [self.profile_routing_offset(profile) for profile in self.profiles]
-        if len(offsets) != len(set(offsets)):
-            raise ValueError(
-                "upstream profiles must use distinct routing_offset values "
-                "(or leave it unset so it's derived from list position)"
             )
         return self
 
@@ -809,149 +640,15 @@ class UpstreamConfig(StrictModel):
                 return self.interface if index == 0 else f"oc-up{index}"
         return self.interface
 
-    def profile_routing_offset(self, profile: UpstreamProfileConfig) -> int:
-        """fwmark/table_id offset for this profile's own named routing
-        target, added to routing.fwmark/table_id (see
-        RoutingService.list_targets()).
-
-        Explicit profile.routing_offset wins. Without it, derived from this
-        profile's fixed 1-based position in upstream.profiles -- the same
-        "explicit override, otherwise stable by list position" pattern as
-        profile_interface() above. Deriving it instead from a count of only
-        the *other* profiles that currently have routes/domains assigned
-        would silently reassign this profile's live fwmark/table whenever an
-        unrelated profile's routes/domains change.
-        """
-        if profile.routing_offset is not None:
-            return profile.routing_offset
-        for index, candidate in enumerate(self.profiles):
-            if candidate.name == profile.name:
-                return index + 1
-        return 1
-
-
-class RoutingSplitConfig(StrictModel):
-    @model_validator(mode="before")
-    @classmethod
-    def drop_legacy_tunnel_dns(cls, data: Any) -> Any:
-        # tunnel_dns used to gate whether split-mode domains were resolved
-        # through the built-in resolver at all. The resolver is mandatory
-        # now whenever the VPN server is enabled, so there is nothing left
-        # for this flag to gate -- domains below are always resolved when
-        # routing.client_policy is "split".
-        if isinstance(data, dict) and "tunnel_dns" in data:
-            data = dict(data)
-            data.pop("tunnel_dns")
-            _LOGGER.warning(
-                "routing.split.tunnel_dns no longer has an effect and was ignored; "
-                "split-mode domains are resolved whenever routing.client_policy is 'split'"
-            )
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
-    def drop_legacy_static_files(cls, data: Any) -> Any:
-        return _drop_removed_static_files(data, "routing.split")
-
-    routes_file: Path = Path("/var/lib/kornode/routes.txt")
-    domains_file: Path = Path("/var/lib/kornode/domains.txt")
-    routes: list[str] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-    # External sources -- same shape as internal_dns's blocklist_urls:
-    # kornode fetches and caches these, merged in alongside the inline
-    # `routes`/`domains` lists above and the separate runtime-editable
-    # routes_file/domains_file (which `korctl routes/domains add/delete`
-    # manage). See RoutingService.list_routes()/list_domains().
-    routes_urls: list[str] = Field(default_factory=list)
-    domains_urls: list[str] = Field(default_factory=list)
-
-    @field_validator("routes")
-    @classmethod
-    def validate_routes(cls, value: list[str]) -> list[str]:
-        # A single host is just a /32 (or /128) CIDR, so routes already
-        # covers individual IPs -- no need for a separate "ips" list.
-        return [_validate_cidr(item) for item in value]
-
-    @field_validator("domains")
-    @classmethod
-    def validate_domains(cls, value: list[str]) -> list[str]:
-        return [_validate_domain(item) for item in value]
-
-    @field_validator("routes_urls")
-    @classmethod
-    def validate_routes_urls(cls, value: list[str]) -> list[str]:
-        return _validate_http_url_list(value, field_name="routing.split.routes_urls")
-
-    @field_validator("domains_urls")
-    @classmethod
-    def validate_domains_urls(cls, value: list[str]) -> list[str]:
-        return _validate_http_url_list(value, field_name="routing.split.domains_urls")
-
-
-class HostSplitConfig(StrictModel):
-    """Same shape as RoutingSplitConfig's routes/domains lists (inline,
-    runtime-editable file, URLs), but for the HOST's own traffic under
-    routing.host_policy: split -- deliberately a separate list from
-    routing.split's, not shared, since an admin may want the host to
-    follow entirely different routes/domains than clients do. No internal
-    DNS listen/port fields here: those are about clients picking this
-    server as their DNS, which has no host equivalent -- host domains are
-    just resolved via whatever DNS the host itself already uses (see
-    RoutingService.list_host_domains()).
-    """
-
-    @model_validator(mode="before")
-    @classmethod
-    def drop_legacy_static_files(cls, data: Any) -> Any:
-        return _drop_removed_static_files(data, "routing.host_split")
-
-    routes_file: Path = Path("/var/lib/kornode/host-routes.txt")
-    domains_file: Path = Path("/var/lib/kornode/host-domains.txt")
-    routes: list[str] = Field(default_factory=list)
-    domains: list[str] = Field(default_factory=list)
-    routes_urls: list[str] = Field(default_factory=list)
-    domains_urls: list[str] = Field(default_factory=list)
-
-    @field_validator("routes")
-    @classmethod
-    def validate_routes(cls, value: list[str]) -> list[str]:
-        return [_validate_cidr(item) for item in value]
-
-    @field_validator("domains")
-    @classmethod
-    def validate_domains(cls, value: list[str]) -> list[str]:
-        return [_validate_domain(item) for item in value]
-
-    @field_validator("routes_urls")
-    @classmethod
-    def validate_routes_urls(cls, value: list[str]) -> list[str]:
-        return _validate_http_url_list(value, field_name="routing.host_split.routes_urls")
-
-    @field_validator("domains_urls")
-    @classmethod
-    def validate_domains_urls(cls, value: list[str]) -> list[str]:
-        return _validate_http_url_list(value, field_name="routing.host_split.domains_urls")
-
 
 class RoutingConfig(StrictModel):
-    # Policy for a connected client's traffic that no profile claims via its
-    # own route_clients_enabled. "off" leaves clients on plain host NAT even
-    # with Upstream enabled (explicit per-profile targeting still works);
-    # "full" sends everything through Upstream; "split" sends only the
-    # configured routes/domains. Default "full" keeps upgraded deployments
-    # routing clients as before.
-    client_policy: Literal["off", "full", "split"] = "full"
-    # Same policy for the server host's own traffic, marked in the nftables
-    # output hook so the host follows Upstream without connecting to its own
-    # ocserv. Independent of client_policy. Default "off": host traffic is
-    # opt-in.
-    host_policy: Literal["off", "full", "split"] = "off"
-    # Point the HOST's own resolver at the built-in dnsmasq -- NOT needed
-    # for domain-based host routing itself any more (DomainResolverService
-    # pre-resolves those independently of this), only so the host's own
-    # lookups can resolve a profile's server-pushed internal-only names and
-    # get the blocklist/local-records effect too (see services/host_dns.py).
-    # Needs network_mode: host plus a mount of the host file/directory:
+    """Host-level settings only. What leaves where is the top-level `egress`/`sources`/`sets`
+    (docs/spec/02-egress-and-sources.md); the old client_policy/host_policy/split keys are
+    gone (D-70) and rejected as unknown."""
+
+    # Point the HOST's own resolver at the built-in dnsmasq so the host's own lookups
+    # get the blocklist/local-records effect (see services/host_dns.py). Needs
+    # network_mode: host plus a mount of the host file/directory:
     #   resolv_conf -- /etc/resolv.conf:/host/etc/resolv.conf, rewritten in
     #                  place and restored when kornode stops;
     #   resolved    -- /etc/systemd/resolved.conf.d:/host/resolved.conf.d, a
@@ -960,48 +657,13 @@ class RoutingConfig(StrictModel):
     # the host never ends up pointed at a resolver that isn't there.
     host_dns: Literal["off", "resolv_conf", "resolved"] = "off"
     main_interface: str = "auto"
-    fwmark: str = "0x0c01"
-    table_id: int = Field(default=1201, ge=1)
-    nft_prefix: str = "kornode"
-    split: RoutingSplitConfig = Field(default_factory=RoutingSplitConfig)
-    host_split: HostSplitConfig = Field(default_factory=HostSplitConfig)
 
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_policy_keys(cls, data: Any) -> Any:
-        # Pre-policy configs used mode/client_traffic and host_mode/host_traffic.
-        # Map them onto client_policy/host_policy. If the new key is already
-        # present (e.g. written by the panel after an upgrade), it wins and the
-        # legacy key is just dropped.
-        if not isinstance(data, dict):
-            return data
-        legacy_keys = [key for key in _LEGACY_ROUTING_KEYS if key in data]
-        if not legacy_keys:
-            return data
-        migrated = dict(data)
-        if "client_policy" not in migrated:
-            client_on = _is_truthy(migrated.get("client_traffic", True))
-            migrated["client_policy"] = migrated.get("mode", "full") if client_on else "off"
-        if "host_policy" not in migrated:
-            host_on = _is_truthy(migrated.get("host_traffic", False))
-            migrated["host_policy"] = migrated.get("host_mode", "full") if host_on else "off"
-        for key in legacy_keys:
-            migrated.pop(key)
-        _LOGGER.warning(
-            "routing: migrated legacy keys %s to client_policy/host_policy; "
-            "update config.yaml to the new names",
-            ", ".join(legacy_keys),
-        )
-        return migrated
-
-    @field_validator("host_dns", "client_policy", "host_policy", mode="before")
+    @field_validator("host_dns", mode="before")
     @classmethod
     def validate_literal_off(cls, value: object) -> object:
         # "off" is a YAML/env boolean word: YAML 1.1 and parse_env_value()
         # both turn it into False before this model sees it. Map it back so
-        # `host_policy: off`/KORNODE_ROUTING__HOST_POLICY=off (and the same
-        # for client_policy/host_dns) mean the literal string "off", not the
-        # boolean.
+        # `host_dns: off` means the literal string "off", not the boolean.
         if value is False:
             return "off"
         return value
@@ -1011,30 +673,6 @@ class RoutingConfig(StrictModel):
     def validate_main_interface(cls, value: str) -> str:
         # Rendered into the nft kill-switch (`oifname "<uplink>"`).
         return value if value == "auto" else _validate_interface_name(value)
-
-    @field_validator("nft_prefix")
-    @classmethod
-    def validate_nft_prefix(cls, value: str) -> str:
-        if not re.match(r"^[A-Za-z][A-Za-z0-9_]{0,31}$", value):
-            raise ValueError("routing.nft_prefix must be a short nftables-safe identifier")
-        return value
-
-    @field_validator("fwmark")
-    @classmethod
-    def validate_fwmark(cls, value: str) -> str:
-        parsed = int(value, 0)
-        if parsed == 0:
-            # An unmarked packet's implicit mark is 0, so a fwmark of 0 would
-            # make the forward kill-switch's "oifname != <tunnel> drop" rule
-            # (templates/nftables.nft.j2) match virtually all forwarded
-            # traffic, not just the traffic kornode actually marked.
-            raise ValueError("routing.fwmark must not be 0")
-        return value
-
-    @field_validator("table_id")
-    @classmethod
-    def validate_table_id(cls, value: int) -> int:
-        return _validate_routing_table_id(value, field_name="routing.table_id")
 
 
 class InternalDnsConfig(StrictModel):
@@ -1209,9 +847,8 @@ class WebConfig(StrictModel):
     terminal_enabled: bool = False
     terminal_idle_timeout: int = Field(default=900, ge=60, le=86400)
     terminal_max_sessions: int = Field(default=2, ge=1, le=10)
-    # Serves GET /api/client/routing (api/routes_client_sync.py), polled by
-    # upstream profiles' sync_url -- either this kornode acting as a client,
-    # or a Korvus Client -- for mid-session route/split-DNS refresh. That
+    # Serves GET /api/client/routing (api/routes_client_sync.py), polled by a
+    # Korvus Client for mid-session route/split-DNS refresh. That
     # endpoint has no admin auth by design (VPN clients authenticate by
     # their session source IP instead), so unlike most other web.* surfaces
     # it needs its own default-off gate distinct from `enabled`: turning on
@@ -1535,32 +1172,12 @@ class AppConfig(StrictModel):
         # "must/must not overlap the VPN client subnet" check below only
         # makes sense, and so only applies, while the server actually runs.
         vpn_network = ipaddress.ip_network(self.server.ipv4_network, strict=False)
-        if self.server.enabled:
-            for route in self.routing.split.routes:
-                if ipaddress.ip_network(route, strict=False) == vpn_network:
-                    raise ValueError(
-                        "routing.split.routes must not contain the VPN client subnet itself"
-                    )
         if self.upstream.enabled:
             profile = self.upstream.selected_profile()
             if self.server.enabled and profile and profile.check_host:
                 check_ip = ipaddress.ip_address(profile.check_host)
                 if check_ip in vpn_network:
                     raise ValueError("upstream.check_host must not be inside the VPN client subnet")
-            # Each profile's own named routing target (RoutingService.
-            # list_targets()) uses routing.table_id + its offset -- reject
-            # any derived table landing on a kernel-reserved ID, the same
-            # check routing.table_id itself already gets. Independent of
-            # server.enabled: a client-only deployment still derives real
-            # policy-routing tables for its profiles.
-            for target_profile in self.upstream.profiles:
-                derived_table_id = self.routing.table_id + self.upstream.profile_routing_offset(
-                    target_profile
-                )
-                _validate_routing_table_id(
-                    derived_table_id,
-                    field_name=f"upstream.profiles[{target_profile.name!r}]'s derived table_id",
-                )
         # client_dns_servers() always returns internal_dns.listen while
         # server.enabled (the resolver is mandatory then -- see
         # dnsmasq_active_reasons()/client_dns_servers() below), so that's the
@@ -1592,24 +1209,6 @@ class AppConfig(StrictModel):
         # The hub answers the fabric zone for agents and clients (D-66).
         if self.server.enabled:
             reasons.append("fabric_dns")
-        # routing.split/host_split domains and a profile's own plain
-        # domains/host_domains do NOT need dnsmasq any more: they're
-        # resolved into their nftables *_dynamic sets by the independent
-        # DomainResolverService (services/domain_resolver.py), not by
-        # dnsmasq answering a live query. Only a profile's server-pushed
-        # domains still need dnsmasq, for the next reason -- those are
-        # typically internal-only names requiring a `server=/domain/...`
-        # override to the upstream's own DNS, a real answer-correctness
-        # need independent of nftables set population.
-        #
-        # Pushed split-DNS domains aren't known until the upstream sends
-        # them, so a profile accepting them keeps dnsmasq running up front
-        # (see services/upstream_pushed.py).
-        if self.upstream.enabled and any(
-            profile.enabled and profile.route_host_enabled and profile.accept_server_routes
-            for profile in self.upstream.profiles
-        ):
-            reasons.append("profile_server_routes")
         return reasons
 
     def dns_tunnel_active(self) -> bool:

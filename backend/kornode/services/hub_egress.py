@@ -12,9 +12,8 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from kornode.config.legacy import profile_slug
 from kornode.config.loader import load_config, load_yaml_file
-from kornode.config.models import AppConfig
+from kornode.config.models import AppConfig, profile_slug
 from kornode.net.compile import dead_rules
 from kornode.net.model import EgressPolicy, Source
 from kornode.registry.db import migrate, open_registry
@@ -37,6 +36,12 @@ def validate_hub_policy(
 ) -> None:
     by_id = {node.id: node for node in nodes}
     known_upstreams = set(upstreams)
+    for name, dest in policy.sets.items():
+        if dest.route_urls or dest.domain_urls:
+            # Nothing fetches them on the hub yet; a silent no-op set would be worse.
+            raise HubEgressError(
+                "runtime_unsupported", f"set {name!r}: route_urls/domain_urls are not supported yet"
+            )
     for index, rule in enumerate(policy.egress):
         via = rule.parsed_via
         if via.kind == "upstream" and via.target not in known_upstreams:
