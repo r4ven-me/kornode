@@ -15,7 +15,7 @@ It only changes that input and wakes the reconciler -- kernel state
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,6 +27,7 @@ from kornode.net.model import EgressPolicy, InlineDest
 from kornode.services.files import FileManager
 from kornode.services.net import NetService
 from kornode.services.netinputs import resolved_state_dir
+from kornode.services.url_lists import UrlListCache, normalize_domain, normalize_route
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,16 +65,24 @@ class RefreshOutcome:
     next_interval_seconds: int
 
 
-def domain_groups(config: AppConfig, policy: EgressPolicy | None = None) -> list[DomainGroup]:
+def domain_groups(
+    config: AppConfig,
+    policy: EgressPolicy | None = None,
+    url_domains: Mapping[str, Sequence[str]] | None = None,
+) -> list[DomainGroup]:
     """Every destination with domains, resolved through the internal DNS upstreams: the
-    policy's named sets (key = set name) and inline rule destinations (key `rule<N>`,
-    the names NodeFacts.resolved is read by)."""
+    policy's named sets (key = set name; `url_domains` are the domains downloaded from
+    its `domain_urls`) and inline rule destinations (key `rule<N>`, the names
+    NodeFacts.resolved is read by)."""
+    url_domains = url_domains or {}
     policy = policy or config.egress_policy()
     upstreams = tuple(config.internal_dns.upstreams)
     groups = [
-        DomainGroup(name, tuple(dest.domains), upstreams)
+        DomainGroup(
+            name, tuple(dict.fromkeys([*dest.domains, *url_domains.get(name, ())])), upstreams
+        )
         for name, dest in policy.sets.items()
-        if dest.domains
+        if dest.domains or url_domains.get(name)
     ]
     groups += [
         DomainGroup(f"rule{index}", tuple(rule.to.domains), upstreams)
@@ -129,17 +138,39 @@ class DomainResolverService:
         lookup: DnsLookup | None = None,
         files: FileManager | None = None,
         net: NetService | None = None,
+        url_lists: UrlListCache | None = None,
     ) -> None:
         self.config = config
         self.lookup = lookup or DnsLookup()
         self.files = files or FileManager()
         self.net = net or NetService(config)
+        self.url_lists = url_lists or UrlListCache(
+            config.system.generated_dir / "url-lists", self.files
+        )
 
     def state_dir(self) -> Path:
         return resolved_state_dir(self.config)
 
     def refresh(self, *, dry_run: bool = False) -> RefreshOutcome:
-        groups = domain_groups(self.config)
+        policy = self.config.egress_policy()
+        url_domains: dict[str, list[str]] = {}
+        url_routes: dict[str, list[str]] = {}
+        for name, dest in policy.sets.items():
+            domains = [
+                item
+                for url in dest.domain_urls
+                for item in self.url_lists.items(url, normalize_domain, dry_run=dry_run)
+            ]
+            routes = [
+                item
+                for url in dest.route_urls
+                for item in self.url_lists.items(url, normalize_route, dry_run=dry_run)
+            ]
+            if domains:
+                url_domains[name] = domains
+            if dest.route_urls:
+                url_routes[name] = routes
+        groups = domain_groups(self.config, policy, url_domains)
         resolved: list[ResolvedSet] = []
         min_ttl: int | None = None
         for group in groups:
@@ -150,7 +181,9 @@ class DomainResolverService:
                     ips.extend(found)
                     if ttl is not None and (min_ttl is None or ttl < min_ttl):
                         min_ttl = ttl
+            ips.extend(url_routes.pop(group.name, []))
             resolved.append(ResolvedSet(group.name, sorted(_dedup(ips))))
+        resolved += [ResolvedSet(name, sorted(_dedup(items))) for name, items in url_routes.items()]
 
         directory = self.state_dir()
         previous = {

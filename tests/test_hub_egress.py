@@ -105,10 +105,8 @@ def test_unknown_upstream_rejected() -> None:
     assert err.value.code == "unknown_upstream"
 
 
-def test_url_sourced_sets_are_refused_until_the_hub_fetches_them() -> None:
+def test_url_sourced_sets_are_accepted_because_the_hub_fetches_them() -> None:
     sets = {"s": {"route_urls": ["https://lists.example.com/routes.txt"]}}
-    with pytest.raises(HubEgressError) as err:
-        check_hub_policy(
-            cfg(sets=sets, egress=[{"from": ["clients"], "to": {"set": "s"}, "via": "local"}]), []
-        )
-    assert err.value.code == "runtime_unsupported"
+    check_hub_policy(
+        cfg(sets=sets, egress=[{"from": ["clients"], "to": {"set": "s"}, "via": "local"}]), []
+    )

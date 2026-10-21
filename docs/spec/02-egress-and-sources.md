@@ -18,7 +18,7 @@ sets:                         # reusable destination sets
   corp:
     routes: [10.60.0.0/16]
     domains: [corp.example.com]
-    route_urls: []            # refreshed by DomainResolver/ExternalList
+    route_urls: []            # hub: downloaded hourly by DomainResolver, cached, last good copy kept (D-75)
     domain_urls: []
 
 egress:

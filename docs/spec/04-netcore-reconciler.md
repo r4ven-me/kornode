@@ -100,7 +100,7 @@ reconciler runs inside the agent process.
 Hub inputs that are files, all re-read on every pass: the runtime-switched
 active profile (`generated_dir/active-upstream`, overrides
 `upstream.active_profile`; a disabled profile is never active), per-profile
-carrier addresses (`upstream-carrier/<profile>.addrs`), server-pushed routes,
+carrier addresses (`upstream-carrier/<profile>.addrs`),
 and resolved domain addresses (`resolved/<set>.txt`).
 
 ## Explain
