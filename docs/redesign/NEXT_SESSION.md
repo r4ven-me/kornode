@@ -10,8 +10,8 @@
 > backend, frontend, netlab.** Слияние — локально `git merge --no-ff` + `git push origin main` (`gh` не работает).
 >
 > Доказательства: `make lint typecheck test render parity` на Python 3.13 и 3.12 — 1150 passed / 92 skipped;
-> фронтенд 32 теста + сборка; netlab на hub-VM 69 passed (golden `hub_egress_exit` загружается в ядро). **E2E на
-> четырёх VM после этих изменений не гонялся** (конфиги harness переведены на `egress: []`) — прогнать `routed`.
+> фронтенд 32 теста + сборка; netlab на hub-VM 69 passed (golden `hub_egress_exit` загружается в ядро). E2E `routed` на
+> четырёх VM после этих изменений (harness переведён на `egress: []`): 6 passed, 7 skipped — как до них.
 >
 > **Не сделано:** P4-07 (раздел Fabric: топология/префиксы/DNS/источники в одном месте), set/domain-выходы через
 > `exit:<n>` (нужны одинаковые наборы на хабе и узле), NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спеки,
