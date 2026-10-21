@@ -46,7 +46,7 @@
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык — русский, обращайся ко мне «Ivan».
 Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (фаза P4), раздел «Дальнейшие
-действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-69), `docs/spec/07-fabric.md`,
+действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-70, S-07), `docs/spec/07-fabric.md`,
 `docs/runbooks/vm-e2e.md`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Что уже сделано (не переделывай)
@@ -129,8 +129,12 @@
 
 ## Что делать дальше (по порядку)
 1. **Проверить CI на `main`** после слияния P4-05/P4-06 (публичный API, см. «Важно для продолжения», п. 2): три job — `backend`, `frontend`, `netlab`. Если красный — чинить первым делом.
-2. **P4-06 часть 2** (D-69, пункт 1): модель egress хаба. Нужны ключи `egress`/`sources`/`sets` в `config/models.py`,
-   которые сливаются перед `legacy_policy` (P5 уберёт legacy), валидация против ролей реестра, parity-поверхности
+2. **Spike S-07 (D-70, решение владельца 2026-10-21):** совместимости с v1 нет, но вход клиентов по сертификату и
+   OIDC обязателен вместе с фабрикой. Проверить в netlab виртуальные хосты ocserv по SNI на 443/tcp: `fabric.<домен>` —
+   только сертификаты агентов и регистрация, хост по умолчанию — клиенты с любым входом; проверки в обе стороны (см. S-07
+   в `DECISIONS.md`). Пройдёт — удалить `fabric.enabled`, поправить spec 01/05/07; нет — запасной вариант из S-07.
+2a. **P4-06 часть 2 вместе с P5-03** (D-69, D-70): модель egress хаба. Ключи `egress`/`sources`/`sets` в `config/models.py`
+   **заменяют** старые ключи — `legacy_policy` и `kornode.config.legacy` удаляются, тесты v1-поведения тоже (списком в PR), валидация против ролей реестра, parity-поверхности
    `egress.hub`/`sources.hub` (CLI `egress show/edit/set/check`, `GET/PUT /api/egress`, `source add/del/list`,
    панель Network → Egress/Sources, строки в `parity.yaml`), источники хаба в `HubNetInputs.facts()` (`SourceFact`,
    их подсеть в `node_prefixes[1]`, экспорт агентам через пакет и per-user `route`), выход хаба через `exit:<n>`

@@ -1,46 +1,65 @@
-# 10 — Migration from v1
+# 10 — v1 removal (no migration)
 
-## Config keys → egress (compiled automatically from P2, written back by `korctl config migrate` in P5)
+There are no v1 installations to carry over (D-70, 2026-10-21), so v2 does
+**not** translate, migrate or tolerate v1 configuration. A config that still
+contains a removed key fails validation with an error naming the key and its
+v2 replacement below; nothing is rewritten automatically. There is no
+`korctl config migrate`, no `korctl migrate-to-agent` / `korctl agent import`
+and no deprecation period.
 
-| v1 | v2 |
+Compatibility that **does** stay: hub ⇄ agent version skew within v2 — the
+bundle `format` version, `control.min_agent_version` and the E2E-06 upgrade
+test (spec 09). That is about upgrading v2, not about v1.
+
+## Removed config keys and their v2 replacement
+
+The table is a reference for writing v2 configs (README, `examples/`), not a
+translation performed by code.
+
+| Removed v1 key | Write instead (v2) |
 | --- | --- |
 | `upstream.enabled: false` | `clients → any via local` |
-| `routing.client_policy: full` | `clients → any via upstream:<active_profile>` |
-| `routing.client_policy: split` + `routing.split.{routes,domains,*_urls}` | set `split` + `clients → {set: split} via upstream:<active>`; `clients → any via local` |
-| `routing.host_policy: full` | `host → any via upstream:<active>` (carrier exclusion is now automatic) |
-| `routing.host_policy: split` + `routing.host_split` | set `host_split` + `host → {set: host_split} via upstream:<active>` |
-| `profiles[].routes/domains/*_urls` (`route_clients_enabled`) | set `profile_<name>` + `clients → {set: profile_<name>} via upstream:<name>`, inserted **before** the default rules (v1 "named target wins") |
-| `profiles[].route_host_enabled/host_routes/host_domains` | set `profile_<name>_host` + `host → {set: …} via upstream:<name>` before host defaults |
-| `profiles[].accept_server_routes` | stays; pushed routes/domains extend set `profile_<name>_pushed` used by an implicit host rule, as in v1 |
-| `profiles[].sync_url` between own nodes | replaced by the fabric; kept for third-party kornode upstreams |
-| `routing.fwmark`, `routing.table_id`, `routing_offset` | removed; marks/tables allocated by the compiler (03) |
-| `routing.main_interface` | becomes exit `local` interface hint |
-| `server.ipv4_network`, `internal_dns.listen` | derived when `fabric.enabled` (01) |
-| `routing.host_dns` | unchanged, points to the node service address |
-| `upstream.active_profile` + switch/failover | v2 keeps "active profile" as an alias `upstream:active` resolved by the compiler; `switch` changes the alias target → reconciler re-applies; failover logic moves into the tunnel manager |
+| `routing.client_policy: full` | `clients → any via upstream:<profile>` |
+| `routing.client_policy: split` + `routing.split.{routes,domains,*_urls}` | set `split` + `clients → {set: split} via upstream:<profile>`; `clients → any via local` |
+| `routing.host_policy: full` | `host → any via upstream:<profile>` (carrier exclusion is automatic) |
+| `routing.host_policy: split` + `routing.host_split` | set + `host → {set: …} via upstream:<profile>` |
+| `profiles[].routes/domains/*_urls` (`route_clients_enabled`) | set + `clients → {set: …} via upstream:<name>` placed before the default rules |
+| `profiles[].route_host_enabled/host_routes/host_domains` | set + `host → {set: …} via upstream:<name>` |
+| `profiles[].accept_server_routes` | stays (third-party upstreams); pushed routes/domains extend the profile's pushed set |
+| `profiles[].sync_url` between own nodes | the fabric; kept only for third-party kornode upstreams |
+| `routing.fwmark`, `routing.table_id`, `routing_offset` | nothing: marks/tables are allocated by the compiler (03) |
+| `routing.main_interface` | exit `local` interface hint |
+| `upstream.active_profile` + switch/failover | alias `upstream:active` resolved by the compiler; `switch` changes the alias target and wakes the reconciler |
 
-Translation is implemented once in `kornode.config.legacy` and covered by a
-golden test per file in `examples/`: the compiled v2 state must route every
-NL scenario the same way v1 did (where v1 was correct).
+`server.ipv4_network`, `internal_dns.listen` (derived from `node.id`, 01) and
+`routing.host_dns` (points to the node service address) are not removed.
 
-## Code removed in P5
+## Code removed (P5-03, together with P4-06 part 2)
 
+- `kornode.config.legacy` and `legacy_policy`: `egress`/`sources`/`sets` are
+  the only policy input on the hub;
 - "last mark wins" ordering and `meta mark set 0` resets for the VPN subnet
   (replaced by implicit rules + first-match chain);
 - per-target `*_static`/`*_dynamic` set families and
   `nftables-static-refresh.nft.j2` / `nftables-dynamic-refresh.nft.j2`;
+- `RoutingTarget` / `list_targets()`;
 - (removed earlier, in P2, per D-29: `NftablesService`, `PolicyRoutingService`,
   `SysctlService` and every kernel call in `UpstreamService`, `upstream watch`,
-  `apply_server_routing_if_changed`);
-- `RoutingTarget` / `list_targets()`.
+  `apply_server_routing_if_changed`).
 
-## Nodes → agents
+Unit, netlab and e2e tests that encode v1 behaviour are deleted in the PR that
+removes it, and the PR lists them.
 
-`korctl migrate-to-agent --out node3.json` on an existing v1 node exports
-upstream profiles (secrets included, encrypted with a passphrase prompted on
-the terminal), local users/groups, route/domain lists and host DNS settings.
-On the hub: `korctl agent import node3.json` creates the agent, maps its
-lists into its egress policy and prints an enroll token. The node is then
-redeployed with `compose.agent.yaml` and enrolled. Old and new nodes can run
-side by side during the transition: v1 nodes keep connecting as ordinary
-clients to the hub.
+## Nodes
+
+New nodes are deployed with `compose.agent.yaml` and enrolled with
+`kornode-agent enroll <token>` (spec 05/06). There is no export/import path
+from a v1 node.
+
+## Fabric toggle
+
+`fabric.enabled` exists today because D-43 cannot combine client certificate
+or OIDC login with agents on one listener. Client certificate and OIDC login
+are required (D-70); spike S-07 (ocserv SNI virtual hosts) decides how. When
+it lands, `fabric.enabled` is removed and the hub always runs the fabric — a
+hub without agents is a plain client server.

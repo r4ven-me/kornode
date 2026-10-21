@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed (plan, D-70)
+
+- No v1 compatibility: legacy routing keys will be deleted outright (no translation, no `korctl config migrate`, no `korctl migrate-to-agent`; ROADMAP P5-02/P5-04 removed). Hub ⇄ agent version compatibility within v2 stays.
+- Client login by certificate and OIDC is required together with the fabric; spike S-07 (ocserv SNI virtual hosts on 443/tcp) decides how, after which `fabric.enabled` is removed. Spec 10 rewritten as "v1 removal".
+
 ### Added (P4-06 part 1, D-69; branch `redesign/p4-06-exit-via-node`, not merged)
 
 - `via: exit:<n>` for agent-originated traffic (`to: any`, clients and sources): the hub marks an agent's traffic by source prefix for the exit node's session table (`unreachable` while it is offline), the exit node (role `exit`, implicit `from: fabric -> any via local` rule) masquerades it, answers return through fabric prefix routes in main. The hub now rejects agent traffic to non-fabric destinations unless a policy declares an exit.

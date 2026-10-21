@@ -112,7 +112,8 @@ Done when:
 | P4-03 | DNS: per-node zone `node<id>.<fabric.domain>` on each dnsmasq, hub authoritative for `<fabric.domain>`, agents forward the zone to the hub service address. Records managed in the registry (`docs/spec/07-fabric.md`). **Done (D-66): netlab `test_p4_dns` (real dnsmasq of hub and agent, agent zone with the hub resolver down), E2E NL-02 on the four VMs.** |
 | P4-04 | Agent role `access`: local ocserv, users assigned on the hub, delivered as hashes, local auth works without the hub. **Done (D-67): netlab `test_p4_access` (real ocserv, delivered hashes), E2E NL-03 on the four VMs (client login, hub reached without NAT, exit through the node with NAT, new login with the hub stopped).** |
 | P4-05 | Sources (`docs/spec/02-egress-and-sources.md`): wg-easy/Amnezia interfaces, export into the fabric, doctor checks for foreign NAT rules on the source subnet. **Done for agent-attached sources (D-68): export/hub routes/validation unit tests, doctor `foreign_nat_on_source` (nft + legacy iptables) as error, one `missing_source` warning, `docs/sources.md`, E2E NL-06 (client behind a source reaches the hub and is reached by the hub and agent-a, no NAT). Hub-attached sources move to P4-06 (the hub has no egress model yet); NL-05 (source client through `upstream:office`) stays blocked.** |
-| P4-06 | **Part 1 done (D-69): agent-originated traffic through `exit:<n>` (hub transit by source prefix, per-node table, exit-node masquerade, default-deny for agent traffic on the hub); netlab goldens, E2E-07. Part 2 (hub-originated and set/domain exits, hub egress model) open.** Exit via another node: `via: exit:<node>` for agent-originated traffic and for hub-originated traffic (hub clients, hub sources, hub host); per-exit-node table tracking the node's current `vpnsX`; role `exit` required on the target node. |
+| S-07 | **Spike before P4-06 part 2 (D-70):** client certificate and OIDC login together with the fabric on one 443/tcp via ocserv SNI virtual hosts (`docs/redesign/DECISIONS.md`, S-07). If it passes: `fabric.enabled` is removed, `auth.certificate`/`auth.oidc` are allowed with agents, specs 01/05/07 updated. |
+| P4-06 | **Part 1 done (D-69): agent-originated traffic through `exit:<n>` (hub transit by source prefix, per-node table, exit-node masquerade, default-deny for agent traffic on the hub); netlab goldens, E2E-07. Part 2 (hub-originated and set/domain exits, hub egress model) open; per D-70 it lands together with P5-03 — the hub egress model replaces the legacy keys, no merge with `legacy_policy`.** Exit via another node: `via: exit:<node>` for agent-originated traffic and for hub-originated traffic (hub clients, hub sources, hub host); per-exit-node table tracking the node's current `vpnsX`; role `exit` required on the target node. |
 | P4-07 | Panel/CLI/API for fabric: topology view, per-node prefixes, DNS records, sources (parity). |
 
 Done when:
@@ -128,10 +129,11 @@ Done when:
 | ID | Task |
 | --- | --- |
 | P5-01 | Egress editor in the panel (ordered list, drag to reorder, dead-rule warnings, explain inline) + `korctl egress ...` + API (parity). |
-| P5-02 | `korctl config migrate` writes the compiled egress policy back to YAML; legacy keys emit deprecation warnings. |
-| P5-03 | Remove legacy keys and code listed in `docs/spec/10-migration.md` (last-mark-wins, per-target static/dynamic set families, static/dynamic refresh templates; the `UpstreamService`/watchdog policy re-application already went in P2, D-29). |
-| P5-04 | `korctl migrate-to-agent` for existing full kornode nodes. |
-| P5-05 | Documentation rewrite: README, `docs/architecture.md`, `docs/networking.md`, examples. |
+| ~~P5-02~~ | **Removed (D-70):** no `korctl config migrate` — there are no v1 installations; legacy keys are deleted, not translated. |
+| P5-03 | Remove legacy keys and code outright (D-70; together with P4-06 part 2): `routing.client_policy/host_policy/split/host_split`, per-profile route/host-route lists, `routing.fwmark/table_id`, `kornode.config.legacy`/`legacy_policy`, last-mark-wins, per-target static/dynamic set families, static/dynamic refresh templates (the `UpstreamService`/watchdog policy re-application already went in P2, D-29). Tests encoding v1 behaviour are deleted in the same PR. |
+| ~~P5-04~~ | **Removed (D-70):** no `korctl migrate-to-agent` — nodes are deployed as agents and enrolled. |
+| P5-05 | Documentation rewrite: README, `docs/architecture.md`, `docs/networking.md`, `examples/` rewritten in the v2 format. |
 
-Done when: every file in `examples/` migrates automatically and passes the
-full netlab + e2e suites; no legacy routing key remains in `models.py`.
+Done when: every file in `examples/` is valid v2 config and passes the
+full netlab + e2e suites; no legacy routing key remains in `models.py`;
+hub ⇄ agent version compatibility (E2E-06) still holds.
