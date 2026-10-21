@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added (Fabric section, P4-07; branch `redesign/p4-07-fabric`)
+
+- `FabricService` (`show`, `set`): one read model of the fabric (addressing, hub, nodes with roles/online/fabric address/prefixes, DNS zone, hub sources) and the only writer of the `fabric:` pool/domain/reserved keys. `korctl fabric show|set`, `GET/PATCH /api/fabric`, panel **Fabric** tab (Topology, Fabric settings, Fabric DNS); `parity.yaml` rows `fabric.show`, `fabric.settings`.
+- The Fabric DNS panel moved from Agents to Fabric (`dns.record.*` capabilities unchanged). `POST /api/config/fabric-settings` (also sets `node.id`) stays for the Config panel.
+
 ### Added (hub egress model, P4-06 part 2 / P5-03, slice 1; branch `redesign/p4-06b-hub-egress`)
 
 - Top-level `egress`, `sources`, `sets` keys in the hub config (the agent policy model). Config-level checks: references, source CIDR inside `fabric.source_pool` (or `allow_outside_pool`), no overlap with the client pool/fabric/enroll pool/other sources, unique interfaces, `host` and non-exported sources cannot use `exit:<n>`. Registry/upstream checks: `services/hub_egress.py`. Legacy keys stay until the removal block.

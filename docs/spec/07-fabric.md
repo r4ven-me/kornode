@@ -95,8 +95,7 @@ Zone `<fabric.domain>` (default `kornode.internal`), D-66.
   `korctl dns record add nas A 192.168.3.10 --node branch` →
   `nas.node3.<domain>`. A CNAME target must exist in the zone; an agent's CNAME
   must stay inside its node zone. API: `GET/POST/DELETE /api/dns/records`
-  (`{name, type, value, node}`); panel: Agents → Fabric DNS (Fabric → DNS from
-  P4-07).
+  (`{name, type, value, node}`); panel: Fabric → DNS.
 - **Agent.** The bundle `dns` section carries the node's own zone as
   `local_records` (absolute names) and `forward_zones: [{zone: <domain>,
   servers: [<hub internal_dns.listen>]}]`. The agent's dnsmasq listens on the

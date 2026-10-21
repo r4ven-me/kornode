@@ -13,6 +13,7 @@ import yaml
 
 from kornode.cli_agents import register as register_agent_commands
 from kornode.cli_egress import register as register_egress_commands
+from kornode.cli_fabric import register as register_fabric_commands
 from kornode.cli_hub import register as register_hub_commands
 from kornode.config.defaults import DEFAULT_CONFIG
 from kornode.config.env import combined_environment, env_overrides_from_mapping
@@ -1268,6 +1269,7 @@ app.add_typer(registry_app, name="registry")
 register_agent_commands(app, get_config)
 register_hub_commands(app, get_config)
 register_egress_commands(app, get_config, lambda: STATE.get("config_path"))
+register_fabric_commands(app, get_config, lambda: STATE.get("config_path"))
 
 
 if __name__ == "__main__":
