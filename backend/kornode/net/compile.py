@@ -69,6 +69,18 @@ class EnrollGuard:
 
 
 @dataclass(frozen=True, slots=True)
+class TransitExit:
+    """Hub only (D-69): the traffic of agents whose policy says `exit:<node>` leaves
+    through that node's ocserv session. `sources` are the prefixes those agents send
+    from (client pool, source subnets); `exit_iface` is the node's session device right
+    now, None while it is offline (the exit table then only fails closed)."""
+
+    node: int
+    sources: tuple[Network, ...]
+    exit_iface: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class NodeFacts:
     node_id: int
     client_pool: ipaddress.IPv4Network | None
@@ -89,6 +101,10 @@ class NodeFacts:
     service_address: ipaddress.IPv4Address | None = None
     # Further addresses bound to `lo`, e.g. an agent's resolver address (D-66).
     local_addresses: tuple[ipaddress.IPv4Address, ...] = ()
+    # Hub: agent sessions are policed (D-69): traffic of an agent to a non-fabric
+    # destination is dropped unless an agent policy declares an exit for its source.
+    fabric_guard: bool = False
+    transit_exits: tuple[TransitExit, ...] = ()
     # Globs of the agent's own ocserv session devices ("vpns*", role access):
     # the same strict reverse-path check as the hub's enroll guard (D-47, D-67).
     access_ifaces: tuple[str, ...] = ()
@@ -130,6 +146,10 @@ class ClassifyRule:
     match: tuple[str, ...]
     to_sets: tuple[str, ...]
     exit: Exit | None
+    # Instead of rejecting when `exit` is None (e.g. "return": leave unmarked).
+    verdict: str | None = None
+    # Replaces the "egress rule N" comment (transit and guard lines have no rule number).
+    label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +166,16 @@ class Compiled:
 def _addresses(facts: NodeFacts) -> frozenset[Address]:
     bound = (facts.service_address, *facts.local_addresses)
     return frozenset(Address("lo", f"{address}/32") for address in bound if address is not None)
+
+
+def node_exit_tunnels(policy: EgressPolicy, interface: str, up: bool) -> dict[str, TunnelFact]:
+    """An agent reaches `exit:<node>` through its tunnel to the hub (D-69): one tunnel
+    fact per exit node named by the policy, all on the fabric interface."""
+    return {
+        rule.parsed_via.name: TunnelFact(interface=interface, up=up)
+        for rule in policy.egress
+        if rule.parsed_via.kind == "exit"
+    }
 
 
 def _dest_name(rule: Rule, index: int) -> str | None:
@@ -266,6 +296,19 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
         if via.kind == "drop" or via.name in exits:
             continue
         exits[via.name] = _make_exit(via, len(exits) + 1, policy, facts)
+    # Hub (D-69): the exits declared by agents' policies, one per exit node.
+    for transit in facts.transit_exits:
+        name = f"exit:{transit.node}"
+        if name not in exits:
+            exits[name] = Exit(
+                name=name,
+                kind="exit",
+                index=len(exits) + 1,
+                interface=transit.exit_iface,
+                up=transit.exit_iface is not None,
+                kill_switch=True,
+                nat=False,
+            )
 
     sets: dict[str, DestSetDecl] = {}
     elements: dict[str, set[str]] = {}
@@ -293,12 +336,28 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
                 ClassifyRule(index, source, _from_match(source, policy, facts), to_sets, exit_)
             )
 
+    if facts.fabric_guard:
+        classify[:0] = _transit_head(facts, exits, sets, elements)
+
     # Appended implicit rule: nothing from clients/sources escapes unrouted.
     tail_index = len(policy.egress)
     for name in ("clients", *(item.name for item in policy.sources)):
         if name == "clients" and facts.client_pool is None:
             continue
         classify.append(ClassifyRule(tail_index, name, _from_match(name, policy, facts), (), None))
+    if facts.fabric_guard:
+        # Agents never reach a destination outside the fabric unless a policy says so
+        # (spec 07: the hub accepts exit traffic only from nodes that declare it).
+        classify.append(
+            ClassifyRule(
+                tail_index,
+                "fabric-guard",
+                ("iifname @fabric_ifaces",),
+                (),
+                None,
+                label="agents: no exit declared",
+            )
+        )
 
     warnings = [f"rule {dead} is shadowed by rule {shadow}" for dead, shadow in dead_rules(policy)]
     for declared in policy.sources:
@@ -336,6 +395,60 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
         script=script,
         warnings=tuple(warnings),
     )
+
+
+def _transit_head(
+    facts: NodeFacts,
+    exits: dict[str, Exit],
+    sets: dict[str, DestSetDecl],
+    elements: dict[str, set[str]],
+) -> list[ClassifyRule]:
+    """Hub classification of agent traffic (D-69), before every other rule:
+    fabric destinations are left to routing, a declared exit marks the flow for its
+    per-node table, everything else from an agent falls to the guard at the end.
+    Matching is by source prefix (strict reverse path guarantees that only the owning
+    agent can send from it) so the script does not change when sessions come and go."""
+    head: list[ClassifyRule] = []
+    for family in (4, 6):
+        name = f"fabric_v{family}"
+        sets.setdefault(name, DestSetDecl(name, family))
+        elements.setdefault(name, set()).update(
+            str(prefix)
+            for prefixes in facts.node_prefixes.values()
+            for prefix in prefixes
+            if prefix.version == family
+        )
+    head.append(
+        ClassifyRule(
+            -1,
+            "fabric-guard",
+            ("iifname @fabric_ifaces",),
+            ("fabric_v4", "fabric_v6"),
+            None,
+            verdict="return",
+            label="agents: fabric destinations are routed",
+        )
+    )
+    by_node: dict[int, set[str]] = {}
+    for transit in facts.transit_exits:
+        by_node.setdefault(transit.node, set()).update(
+            str(net) for net in transit.sources if net.version == 4
+        )
+    for node, nets in sorted(by_node.items()):
+        name = f"transit{node}_v4"
+        sets.setdefault(name, DestSetDecl(name, 4))
+        elements.setdefault(name, set()).update(nets)
+        head.append(
+            ClassifyRule(
+                -1,
+                "transit",
+                ("iifname @fabric_ifaces", f"ip saddr @{name}"),
+                (),
+                exits[f"exit:{node}"],
+                label=f"transit exit:{node}",
+            )
+        )
+    return head
 
 
 def _make_exit(via: Via, index: int, policy: EgressPolicy, facts: NodeFacts) -> Exit:
@@ -474,6 +587,15 @@ def _elements(
         NftElements(family, table, name, frozenset(members)) for name, members in elements.items()
     }
     items.add(NftElements(family, table, "fabric_ifaces", frozenset(facts.fabric_ifaces)))
+    if facts.transit_exits:
+        items.add(
+            NftElements(
+                family,
+                table,
+                "transit_ifaces",
+                frozenset(t.exit_iface for t in facts.transit_exits if t.exit_iface),
+            )
+        )
     local4 = {str(net) for net in facts.local_networks if net.version == 4}
     local6 = {str(net) for net in facts.local_networks if net.version == 6}
     if facts.client_pool is not None:

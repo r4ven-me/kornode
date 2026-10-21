@@ -143,3 +143,38 @@ def test_bootstrap_routes_the_hub_through_the_fabric_exit_only() -> None:
     desired = inputs.desired()
     fabric_routes = [r for r in desired.routes if getattr(r, "dev", None) == "oc-hub0"]
     assert [r.dst for r in fabric_routes] == ["10.99.0.1/32"]
+
+
+def test_a_node_that_takes_fabric_traffic_routes_the_fabric_prefixes_in_main(
+    tmp_path: Path,
+) -> None:
+    """An exit node (D-69): answers come back addressed to fabric prefixes and must return
+    through the tunnel; prefix routes (proto 77, in main) do that and disappear with the link."""
+    import dataclasses
+
+    from kornode.net.model import EgressPolicy
+
+    validated = _validated(tmp_path)
+    exit_policy = EgressPolicy.model_validate(
+        {
+            "egress": [
+                {"id": "to-fabric", "from": ["host"], "to": "fabric", "via": "fabric"},
+                {"id": "exit-local", "from": ["fabric"], "to": "any", "via": "local"},
+            ]
+        }
+    )
+    plain = validated
+    taking = dataclasses.replace(
+        validated, bundle=validated.bundle.model_copy(update={"policy": exit_policy})
+    )
+
+    def facts(item: object, links: dict[str, bool]) -> object:
+        inputs = AgentNetInputs(CONFIG, FakeProbes(links), FakeCarriers())
+        inputs.set_bundle(item)  # type: ignore[arg-type]
+        return inputs.facts()
+
+    up = facts(taking, {"oc-hub0": True})
+    assert up.session_routes, "an exit node needs the routes"  # type: ignore[attr-defined]
+    assert {dev for _, dev in up.session_routes} == {"oc-hub0"}  # type: ignore[attr-defined]
+    assert not facts(plain, {"oc-hub0": True}).session_routes  # type: ignore[attr-defined]
+    assert not facts(taking, {"oc-hub0": False}).session_routes  # type: ignore[attr-defined]

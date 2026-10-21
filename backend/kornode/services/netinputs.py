@@ -9,16 +9,25 @@ from __future__ import annotations
 
 import ipaddress
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from kornode.config.legacy import legacy_policy, profile_slug, upstream_exit
 from kornode.config.models import AppConfig, UpstreamProfileConfig
 from kornode.net.addressing import derive_addresses
-from kornode.net.compile import Compiled, EnrollGuard, NodeFacts, TunnelFact, compile_policy
+from kornode.net.compile import (
+    Compiled,
+    EnrollGuard,
+    NodeFacts,
+    TransitExit,
+    TunnelFact,
+    compile_policy,
+)
 from kornode.net.model import EgressPolicy
 from kornode.net.state import DesiredState
 from kornode.registry.db import migrate, open_registry
+from kornode.registry.models import Node, NodePrefix
 from kornode.registry.repository import Registry
 from kornode.services.command import CommandRunner
 from kornode.services.files import FileManager
@@ -108,6 +117,16 @@ def _merge(*sources: list[str]) -> list[str]:
     return list(seen)
 
 
+@dataclass(frozen=True)
+class FabricView:
+    """The registry and the connected sessions, read once per pass."""
+
+    nodes: list[Node] = field(default_factory=list)
+    prefixes: list[NodePrefix] = field(default_factory=list)
+    # node id -> ocserv session device while the node is connected
+    sessions: dict[int, str] = field(default_factory=dict)
+
+
 class HubNetInputs:
     def __init__(
         self,
@@ -145,6 +164,7 @@ class HubNetInputs:
                 )
                 upstreams.append(profile_slug(profile.name))
         tunnel_ifaces = {tunnel.interface for tunnel in tunnels.values()}
+        view = self._fabric_view()
         return NodeFacts(
             node_id=node_id,
             client_pool=pool,
@@ -152,8 +172,11 @@ class HubNetInputs:
             local_networks=tuple(self._local_networks(exclude=tunnel_ifaces)),
             resolved=self._resolved(),
             upstreams=tuple(upstreams),
-            node_prefixes={node_id: (pool,)},
-            session_routes=tuple(self._session_routes()),
+            node_prefixes=self._node_prefixes(pool, view),
+            fabric_ifaces=tuple(sorted(set(view.sessions.values()))),
+            fabric_guard=self.config.fabric.enabled,
+            transit_exits=tuple(self._transit_exits(view)),
+            session_routes=tuple(self._session_routes(view)),
             uplink=NetworkStatsService(config, runner=self.runner).resolve_interface(),
             all_rp_filter=self._read_sysctl("net.ipv4.conf.all.rp_filter"),
             enroll=self._enroll_guard(),
@@ -184,27 +207,26 @@ class HubNetInputs:
             if link.get("ifname")
         }
 
-    def _session_routes(self) -> list[tuple[Network, str]]:
-        """Exported prefixes of connected agents -> their ocserv session device.
+    def _fabric_view(self) -> FabricView:
+        """Active nodes, their prefixes and the session device of each connected one.
 
-        ocserv does not install `iroute` routes itself (S-03), so the reconciler
-        does. A session is connected while its fabric address is a route on a
-        `vpns*` device in main; that is also what removes the prefix routes again
-        when the session ends.
+        A session is connected while the node's fabric address is a route on a `vpns*`
+        device in main (ocserv installs it from `explicit-ipv4`); the same fact removes
+        the node's routes again when the session ends.
         """
         config = self.config
         db = config.system.data_dir / "registry.db"
         if not config.fabric.enabled or not db.exists():
-            return []
+            return FabricView()
         result = self.runner.run(
             ["ip", "-j", "-4", "route", "show", "table", "main"], check=False, timeout=5
         )
-        if not result.ok:
-            return []
-        try:
-            routes: list[dict[str, Any]] = json.loads(result.stdout or "[]")
-        except json.JSONDecodeError:
-            return []
+        routes: list[dict[str, Any]] = []
+        if result.ok:
+            try:
+                routes = json.loads(result.stdout or "[]")
+            except json.JSONDecodeError:
+                routes = []
         device_of = {
             str(route["dst"]).removesuffix("/32"): str(route["dev"])
             for route in routes
@@ -214,24 +236,93 @@ class HubNetInputs:
         try:
             migrate(conn)
             registry = Registry(conn)
-            active = {node.id for node in registry.list_nodes() if node.state == "active"}
+            nodes = [node for node in registry.list_nodes() if node.state == "active"]
             prefixes = registry.list_prefixes()
         finally:
             conn.close()
-        fabric = config.fabric
-        session_routes: list[tuple[Network, str]] = []
-        for item in prefixes:
-            if not item.export or item.node_id not in active or item.node_id == 1:
+        sessions: dict[int, str] = {}
+        for node in nodes:
+            device = device_of.get(str(self._fabric_address(node.id)))
+            if device is not None and node.id != 1:
+                sessions[node.id] = device
+        return FabricView(nodes=nodes, prefixes=prefixes, sessions=sessions)
+
+    def _fabric_address(self, node_id: int) -> ipaddress.IPv4Address:
+        fabric = self.config.fabric
+        return derive_addresses(
+            node_id,
+            fabric_cidr=fabric.cidr,
+            client_pool=fabric.client_pool,
+            source_pool=fabric.source_pool,
+            domain=fabric.domain,
+        ).fabric_address
+
+    def _node_prefixes(self, pool: Network, view: FabricView) -> dict[int, tuple[Network, ...]]:
+        """Every active node's exported prefixes; the hub's are its pool and the fabric."""
+        hub: list[Network] = [pool]
+        if self.config.fabric.enabled:
+            hub.append(ipaddress.ip_network(self.config.fabric.cidr, strict=False))
+        result: dict[int, tuple[Network, ...]] = {1: tuple(hub)}
+        active = {node.id for node in view.nodes}
+        for item in view.prefixes:
+            if item.export and item.node_id in active and item.node_id != 1:
+                result[item.node_id] = (
+                    *result.get(item.node_id, ()),
+                    ipaddress.ip_network(item.prefix, strict=False),
+                )
+        return result
+
+    def _transit_exits(self, view: FabricView) -> list[TransitExit]:
+        """Exits that agents declare for their own traffic (D-69): `from` classes of a
+        rule `to: any via exit:<n>` become the source prefixes the hub marks for node
+        n's table. Only an active node with role `exit` is honoured; anything else stays
+        unmarked and is rejected by the agent guard."""
+        fabric = self.config.fabric
+        roles = {node.id: node.roles for node in view.nodes}
+        found: list[TransitExit] = []
+        for node in view.nodes:
+            if node.id == 1:
                 continue
-            address = derive_addresses(
-                item.node_id,
+            try:
+                policy = EgressPolicy.model_validate(node.policy)
+            except ValueError:
+                continue
+            addresses = derive_addresses(
+                node.id,
                 fabric_cidr=fabric.cidr,
                 client_pool=fabric.client_pool,
                 source_pool=fabric.source_pool,
                 domain=fabric.domain,
-            ).fabric_address
-            device = device_of.get(str(address))
-            if device is not None:
+            )
+            cidrs = {
+                item.name: ipaddress.ip_network(item.cidr, strict=False) for item in policy.sources
+            }
+            for rule in policy.egress:
+                via = rule.parsed_via
+                if via.kind != "exit" or rule.to != "any":
+                    continue
+                target = int(via.target or 0)
+                if "exit" not in roles.get(target, []) or target == node.id:
+                    continue
+                sources: list[Network] = []
+                for name in rule.from_:
+                    if name == "clients":
+                        sources.append(addresses.client_pool)
+                    elif name in cidrs:
+                        sources.append(cidrs[name])
+                if sources:
+                    found.append(TransitExit(target, tuple(sources), view.sessions.get(target)))
+        return found
+
+    def _session_routes(self, view: FabricView) -> list[tuple[Network, str]]:
+        """Exported prefixes of connected agents -> their ocserv session device.
+
+        ocserv does not install `iroute` routes itself (S-03), so the reconciler does.
+        """
+        session_routes: list[tuple[Network, str]] = []
+        for item in view.prefixes:
+            device = view.sessions.get(item.node_id)
+            if item.export and device is not None and item.node_id != 1:
                 session_routes.append((ipaddress.ip_network(item.prefix), device))
         return sorted(session_routes, key=lambda entry: (str(entry[0]), entry[1]))
 

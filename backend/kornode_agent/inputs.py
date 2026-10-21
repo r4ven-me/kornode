@@ -17,7 +17,7 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from kornode.bundle.validator import Validated
-from kornode.net.compile import NodeFacts, SourceFact, TunnelFact, compile_policy
+from kornode.net.compile import NodeFacts, SourceFact, TunnelFact, compile_policy, node_exit_tunnels
 from kornode.net.model import EgressPolicy, Rule
 from kornode.net.state import DesiredState
 from kornode_agent.access import DEVICE as ACCESS_DEVICE
@@ -151,6 +151,13 @@ class AgentNetInputs:
             up=links.get(fabric_iface, False),
             carrier=self.carriers.carrier(FABRIC),
         )
+        if active:
+            # `exit:<node>` goes through the hub tunnel: same device, same carrier (D-69).
+            tunnels.update(
+                node_exit_tunnels(
+                    active.bundle.policy, fabric_iface, links.get(fabric_iface, False)
+                )
+            )
         upstreams: list[str] = []
         sources: dict[str, SourceFact] = {}
         node_prefixes: dict[int, tuple[Network, ...]] = {}
@@ -161,6 +168,7 @@ class AgentNetInputs:
                 )
                 node_prefixes[HUB_NODE_ID] = (ipaddress.ip_network(f"{hub_address}/32"),)
         client_pool: ipaddress.IPv4Network | None = None
+        session_routes: tuple[tuple[Network, str], ...] = ()
         local_addresses: tuple[ipaddress.IPv4Address, ...] = ()
         access_ifaces: tuple[str, ...] = ()
         node_id = self.config.node_id
@@ -191,6 +199,17 @@ class AgentNetInputs:
                     ipaddress.ip_network(item.prefix, strict=False)
                 )
             node_prefixes = {key: tuple(value) for key, value in grouped.items()}
+            if links.get(fabric_iface, False) and any(
+                "fabric" in rule.from_ for rule in bundle.policy.egress
+            ):
+                # The node takes traffic from the fabric (an exit node, D-69): its answers
+                # come back from the internet addressed to fabric prefixes and must return
+                # through the tunnel, whatever mark they carry. Prefix routes in main (owned
+                # by protocol 77, gone with the tunnel) do that without touching the
+                # reverse-path check, which honours the packet mark.
+                session_routes = tuple(
+                    (net, fabric_iface) for nets in node_prefixes.values() for net in nets
+                )
         tunnel_ifaces = {tunnel.interface for tunnel in tunnels.values()}
         return NodeFacts(
             node_id=node_id,
@@ -205,6 +224,7 @@ class AgentNetInputs:
             all_rp_filter=self.probes.rp_filter(),
             local_addresses=local_addresses,
             access_ifaces=access_ifaces,
+            session_routes=session_routes,
         )
 
     def desired(self) -> DesiredState:

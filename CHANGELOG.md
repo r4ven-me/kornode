@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added (P4-06 part 1, D-69; branch `redesign/p4-06-exit-via-node`, not merged)
+
+- `via: exit:<n>` for agent-originated traffic (`to: any`, clients and sources): the hub marks an agent's traffic by source prefix for the exit node's session table (`unreachable` while it is offline), the exit node (role `exit`, implicit `from: fabric -> any via local` rule) masquerades it, answers return through fabric prefix routes in main. The hub now rejects agent traffic to non-fabric destinations unless a policy declares an exit.
+- Validation: the target must be another active agent with role `exit`; the role cannot be dropped while in use; `RUNTIME_GAPS["exit"]` is true.
+- Hub-originated exits and set/domain-based exits are P4-06 part 2.
+
 ### Added (P4-05, D-68)
 
 - Doctor: a foreign `masquerade`/`snat` rule that matches a source's subnet or interface (nftables and the legacy iptables backend) is the error `foreign_nat_on_source`; an absent source interface is a single `missing_source` warning; `docs/sources.md` (wg-easy/Amnezia setup, NAT hooks, MTU, DNS); `AgentService.sources()` reports `runtime_supported: true`; agent image ships `iptables` (read-only checks).

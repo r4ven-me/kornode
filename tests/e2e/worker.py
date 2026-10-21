@@ -184,12 +184,18 @@ ACCESS_CLIENT = """import json,os,subprocess,sys,time
 o=json.load(sys.stdin)
 d="/tmp/kn-access"
 os.makedirs(d,exist_ok=True)
+gw=None
+if o.get("full"):
+ r=subprocess.run(["ip","-4","-j","route","show","default"],capture_output=True)
+ gw=json.loads(r.stdout)[0]["gateway"]
 script="\\n".join([
  "#!/bin/sh",
  '[ "$reason" = connect ] || exit 0',
  'ip link set dev "$TUNDEV" up mtu "${INTERNAL_IP4_MTU:-1400}"',
  'ip addr add "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"',
  *["ip route add %s dev \\"$TUNDEV\\""%r for r in o["routes"]],
+ *(["ip route add %s/32 via %s"%(o["host"],gw)] if gw else []),
+ *(['ip route replace default dev "$TUNDEV"'] if gw else []),
  ""])
 open(d+"/vpnc","w").write(script)
 os.chmod(d+"/vpnc",0o755)
@@ -541,8 +547,9 @@ class Worker:
                 )
             service["environment"] = {"KORNODE_CONFIG": str(config_path)}
             service["ports"] = ["443:443/tcp"] + (["18444:18444/tcp"] if self.role == "hub" else [])
-            if self.role == "hub" and self.case == "routed":
-                # NL-03: a client of agent-a reaches the hub test listener from outside.
+            if self.role in {"hub", "ext"} and self.case == "routed":
+                # NL-03: a client of agent-a reaches the hub test listener from outside;
+                # E2E-07: ext is the "internet" an exit node reaches.
                 service["ports"].append("9100:9100/tcp")
         services = {"node": service}
         compose: dict[str, Any] = {"services": services}
@@ -671,6 +678,8 @@ class Worker:
             ("routes", ["ip", "route", "show", "table", "all"]),
             ("nft", ["nft", "list", "ruleset"]),
             ("rp_filter", ["sysctl", "-a", "--pattern", "rp_filter|ip_forward"]),
+            # The test flows only (port 9100): where did the connection get to?
+            ("conntrack", ["sh", "-c", "grep 'dport=9100' /proc/net/nf_conntrack | head -8"]),
         ):
             try:
                 _, out = self.execute(argv, allowed=tuple(range(256)), timeout=20)
@@ -763,15 +772,24 @@ class Worker:
         if self.role != "hub" or self.case != "routed":
             raise ValueError("routed case, hub only")
         path = self.directory / "access-policy.json"
+        via = self.payload.get("via", "local")
+        if via not in {"local", "exit:3"}:  # exit:3 is agent-b, the second enrolled agent
+            raise ValueError("invalid exit")
         rules = [
             {"id": "clients-fabric", "from": ["clients"], "to": "fabric", "via": "fabric"},
-            {"id": "clients-out", "from": ["clients"], "to": "any", "via": "local"},
+            {"id": "clients-out", "from": ["clients"], "to": "any", "via": via},
         ]
         atomic(path, {"egress": rules})
         try:
             return self.cli("agent", "egress", "set", "agent-a", "--file", str(path))
         finally:
             path.unlink(missing_ok=True)
+
+    def exit_role(self) -> Any:
+        """Agent-b becomes an exit node (hub only)."""
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        return self.cli("agent", "set", "agent-b", "--role", "exit")
 
     def access_client(self) -> Any:
         if self.role != "agent-b" or self.case != "routed":
@@ -787,6 +805,7 @@ class Worker:
         if not re.fullmatch(r"pin-sha256:[A-Za-z0-9+/=]{44}", options["pin"]):
             raise ValueError("invalid pin")
         options["routes"] = [str(ipaddress.ip_network(route)) for route in o["routes"]]
+        options["full"] = o.get("full") is True
         self.compose("up", "-d", "client")
         _, data = self.run(
             ["docker", "exec", "-i", self.container("client"), "python", "-c", ACCESS_CLIENT],
@@ -868,7 +887,9 @@ class Worker:
         return json.loads(data)
 
     def fabric_listen(self) -> Any:
-        if not (self.role == "hub" or self.role.startswith("agent-")) or self.case != "routed":
+        if self.role not in {"hub", "ext"} and not self.role.startswith("agent-"):
+            raise ValueError("routed case only")
+        if self.case != "routed":
             raise ValueError("routed case only")
         seconds = self.payload["seconds"]
         if type(seconds) is not int or not 1 <= seconds <= 120:
@@ -1200,6 +1221,7 @@ class Worker:
             "source_iface",
             "source_add",
             "client_route",
+            "exit_role",
             "access_setup",
             "access_policy",
             "access_client",

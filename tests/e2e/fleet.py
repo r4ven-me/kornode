@@ -309,6 +309,50 @@ class Cluster:
                 "initial agent bundle was not confirmed",
             )
 
+    def tcp_unreachable(
+        self,
+        listener: str,
+        connector: str,
+        host: str,
+        *,
+        source: str | None = None,
+        seconds: int = 25,
+        client: bool = False,
+    ) -> bool:
+        """True when nothing connecting `connector` -> host:9100 for `seconds` reaches the
+        listener: the fail-closed check of an exit that is down."""
+        result: dict[str, Any] = {}
+
+        def listen() -> None:
+            try:
+                result["peer"] = self.call(listener, "fabric_listen", seconds=seconds)["peer"]
+            except E2EError as exc:
+                result["error"] = exc
+
+        thread = threading.Thread(target=listen, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + seconds - 3
+        reached = False
+        while thread.is_alive() and time.monotonic() < deadline:
+            reached = bool(
+                self.call(connector, "fabric_connect", host=host, source=source, client=client)[
+                    "ok"
+                ]
+            )
+            if reached:
+                break
+            time.sleep(1)
+        thread.join(seconds + 30)
+        if "error" in result:
+            raise result["error"]
+        if reached or result.get("peer") is not None:
+            lines = [f"{connector} -> {host} reached {listener} (peer {result.get('peer')})"]
+            for role in ("hub", listener):
+                for name, text in self.call(role, "net_dump").items():
+                    lines.append(f"--- {role} {name}\n{text}")
+            raise E2EError("\n".join(lines))
+        return True
+
     def tcp_peer(
         self,
         listener: str,
@@ -348,7 +392,8 @@ class Cluster:
             raise result["error"]
         peer = result.get("peer")
         if not isinstance(peer, str):
-            dumps = {role: self.call(role, "net_dump") for role in ("hub", listener, connector)}
+            roles = dict.fromkeys(("hub", "agent-a", listener, connector))
+            dumps = {role: self.call(role, "net_dump") for role in roles}
             lines = [f"no connection {connector} -> {host} reached {listener}"]
             for role, dump in dumps.items():
                 lines += [f"--- {role} {name}\n{text}" for name, text in dump.items()]

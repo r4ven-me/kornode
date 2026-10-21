@@ -28,7 +28,13 @@ from kornode.bundle.errors import BundleError
 from kornode.bundle.redaction import Redactor
 from kornode.config.models import AppConfig
 from kornode.net.addressing import LocalNetwork, OwnedPrefix, check_overlaps, derive_addresses
-from kornode.net.compile import NodeFacts, SourceFact, TunnelFact, compile_policy
+from kornode.net.compile import (
+    NodeFacts,
+    SourceFact,
+    TunnelFact,
+    compile_policy,
+    node_exit_tunnels,
+)
 from kornode.net.errors import NetError
 from kornode.net.model import NAME_PATTERN, EgressPolicy, Source
 from kornode.registry.db import migrate, open_registry, transaction
@@ -56,7 +62,7 @@ ACCESS_CERT_DAYS = 825
 
 RUNTIME_GAPS = {
     "access": True,
-    "exit": False,
+    "exit": True,
     "routed_prefixes": True,
     "domain_sets": False,
     "p12": False,
@@ -841,10 +847,7 @@ class AgentService:
                     "runtime_unsupported",
                     "agent domain/URL resolution is not implemented; use explicit CIDRs",
                 )
-            if any(rule.via.startswith("exit:") for rule in policy.egress):
-                raise ManagementError(
-                    409, "runtime_unsupported", "exit via another node requires P4-06"
-                )
+            self._check_exits(r, node, policy)
             for source in policy.sources:
                 network = ipaddress.ip_network(source.cidr)
                 if not source.allow_outside_pool and (
@@ -871,6 +874,7 @@ class AgentService:
                     409, "interface_conflict", "sources and tunnels must have distinct interfaces"
                 )
             tunnels = {"fabric": TunnelFact("oc-hub0", False)}
+            tunnels.update(node_exit_tunnels(policy, "oc-hub0", False))
             tunnels.update(
                 {
                     f"upstream:{e.name}": TunnelFact(str(e.spec.get("interface", "")), False)
@@ -886,8 +890,14 @@ class AgentService:
                     upstreams=tuple(e.name for e in externals if e.spec.get("enabled", True)),
                     tunnels=tunnels,
                     sources={s.name: SourceFact(False) for s in policy.sources},
+                    node_prefixes={
+                        other.id: (self.addresses(other.id).client_pool,)
+                        for other in r.list_nodes()
+                        if other.state == "active" and other.id != node.id
+                    },
                 ),
             )
+        self._check_exit_role_kept(r, changed)
         f = self.config.fabric
         conflicts = check_overlaps(
             owned,
@@ -903,6 +913,69 @@ class AgentService:
                 "network overlaps another owner",
                 [c.to_dict() for c in conflicts.errors],
             )
+
+    def _check_exits(self, r: Registry, node: Node, policy: EgressPolicy) -> None:
+        """`via: exit:<n>` (D-69): n must be another active agent with role `exit`; only
+        `to: any` (the hub does not repeat domain/set matching), only clients and
+        sources (host traffic carries the uplink address, which the hub's strict reverse
+        path drops), and a source must be exported so that answers find their way back."""
+        nodes = {item.id: item for item in r.list_nodes()}
+        for rule in policy.egress:
+            via = rule.parsed_via
+            if via.kind != "exit":
+                continue
+            target = int(via.target or 0)
+            other = nodes.get(target)
+            if target == node.id or other is None or other.state != "active":
+                raise ManagementError(
+                    409, "exit_node", f"exit:{target} needs another active agent with role exit"
+                )
+            if "exit" not in other.roles:
+                raise ManagementError(
+                    409, "role_required", f"agent {other.name} lacks the exit role"
+                )
+            if rule.to != "any":
+                raise ManagementError(
+                    409,
+                    "runtime_unsupported",
+                    "exit via another node supports `to: any` only; set/domain exits need hub sets",
+                )
+            if "host" in rule.from_:
+                raise ManagementError(
+                    409,
+                    "runtime_unsupported",
+                    "the node's own traffic cannot use exit:<n>; use clients or sources",
+                )
+            for name in rule.from_:
+                source = next((item for item in policy.sources if item.name == name), None)
+                if source is not None and not source.export:
+                    raise ManagementError(
+                        409,
+                        "source_export",
+                        f"source {name} must be exported to use an exit (answers return by prefix)",
+                    )
+
+    def _check_exit_role_kept(self, r: Registry, changed: int) -> None:
+        """A node that other agents use as their exit keeps its role (and stays active)."""
+        node = r.get_node(changed)
+        if "exit" in node.roles and node.state == "active":
+            return
+        for other in r.list_nodes():
+            if other.id == changed or other.state == "revoked":
+                continue
+            try:
+                policy = parse(EgressPolicy, other.policy)
+            except ManagementError:
+                continue  # another node's stale policy is not this mutation's problem
+            if any(
+                rule.parsed_via.kind == "exit" and rule.parsed_via.target == str(changed)
+                for rule in policy.egress
+            ):
+                raise ManagementError(
+                    409,
+                    "exit_in_use",
+                    f"agent {other.name} uses {node.name} as its exit; change its policy first",
+                )
 
     def _reload_ocserv(self) -> None:
         CommandRunner().run(SessionService(self.config).occtl_argv("reload"), timeout=15)
