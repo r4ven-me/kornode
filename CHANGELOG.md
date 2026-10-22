@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (netlab NL-09, branch `redesign/netlab-nl09-loss`)
+
+- `test_nl09_50_mb_transfer_completes_through_the_tunnel_with_loss_and_latency`: 5 % loss and 25 ms each way (netem on both uplinks) on the carrier of a real full tunnel; 50 MB from the hub's LAN to the node arrive complete (219 s on the hub-VM). Netem on one side only was not enough: the bulk data flows the other way (11.9 s).
+
 ### Added (E2E NL-13-forwarding and 60 s recovery, branch `redesign/e2e-nl13-forwarding-recovery`)
 
 - `test_nl_13_forwarding_access_client_keeps_the_internet_while_the_hub_is_down`: a VPN client of agent-a keeps reaching ext with the hub stopped; after agent-a restarts from its cached bundle (hub still down) a new login works. `test_fabric_recovers_after_a_60_second_hub_outage_without_operator_action`: after 60 s without the hub both agents reconnect and the hub reaches them by fabric address. Both passed on the four VMs (2 passed, 9 min). The `NL-13-forwarding` stub is removed from `BLOCKED` (skips: 6 → 5).

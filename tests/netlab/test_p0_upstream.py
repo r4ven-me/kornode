@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from tests.netlab.helpers import http_get, tcp_check
+from tests.netlab.helpers import http_get, netem, tcp_check
 from tests.netlab.kornode_nodes import (
     UPSTREAM_INTERFACE,
     HubServerHandle,
@@ -506,3 +506,72 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait()
+
+
+BULK_PORT = 9191
+BULK_BYTES = 50 * 1024 * 1024
+
+
+@pytest.mark.netlab
+def test_nl09_50_mb_transfer_completes_through_the_tunnel_with_loss_and_latency(
+    topology: Topology,
+    connected_node3: UpstreamHandle,
+) -> None:
+    """NL-09 (spec 09): 5 % loss and 50 ms RTT (25 ms each way) on the carrier path, 50 MB
+    through the tunnel (the node's full-tunnel host traffic to the hub's LAN). TCP inside TCP
+    must finish (219 s on the hub-VM)."""
+    server = subprocess.Popen(  # noqa: S603 - explicit argv
+        [
+            "ip", "netns", "exec", topology.hub.full_name, "python3", "-c",
+            textwrap.dedent(
+                f"""
+                import socket
+                s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(({HUB_LAN_ADDR!r}, {BULK_PORT})); s.listen(4)
+                chunk = b"x" * 65536
+                while True:
+                    c, _ = s.accept()
+                    sent = 0
+                    try:
+                        while sent < {BULK_BYTES}:
+                            c.sendall(chunk); sent += len(chunk)
+                    except OSError:
+                        pass
+                    c.close()
+                """
+            ),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        assert _wait_listening(topology.node3, HUB_LAN_ADDR, BULK_PORT)
+        # Both directions: the bulk data flows hub -> node, so the hub's side matters most.
+        for ns in (topology.node3, topology.hub):
+            netem(ns, _default_route_device(ns), loss=5, delay_ms=25)
+        code = (
+            "import socket, time\n"
+            f"s = socket.create_connection(({HUB_LAN_ADDR!r}, {BULK_PORT}), timeout=30)\n"
+            "total = 0; start = time.monotonic()\n"
+            "while True:\n"
+            "    data = s.recv(1 << 20)\n"
+            "    if not data: break\n"
+            "    total += len(data)\n"
+            "print(total, round(time.monotonic() - start, 1))\n"
+        )
+        result = topology.node3.run(["python3", "-c", code], timeout=420, check=False)
+        received, seconds = result.stdout.split()
+        print(f"NL-09: {received} bytes in {seconds}s")  # noqa: T201 - evidence
+        assert int(received) == BULK_BYTES, result.stderr
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
+def _wait_listening(ns: Namespace, host: str, port: int, *, seconds: float = 10) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if tcp_check(ns, host, port, timeout=1.0):
+            return True
+        time.sleep(0.2)
+    return False

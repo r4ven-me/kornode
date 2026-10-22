@@ -46,7 +46,7 @@ Scenario list (must all exist by the end of P4; each maps to a task "Done when")
 | NL-06 | awg3 client → hub monitoring | via fabric, hub sees `10.8.3.2` |
 | NL-07 | hub client → hub docker bridge with `via: upstream` rule | local delivery |
 | NL-08 | openconnect bounce under traffic | zero marked packets on uplink |
-| NL-09 | 5 % loss + 50 ms on carrier | 50 MB transfer completes |
+| NL-09 (`test_p0_upstream.py`, done) | 5 % loss + 50 ms on carrier | 50 MB transfer completes |
 | NL-10 | delete policy route manually | restored ≤ 2 s |
 | NL-11 | bundle cutting the fabric | rollback ≤ 70 s, reported |
 | NL-12 | tampered bundle | rejected, version unchanged |
