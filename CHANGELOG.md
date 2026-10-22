@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added (agent image in GHCR, branch `fix/agent-image-release`)
+
+- `Release image` publishes `ghcr.io/<owner>/kornode-agent` (`Dockerfile.agent`) next to the hub image, as `v<version>` and `latest`. Each image checks its own tag, so the agent image is published for the current version even though the hub image already exists; build caches are scoped per image.
+- `compose.agent.yaml` takes the image from `KORNODE_AGENT_IMAGE` (default: the locally built `kornode-agent:latest`), so a node can be deployed from that one file and the published image. README "Adding an agent" and `docs/panel.md` ("Deploying an agent") describe the hub prerequisites (`control.enabled`, a reachable `server.cn`, the open port) and both ways. Tests: `test_agent_compose_runs_the_published_image_without_a_source_tree`, `test_release_workflow_publishes_the_hub_and_the_agent_image`.
+
 ### Changed (panel look and navigation, branch `fix/panel-design-nav`)
 
 - The sidebar is grouped by task: Dashboard; Access (Users, Groups, Sessions); Routing (Network, Agents, Fabric); System (Config, Diagnostics, Logs, Terminal). Every section has its own icon, and the line under the page title describes the open section instead of repeating the version (it stays in the sidebar footer).

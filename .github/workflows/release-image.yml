@@ -1,8 +1,10 @@
 name: Release image
 
-# Publishes ghcr.io/<owner>/kornode:v<version> and :latest whenever the
-# version in pyproject.toml has no image yet, i.e. after a version bump lands
-# on main. Runs only once CI has passed for that commit.
+# Publishes ghcr.io/<owner>/kornode (hub) and ghcr.io/<owner>/kornode-agent
+# as :v<version> and :latest whenever the version in pyproject.toml has no
+# image yet, i.e. after a version bump lands on main. Each image is checked on
+# its own, so one missing image is published even if the other already exists.
+# Runs only once CI has passed for that commit.
 on:
   workflow_run:
     workflows: [CI]
@@ -20,6 +22,16 @@ concurrency:
 
 jobs:
   publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: kornode
+            dockerfile: Dockerfile
+            target: runtime
+          - name: kornode-agent
+            dockerfile: Dockerfile.agent
+            target: ""
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -35,7 +47,7 @@ jobs:
         id: version
         run: |
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kornode"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.name }}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
           echo "Project version: ${version}, image: ${image}"
@@ -74,12 +86,13 @@ jobs:
         if: steps.exists.outputs.published != 'true'
         with:
           context: .
-          target: runtime
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Optional repository variable: pins the ocserv source tarball hash.
           build-args: |
             OCSERV_SHA256=${{ vars.OCSERV_SHA256 }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

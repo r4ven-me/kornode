@@ -203,15 +203,17 @@ make frontend-audit
 
 ### Releasing an image
 
-GitHub Actions publishes the runtime image to GHCR automatically:
+GitHub Actions publishes two images to GHCR automatically: the hub
+(`ghcr.io/r4ven-me/kornode`, `Dockerfile`) and the agent (`ghcr.io/r4ven-me/kornode-agent`,
+`Dockerfile.agent`):
 
 1. bump `version` in `pyproject.toml` and push it to `main` (directly or via a PR);
 2. the `CI` workflow runs on that commit;
 3. once CI passes, the `Release image` workflow (`.github/workflows/release-image.yml`)
-   checks whether `ghcr.io/r4ven-me/kornode:v<version>` already exists. If it doesn't,
-   the workflow builds the image and pushes it as `v<version>` and `latest`.
+   checks for each image whether `v<version>` already exists. If it doesn't, the workflow
+   builds that image and pushes it as `v<version>` and `latest`.
 
-Pushes that don't change the version find the tag already published and skip the build.
+Pushes that don't change the version find both tags already published and skip the build.
 The workflow can also be started by hand from the Actions tab ("Run workflow"). If the
 `OCSERV_SHA256` repository variable is set, the build verifies the ocserv source tarball
 against it.
@@ -708,19 +710,35 @@ address `10.100.<id>.1` and DNS zone `node<id>.kornode.internal`. Overlapping pr
 
 ### Adding an agent
 
-On the hub (the control plane listens on the fabric address; enable it with `control.enabled: true`):
+The hub needs three things first: `control.enabled: true` in its config (the control plane listens on the fabric
+address `10.99.0.1:8444`, reached from inside the tunnel); `server.cn` set to a name or address the new node can
+reach, because the enroll token carries `server.cn:server.port` as the hub address; and that port (443/tcp by
+default) open. The agent only dials out, so it needs no inbound port unless it has the `access` role.
+
+On the hub (or in the panel: Agents → Add agent; the token is shown once and expires after
+`control.enroll_token_ttl_minutes`, 60 by default):
 
 ```bash
 docker compose exec kornode korctl agent create site-a --role exit   # roles: access, exit (optional)
 docker compose exec kornode korctl agent token site-a                # one-time enroll token
 ```
 
-On the new node (`compose.agent.yaml`, `network_mode: host`, persistent `./agent-data`):
+On the new node (Docker with `/dev/net/tun`; `compose.agent.yaml`, `network_mode: host`, persistent
+`./agent-data`), either build the `kornode-agent` image from a checkout of this repository or take the published
+one; only `compose.agent.yaml` is needed for the latter:
 
 ```bash
+# published image, no source tree
+export KORNODE_AGENT_IMAGE=ghcr.io/r4ven-me/kornode-agent:latest
+docker compose -f compose.agent.yaml pull
+
 docker compose -f compose.agent.yaml run --rm agent kornode-agent enroll <token>
 docker compose -f compose.agent.yaml up -d
 ```
+
+Without `KORNODE_AGENT_IMAGE` the same commands build `Dockerfile.agent` from the checkout. `./agent-data` holds the
+agent's keys, certificate and cached bundle: keep it, it is what lets the agent boot and forward while the hub is
+down. The agent appears as `active · online` under Agents and in Fabric → Topology.
 
 Then manage the agent from the hub: `korctl agent list|show|set|status|revoke|delete`, its exported networks
 (`korctl agent prefix list|add|del`), its egress policy (`korctl agent egress show|set|edit`), sources
