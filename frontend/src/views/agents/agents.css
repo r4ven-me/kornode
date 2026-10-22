@@ -1,32 +1,19 @@
 .agents-view { min-width: 0; }
-.agents-view .agent-fields { border: 0; padding: 0; margin: 16px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
-.agents-view label, .agent-enrollment label { display: grid; gap: 6px; min-width: 0; font-size: 14px; }
-.agents-view input:not([type="checkbox"]), .agents-view select, .agents-view textarea, .agent-enrollment input { width: 100%; min-width: 0; min-height: 40px; box-sizing: border-box; }
-.agents-view textarea { min-height: 100px; resize: vertical; }
 .agents-view button, .agent-enrollment button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; }
-.agents-view .agent-check, .agents-view .agent-checks label { display: flex; align-items: center; gap: 8px; min-height: 40px; }
-.agents-view input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; flex: 0 0 auto; }
-.agents-view .agent-checks { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
-.agents-view .agent-list, .agents-view .agent-items { list-style: none; padding: 0; display: grid; gap: 10px; }
 .agents-view .agent-summary { display: grid; gap: 6px; width: 100%; padding: 12px; text-align: left; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .agents-view .agent-summary.active { border-color: var(--accent); }
-.agents-view .agent-items li { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 10px 0; min-width: 0; }
-.agents-view .agent-items li > span { min-width: 0; overflow-wrap: anywhere; }
-.agents-view small { display: block; overflow-wrap: anywhere; }
-.agents-view .agent-resource-stack, .agents-view .agent-rule-list { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 16px; }
-.agents-view .agent-rule { border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
-.agents-view .agent-code { max-width: 100%; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
-.agents-view summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; font-weight: 600; }
+.agents-view summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; font-weight: 800; }
+.agents-view details[open] > summary { margin-bottom: 12px; }
 .agents-view .agent-section { max-width: 420px; }
+.agent-enrollment label { display: grid; gap: 6px; min-width: 0; font-size: 14px; }
+.agent-enrollment input { width: 100%; min-width: 0; min-height: 40px; box-sizing: border-box; }
 .agent-enrollment { width: min(620px, calc(100vw - 32px)); box-sizing: border-box; color: var(--text); }
 .agent-enrollment::backdrop { background: color-mix(in srgb, var(--sidebar) 70%, transparent); }
 @media (max-width: 760px) {
-  .agents-view .agent-fields { grid-template-columns: minmax(0, 1fr); }
   .agents-view button, .agent-enrollment button, .agents-view summary,
   .agents-view input:not([type="checkbox"]), .agents-view select,
   .agents-view .agent-check, .agents-view .agent-checks label { min-height: 44px; }
   .agent-enrollment input { min-height: 44px; }
-  .agents-view .agent-items li { align-items: stretch; flex-direction: column; }
   .agents-view .row-actions { flex-wrap: wrap; }
   .agents-view .panel-footer { flex-direction: column; align-items: stretch; }
   .agents-view .agent-section { max-width: none; }

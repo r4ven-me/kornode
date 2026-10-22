@@ -78,6 +78,22 @@ export function NetworkView({ token }: { token: string }) {
   return (
     <div className="view-stack">
       {error && <section className="panel notice-error">{error}</section>}
+      <HubEgress token={token} />
+      <section className="panel" data-capability="net.status">
+        <div className="panel-header">
+          <div>
+            <h2>Reconciler</h2>
+            <p className="muted-line">Background process that keeps the kernel in line with the saved policy.</p>
+          </div>
+          <Pill kind={status?.running ? "ok" : "muted"}>
+            {status?.running ? "Running" : "Stopped"}
+          </Pill>
+        </div>
+        <p className="muted-line">
+          passes: {status?.passes ?? 0} · last error: {status?.last_error ?? "none"} · drift:{" "}
+          {netDriftCount(status)}
+        </p>
+      </section>
       <section className="panel" data-capability="net.plan">
         <div className="panel-header">
           <div>
@@ -154,7 +170,10 @@ export function NetworkView({ token }: { token: string }) {
 
       <section className="panel" data-capability="net.explain">
         <div className="panel-header">
-          <h2>Explain</h2>
+          <div>
+            <h2>Explain</h2>
+            <p className="muted-line">Which rule, route and NAT a packet from source to destination gets.</p>
+          </div>
         </div>
         <form className="inline-form" onSubmit={submitExplain}>
           <label>
@@ -187,19 +206,6 @@ export function NetworkView({ token }: { token: string }) {
         )}
       </section>
 
-      <section className="panel" data-capability="net.status">
-        <div className="panel-header">
-          <h2>Reconciler</h2>
-          <Pill kind={status?.running ? "ok" : "muted"}>
-            {status?.running ? "Running" : "Stopped"}
-          </Pill>
-        </div>
-        <p className="muted-line">
-          passes: {status?.passes ?? 0} · last error: {status?.last_error ?? "none"} · drift:{" "}
-          {netDriftCount(status)}
-        </p>
-      </section>
-      <HubEgress token={token} />
     </div>
   );
 }

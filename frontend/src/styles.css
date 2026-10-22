@@ -149,7 +149,23 @@ textarea:disabled {
 
 .sidebar nav {
   display: grid;
-  gap: 6px;
+  gap: 14px;
+}
+
+.nav-group {
+  display: grid;
+  gap: 4px;
+}
+
+.nav-group-label {
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0;
+  opacity: 0.75;
+  padding: 0 10px 2px;
+  text-transform: uppercase;
 }
 
 .sidebar-footer {
@@ -749,7 +765,9 @@ textarea:focus {
 }
 
 .switch input[type="checkbox"],
-.mini-check input[type="checkbox"] {
+.mini-check input[type="checkbox"],
+.agent-check input[type="checkbox"],
+.agent-checks input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   background: var(--surface-3);
@@ -769,7 +787,9 @@ textarea:focus {
 }
 
 .switch input[type="checkbox"]::after,
-.mini-check input[type="checkbox"]::after {
+.mini-check input[type="checkbox"]::after,
+.agent-check input[type="checkbox"]::after,
+.agent-checks input[type="checkbox"]::after {
   background: #ffffff;
   border-radius: 8px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.35);
@@ -783,18 +803,24 @@ textarea:focus {
 }
 
 .switch input[type="checkbox"]:checked,
-.mini-check input[type="checkbox"]:checked {
+.mini-check input[type="checkbox"]:checked,
+.agent-check input[type="checkbox"]:checked,
+.agent-checks input[type="checkbox"]:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
 
 .switch input[type="checkbox"]:checked::after,
-.mini-check input[type="checkbox"]:checked::after {
+.mini-check input[type="checkbox"]:checked::after,
+.agent-check input[type="checkbox"]:checked::after,
+.agent-checks input[type="checkbox"]:checked::after {
   transform: translateX(18px);
 }
 
 .switch input[type="checkbox"]:focus-visible,
-.mini-check input[type="checkbox"]:focus-visible {
+.mini-check input[type="checkbox"]:focus-visible,
+.agent-check input[type="checkbox"]:focus-visible,
+.agent-checks input[type="checkbox"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -2572,4 +2598,147 @@ label .icon-button span {
   color: var(--text);
   font-size: 13px;
   padding: 2px 0;
+}
+
+/* Form building blocks of the v2 views (Agents, Fabric, Network → Egress).
+   Their labels wrap the control directly, without a <span>, so the label text
+   is styled on the label and the control resets back to the input look. */
+.agent-fields {
+  border: 0;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.agent-resource-stack,
+.agent-rule-list {
+  border: 0;
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.agent-fields label,
+.agent-section,
+.egress-rule-fields label,
+.egress-explain-bar label,
+.egress-json {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 7px;
+  min-width: 0;
+}
+
+.agent-fields label :is(input, select, textarea),
+.agent-section select,
+.egress-rule-fields :is(input, select),
+.egress-explain-bar input,
+.egress-json textarea {
+  box-sizing: border-box;
+  font-weight: 400;
+  width: 100%;
+}
+
+.agent-fields label.agent-check,
+.agent-checks label {
+  align-items: center;
+  color: var(--text);
+  display: inline-flex;
+  gap: 10px;
+  min-height: 40px;
+}
+
+.agent-checks {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.agent-list,
+.agent-items {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-items {
+  gap: 0;
+}
+
+.agent-items li {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.agent-items li:last-child {
+  border-bottom: 0;
+}
+
+.agent-items li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-items small {
+  color: var(--muted);
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.agent-rule {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.agent-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  max-height: 420px;
+  max-width: 100%;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+textarea.agent-code {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.panel > .agent-items,
+.panel > form,
+.panel > .field-help + .agent-items {
+  margin-top: 12px;
+}
+
+.panel-section-title {
+  font-size: 15px;
+  margin: 16px 0 4px;
+}
+
+@media (max-width: 760px) {
+  .agent-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-items li {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }

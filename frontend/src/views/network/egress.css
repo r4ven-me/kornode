@@ -1,5 +1,5 @@
-.egress-rules { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 10px; }
-.egress-rule { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; background: var(--surface); }
+.egress-rules { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.egress-rule { min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; background: var(--surface); }
 .egress-rule[draggable="true"] { cursor: grab; }
 .egress-rule.dead { border-color: #b7791f; }
 .egress-rule.matched { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -7,7 +7,6 @@
 .egress-rule-head input { flex: 1; min-width: 0; }
 .egress-rule-actions { display: inline-flex; gap: 4px; margin-left: auto; }
 .egress-rule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
-.egress-rule-fields label { display: grid; gap: 4px; min-width: 0; }
 .egress-pair { display: flex; gap: 6px; }
 .egress-pair input { flex: 1; min-width: 0; }
 .egress-wide { grid-column: 1 / -1; }
@@ -16,3 +15,4 @@
 .egress-explain-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 8px 0; }
 .egress-tabs { display: flex; gap: 8px; margin: 8px 0; }
 @media (max-width: 720px) { .egress-rule-fields { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) { .egress-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }

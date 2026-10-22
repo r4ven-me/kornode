@@ -24,8 +24,7 @@ export function FabricDns({ token, agents }: { token: string | null; agents: Arr
     finally { setBusy(false); }
   }
   const domain = zone?.domain ?? "";
-  return <section className="panel" data-capability="dns.record.list"><div className="panel-header"><h2>Fabric DNS</h2><span className="pill muted">{domain || "zone"}</span></div>
-    <p>The hub answers every name in the zone; each agent answers its own node zone even while the hub is unreachable.</p>
+  return <section className="panel" data-capability="dns.record.list"><div className="panel-header"><div><h2>Fabric DNS</h2><p className="muted-line">The hub answers every name in the zone; each agent answers its own node zone even while the hub is unreachable.</p></div><span className="pill muted">{domain || "zone"}</span></div>
     {error && <p role="alert">{error}</p>}
     <ul className="agent-items">{(zone?.records ?? []).map(r => <li key={`${r.fqdn}/${r.type}/${r.value}`}><span>{r.fqdn} · {r.type} · {r.value}{r.generated ? " · generated" : ` · ${r.node ?? "hub"}`}</span>
       {!r.generated && <div className="row-actions"><button className="action-button" type="button" disabled={busy} data-capability="dns.record.delete" onClick={() => {

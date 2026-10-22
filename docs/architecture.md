@@ -213,7 +213,7 @@ panel (a labeled input, checkbox or select bound to that specific field), groupe
 `config.yaml`'s own section layout: VPN server behavior and accepted auth methods live under
 the "Server (VPN)" / "Authentication methods" panels (Config tab), the admin web panel's own
 settings live under "Web / API panel", `system`/`cli` under "General", `identity`/`certificates`
-live in their own dedicated tabs, `egress`/`sources`/`sets` live in Network → Egress and sources,
+live in their own dedicated tabs, `egress`/`sources`/`sets` live in Network → Egress rules and Network → Sources,
 and `fabric` settings live in the Fabric tab.
 
 When a new field is added to `AppConfig`, add its GUI control in the same change:

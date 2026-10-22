@@ -146,7 +146,7 @@ Key files:
 - `frontend/` - Vite/React/TypeScript GUI source;
 - `templates/` - Jinja2 templates for generated system configs;
 - `tests/` - pytest coverage;
-- `docs/` - additional notes on architecture, security, networking and Docker;
+- `docs/` - additional notes on architecture, security, networking, Docker and the web panel;
 - `examples/` - minimal, full, hub-with-upstream (`middle-server`) and client-only configurations;
 - `Dockerfile` - frontend/backend test stages and the runtime image;
 - `compose.yaml` - production-like container startup;
@@ -772,7 +772,7 @@ docker compose exec kornode korctl net plan                # what the reconciler
 docker compose exec kornode korctl net explain --help      # why traffic from SRC to DST goes where it goes
 ```
 
-In the panel: Network → Egress and sources (hub) and Agents → policy (agents). Sources are documented in
+In the panel: Network → Egress rules and Sources (hub) and Agents → policy (agents). Sources are documented in
 [docs/sources.md](docs/sources.md): run the access server in `network_mode: host` and disable its own NAT hooks,
 kornode owns routing and NAT for the source subnet (`korctl doctor` reports foreign NAT rules as an error).
 
@@ -938,6 +938,9 @@ that CA is trusted or a public certificate is configured.
 If you enable `web.enabled: true`, supervisor starts the Uvicorn API and serves the
 static frontend from `/usr/share/kornode/frontend`, if a frontend build is present in
 the image.
+
+What each section of the panel does, and in which order to use them, is described in
+[docs/panel.md](docs/panel.md).
 
 Health endpoint from inside the container:
 

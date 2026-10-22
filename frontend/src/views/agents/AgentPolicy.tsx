@@ -4,7 +4,7 @@ import { EgressRules } from "../network/EgressRules";
 
 const NEW_AGENT_RULE: Rule = { from: ["host"], to: "any", via: "local" };
 
-/** Egress policy of one agent: the same ordered rule editor as the hub's (Network → Egress and sources). */
+/** Egress policy of one agent: the same ordered rule editor as the hub's (Network → Egress rules). */
 export function AgentPolicy({ policy, busy, mutate }: { policy: Policy; busy: boolean; mutate: Mutate }) {
   const [rules, setRules] = useState<Rule[]>(policy.egress ?? []);
   const [sets, setSets] = useState(JSON.stringify(policy.sets ?? {}, null, 2));
