@@ -14,8 +14,6 @@ from tests.e2e.inventory import E2EError
 pytestmark = pytest.mark.e2e
 
 BLOCKED = {
-    "NL-05": "source client through upstream:office needs a source client and the ext upstream "
-    "in one case (kill switch itself: client netlab suite); wg-easy image/kernel module absent",
     "NL-07": "covered by the netlab suppress-rule test (D-80)",
     "NL-08": "covered by netlab tunnel-bounce leak tests and the E2E-07 fail-closed checks (D-80)",
     "E2E-06-clients": "an upgrade restarts the agent's ocserv: client continuity is a re-login "
@@ -516,3 +514,53 @@ def test_fabric_recovers_after_a_60_second_hub_outage_without_operator_action(
     for role in ("agent-a", "agent-b"):
         address = cluster.call(role, "fabric_address")["address"]
         assert cluster.tcp_peer(role, "hub", address) == HUB_FABRIC_ADDRESS
+
+
+@pytest.mark.e2e_case("routed")
+def test_nl_05_awg_client_leaves_through_upstream_office_and_fails_closed_when_it_is_gone(
+    cluster: Cluster,
+) -> None:
+    """NL-05: a real wg-easy (AmneziaWG) is the source of agent-a (same network namespace as
+    the node, NAT hooks off). Its client reaches the "internet" (a listener on the agent-b VM)
+    through `upstream:office` (the ext VM masquerades it); with ext gone nothing arrives,
+    neither from ext nor from agent-a's own uplink."""
+    inventory = cluster.fleet.inventory
+    agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
+    ext = inventory.host("ext").address
+    cluster.configure_upstream()
+    before = cluster.status("agent-a")["applied_version"]
+    config = cluster.call("agent-a", "awg_server")["config"]
+    cluster.call("hub", "awg_policy")
+    wait_for(
+        lambda: cluster.status("agent-a")["applied_version"] > before,
+        60,
+        "agent-a did not apply the bundle with the wg-easy source",
+    )
+    try:
+        cluster.call(
+            "agent-b", "awg_client", config=config, endpoint_host=agent_a, routes=[f"{agent_b}/32"]
+        )
+        del config
+
+        def through_office() -> str | None:
+            try:
+                return cluster.tcp_peer("agent-b", "agent-b", agent_b, awg=True, seconds=30)
+            except E2EError:
+                return None
+
+        wait_for(
+            lambda: through_office() == ext,
+            150,
+            "the AmneziaWG client did not leave through upstream:office",
+        )
+
+        cluster.call("ext", "stop")
+        time.sleep(15)  # the upstream tunnel notices the server going away
+        try:
+            assert cluster.tcp_unreachable("agent-b", "agent-b", agent_b, awg=True), (
+                "AmneziaWG client traffic arrived while the upstream was down"
+            )
+        finally:
+            cluster.call("ext", "restart")
+    finally:
+        cluster.call("agent-b", "awg_client_stop")

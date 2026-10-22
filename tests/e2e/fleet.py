@@ -318,6 +318,7 @@ class Cluster:
         source: str | None = None,
         seconds: int = 25,
         client: bool = False,
+        awg: bool = False,
     ) -> bool:
         """True when nothing connecting `connector` -> host:9100 for `seconds` reaches the
         listener: the fail-closed check of an exit that is down."""
@@ -335,9 +336,9 @@ class Cluster:
         reached = False
         while thread.is_alive() and time.monotonic() < deadline:
             reached = bool(
-                self.call(connector, "fabric_connect", host=host, source=source, client=client)[
-                    "ok"
-                ]
+                self.call(
+                    connector, "fabric_connect", host=host, source=source, client=client, awg=awg
+                )["ok"]
             )
             if reached:
                 break
@@ -363,6 +364,7 @@ class Cluster:
         seconds: int = 120,
         client: bool = False,
         listener_client: bool = False,
+        awg: bool = False,
     ) -> str:
         """Open a TCP connection `connector` -> host:9100 where `listener` accepts it;
         return the peer address the listener saw (NAT would change it). `client` /
@@ -382,9 +384,9 @@ class Cluster:
         thread.start()
         deadline = time.monotonic() + seconds
         while thread.is_alive() and time.monotonic() < deadline:
-            if self.call(connector, "fabric_connect", host=host, source=source, client=client)[
-                "ok"
-            ]:
+            if self.call(
+                connector, "fabric_connect", host=host, source=source, client=client, awg=awg
+            )["ok"]:
                 break
             time.sleep(2)
         thread.join(30)
