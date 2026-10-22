@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added (E2E NL-05 with a real wg-easy, branch `redesign/e2e-nl05-awg`)
+
+- `test_nl_05_awg_client_leaves_through_upstream_office_and_fails_closed_when_it_is_gone`: wg-easy 15.4.0 (AmneziaWG, userspace) is the source of agent-a in the node's network namespace, its client runs on the agent-b VM; traffic leaves through `upstream:office` (ext masquerades), with ext stopped nothing arrives. Passed on the four VMs (4:52). New worker actions `awg_pull`, `awg_server`, `awg_policy`, `awg_client`, `awg_client_stop`, `awg_diag`; compose services `awg` (agent-a, `network_mode: service:node`) and `awg-client` (agent-b); agent-a publishes 51820/udp and agent-b 9100/tcp; in the `routed` case ext uses the default client policy (it is an upstream, not a hub). The harness safety test now allows exactly one `network_mode` (`service:node`), never host.
+- The VMs need MTU 1400 on the default route (ghcr.io TLS handshakes time out otherwise): `kornode-route-mtu.service`, now on all four VMs. `docs/runbooks/vm-e2e.md` notes it.
+
 ### Changed (agent policy editor, D-81, branch `redesign/hub-doctor-sources`)
 
 - The agent policy form uses the shared ordered rule editor (`EgressRules`: drag/arrows, structured to/via fields) instead of JSON-per-destination inputs; test `AgentPolicy.test.tsx`. The Fabric tab points at Network → Egress and sources for hub sources/prefixes instead of duplicating the editor.

@@ -527,6 +527,8 @@ def test_nl_05_awg_client_leaves_through_upstream_office_and_fails_closed_when_i
     inventory = cluster.fleet.inventory
     agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
     ext = inventory.host("ext").address
+    for role in ("agent-a", "agent-b"):
+        cluster.call(role, "awg_pull")
     cluster.configure_upstream()
     before = cluster.status("agent-a")["applied_version"]
     config = cluster.call("agent-a", "awg_server")["config"]
@@ -548,11 +550,17 @@ def test_nl_05_awg_client_leaves_through_upstream_office_and_fails_closed_when_i
             except E2EError:
                 return None
 
-        wait_for(
-            lambda: through_office() == ext,
-            150,
-            "the AmneziaWG client did not leave through upstream:office",
-        )
+        try:
+            wait_for(
+                lambda: through_office() == ext,
+                150,
+                "the AmneziaWG client did not leave through upstream:office",
+            )
+        except E2EError as exc:
+            dumps = {role: cluster.call(role, "awg_diag") for role in ("agent-a", "agent-b")}
+            dumps["net"] = cluster.call("agent-a", "net_dump")
+            dumps["status"] = cluster.status("agent-a")
+            raise E2EError(f"{exc}: {dumps}") from None
 
         cluster.call("ext", "stop")
         time.sleep(15)  # the upstream tunnel notices the server going away

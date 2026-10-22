@@ -545,6 +545,10 @@ class Worker:
                 "web": {"enabled": False},
                 "egress": [],
             }
+            if self.role == "ext" and self.case == "routed":
+                # NL-05: ext is the "office" upstream and lets its clients (the agent's tunnel)
+                # out locally: the default policy, not the empty one of the hub.
+                del config["egress"]
             atomic(config_path, config)
         agent = self.role.startswith("agent-")
         service: dict[str, Any] = {
@@ -788,6 +792,29 @@ class Worker:
             dump[name] = out.decode(errors="replace")[:6000]
         return dump
 
+    def awg_diag(self) -> Any:
+        """State of the wg-easy source (agent-a) or of its client (agent-b): interfaces,
+        routes, handshake. `awg show` hides private keys; nothing here is a credential."""
+        if self.role not in {"agent-a", "agent-b"} or self.case != "routed":
+            raise ValueError("routed case, agents only")
+        service = "awg" if self.role == "agent-a" else "awg-client"
+        container = self.container(service)
+        dump = {}
+        for name, argv in (
+            ("awg", ["awg", "show"]),
+            ("addr", ["ip", "-br", "addr"]),
+            ("routes", ["ip", "route", "show", "table", "all"]),
+            ("nat", ["iptables", "-t", "nat", "-S"]),
+        ):
+            try:
+                _, out = self.run(
+                    ["docker", "exec", container, *argv], allowed=tuple(range(256)), timeout=20
+                )
+            except (ValueError, subprocess.TimeoutExpired):
+                out = b"unavailable"
+            dump[name] = out.decode(errors="replace")[:4000]
+        return dump
+
     def resolved_sets(self) -> Any:
         """What the agent's set resolver recorded (addresses only, D-78/D-79)."""
         if not self.role.startswith("agent-") or self.case != "routed":
@@ -1028,6 +1055,19 @@ class Worker:
             )  # fmt: skip
             out["client_state"] = state.decode(errors="replace")[:2500]
         return {key: value[-3000:] for key, value in out.items()}
+
+    def awg_pull(self) -> Any:
+        """Pull the wg-easy image on this VM (a separate, longer action: the registry is slow)."""
+        if self.role not in {"agent-a", "agent-b"} or self.case != "routed":
+            raise ValueError("routed case, agents only")
+        for attempt in range(5):  # ghcr.io from the VMs drops TLS handshakes now and then
+            try:
+                self.run(["docker", "pull", AWG_IMAGE], timeout=60)
+                return {"pulled": True}
+            except (ValueError, subprocess.TimeoutExpired):
+                if attempt == 4:
+                    raise
+        raise AssertionError("unreachable")
 
     def awg_server(self) -> Any:
         """Start the wg-easy source of agent-a (NL-05) and return a client configuration."""
@@ -1496,6 +1536,8 @@ class Worker:
             "access_client",
             "access_diag",
             "access_client_stop",
+            "awg_diag",
+            "awg_pull",
             "awg_server",
             "awg_policy",
             "awg_client",
