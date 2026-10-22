@@ -14,8 +14,6 @@ from tests.e2e.inventory import E2EError
 pytestmark = pytest.mark.e2e
 
 BLOCKED = {
-    "E2E-07": "the domain/subnet-list half needs set exits (D-78); the full-tunnel half of a "
-    "hub source is test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_gone",
     "NL-05": "source client through upstream:office needs a source client and the ext upstream "
     "in one case (kill switch itself: client netlab suite); wg-easy image/kernel module absent",
     "NL-07": "P4 local delivery with the new egress model",

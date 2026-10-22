@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Removed (stale E2E-07 stub, branch `redesign/e2e-drop-stale-e2e07-stub`)
+
+- The `E2E-07` entry of `BLOCKED` in `tests/e2e/test_routed_fabric.py`: its reason (set exits, D-78) was lifted by D-79 and all three E2E-07 scenarios exist as real tests. Skips in the `routed` case: 7 → 6.
+- `test_offline_plan_performs_no_inventory_or_ssh` no longer expects `E2E-07` among the blocked contracts (it encoded the removed stub).
+
 ### Added (set and domain exits via another node, D-79; branch `redesign/p4-06d-set-exits`)
 
 - `via: exit:<n>` now accepts a set or an inline destination (not `fabric`/`node`) in hub and agent policies. The agent sends the addresses it resolved for such destinations in its report (`exit_sets`, validated, a change wakes the hub reconciler); the hub marks transit traffic by source prefix and destination (static routes + reported addresses) in the order of the agent's policy, unmatched flows fall to the fabric guard (fail closed). `TransitExit.dest`, `kornode.net.lists.parse_exit_sets`, golden `hub_transit_set`. The bundle format is unchanged. E2E `test_e2e_07_domain_exit_...` (client of agent-a, a name from the fabric zone, `exit:3`) found two defects of the agent resolver (D-78), fixed here: its queries now leave from the node's fabric address (the hub's strict reverse path dropped any other source, so nothing was ever resolved), and a domain set without any address is retried after 30 s instead of 1 h. The hub indexes inline destinations (`rule<N>`) in the policy with the implicit rules, like the agent does. Tests that encoded the old `runtime_unsupported` refusal now cover the accepted forms.
