@@ -19,7 +19,6 @@ BLOCKED = {
     "NL-07": "P4 local delivery with the new egress model",
     "NL-08": "VM client leak capture requires the P4 client data path",
     "NL-09": "VM client loss/MTU transfer requires the P4 client data path",
-    "NL-13-forwarding": "cache/upstream connectivity covered; client continuity requires P4",
     "E2E-06-clients": "fabric probes covered; upgrade with access-client traffic requires P4",
 }
 
@@ -426,3 +425,94 @@ def test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed(
     finally:
         cluster.call("agent-b", "access_client_stop")
         cluster.call("agent-b", "restart")
+
+
+@pytest.mark.e2e_case("routed")
+def test_nl_13_forwarding_access_client_keeps_the_internet_while_the_hub_is_down(
+    cluster: Cluster,
+) -> None:
+    """NL-13, forwarding half: a VPN client of agent-a (role access, policy `clients -> any via
+    local`) keeps reaching the "internet" (ext) with the hub stopped, and after agent-a itself
+    restarts (boot from the cached bundle, hub still down) a new login works again."""
+    inventory = cluster.fleet.inventory
+    agent_a, ext = inventory.host("agent-a").address, inventory.host("ext").address
+    password = secrets.token_hex(12)
+    before = cluster.status("agent-a")["applied_version"]
+    access = cluster.call(
+        "hub", "access_setup", name="agent-a", host=agent_a, port=ACCESS_PORT,
+        user="alice", password=password,
+    )  # fmt: skip
+    pin = access["certificate"]["pin"]
+    cluster.call("hub", "access_policy")
+    wait_for(
+        lambda: cluster.status("agent-a")["applied_version"] > before,
+        60,
+        "agent-a did not apply the bundle with the access listener",
+    )
+
+    def login() -> None:
+        def attempt() -> bool:
+            try:
+                cluster.call(
+                    "agent-b", "access_client", host=agent_a, port=ACCESS_PORT, pin=pin,
+                    user="alice", password=password, routes=[f"{ext}/32"],
+                )  # fmt: skip
+            except E2EError:
+                return False
+            return True
+
+        try:
+            wait_for(attempt, 90, "VPN login to the access server of agent-a failed")
+        except E2EError as exc:
+            diag = {role: cluster.call(role, "access_diag") for role in ("agent-a", "agent-b")}
+            raise E2EError(f"{exc}: {diag}") from None
+
+    try:
+        login()
+        assert cluster.tcp_peer("ext", "agent-b", ext, client=True) == agent_a
+        cluster.call("hub", "stop")
+        try:
+            wait_for(lambda: cluster.ping("agent-a") == 0, 20, "hub stop did not interrupt control")
+            # The session was established before the outage and keeps forwarding.
+            assert cluster.tcp_peer("ext", "agent-b", ext, client=True) == agent_a
+            cluster.call("agent-b", "access_client_stop")
+            before_restart = cluster.status("agent-a")["applied_version"]
+            cluster.call("agent-a", "restart")
+            wait_for(
+                lambda: cluster.status("agent-a")["applied_version"] == before_restart,
+                45,
+                "agent-a did not boot from the cached bundle without the hub",
+            )
+            login()
+            assert cluster.tcp_peer("ext", "agent-b", ext, client=True) == agent_a
+        finally:
+            cluster.call("agent-b", "access_client_stop")
+            cluster.call("hub", "restart")
+        wait_for(
+            lambda: cluster.ping("agent-a") == 204, 120, "agent did not reconnect after hub outage"
+        )
+    finally:
+        cluster.call("agent-b", "access_client_stop")
+
+
+@pytest.mark.e2e_case("routed")
+def test_fabric_recovers_after_a_60_second_hub_outage_without_operator_action(
+    cluster: Cluster,
+) -> None:
+    """Phase 4 "done when": after the fabric channel is cut for 60 s, the hub reaches the
+    agents again by their real fabric addresses, with nobody touching anything."""
+    cluster.call("hub", "stop")
+    try:
+        wait_for(lambda: cluster.ping("agent-a") == 0, 20, "hub stop did not interrupt control")
+        time.sleep(60)
+    finally:
+        cluster.call("hub", "restart")
+    for role in ("agent-a", "agent-b"):
+        wait_for(
+            lambda role=role: cluster.ping(role) == 204,  # type: ignore[misc]
+            120,
+            f"{role} did not reconnect after the 60 s outage",
+        )
+    for role in ("agent-a", "agent-b"):
+        address = cluster.call(role, "fabric_address")["address"]
+        assert cluster.tcp_peer(role, "hub", address) == HUB_FABRIC_ADDRESS
