@@ -1,4 +1,4 @@
-# Prompt for the next session — set/доменные выходы, хвост netlab/E2E, `e2e.yml`
+# Prompt for the next session — зелёный `e2e.yml`, netlab NL-17/NL-18, «Готово, когда» фазы 4
 
 > **Седьмая сессия (2026-10-22), всё влито в `main`:** (1) **D-79 — set/доменные выходы `exit:<n>`** для правил хаба и агентов (агент присылает в отчёте `exit_sets`, хаб метит транзит по source+dest в порядке правил агента, `TransitExit.dest`, golden `hub_transit_set`, снятие `runtime_unsupported`; вместо подписанного канала из прежнего плана — решение в `DECISIONS.md`); (2) E2E-07 в двух редакциях на четырёх VM: источник хаба через `exit:3` (в harness у хаба теперь source-сеть, клиентский контейнер и конфиг в записываемой папке `config/`) и доменный выход клиента agent-a; (3) найденные дефекты: гонка `upstream connect` (ждали существования интерфейса, а реконсилер требует флаг `UP`), резолвер агента (D-78) спрашивал DNS хаба не с фабричного адреса и поэтому не резолвил ничего, пустые доменные наборы повторялись через час вместо 30 с, индексы `rule<N>` у хаба и агента расходились из-за неявных правил; (4) `npm audit` падал на vitest (`@vitest/mocker`), lockfile обновлён. Доказательства: `make lint typecheck test render parity` — 1191 passed / 96 skipped; netlab на hub-VM 71 passed; E2E `routed` 8 passed / 7 skipped. **Дополнение (после обеда):** образы базы E2E-06 пересобраны и запушены (registry hub-VM, переменные обновлены), `gh` работает; `e2e.yml` запускается и проходит почти целиком (17 passed / 1 failed / 7 skipped): падает E2E-07 с полным туннелем на входе VPN-клиента (вручную проходит), в harness добавлена диагностика клиента. Hub-VM (`debian13-kornode1`, `192.168.122.123`) теперь 4 ГБ, MTU 1400 на маршруте по умолчанию (`kornode-route-mtu.service`). **Осталось:** netlab NL-17, NL-05, NL-07…NL-09, NL-13-forwarding, E2E-06-clients, зелёный полный `e2e.yml`.
 >
@@ -33,15 +33,15 @@
 > Python 3.12, netlab и E2E не гонялись (код не менялся). CI на `main` (`421c465`) зелёный: backend, frontend,
 > netlab, publish. Команды `korctl` в README сверены с `--help` выборочно.
 >
-> **Не сделано:** NL-05, NL-07…NL-09, NL-17/NL-18, E2E-07 в редакции спецификации, редактирование префиксов и источников хаба во вкладке Fabric (сейчас чтение), общий редактор политики для `AgentPolicy.tsx` (там ещё сырой JSON), прогон `e2e.yml` через GitHub Actions (нужен `gh` и разблокированный keyring), пересборка образов E2E-06 (флаг-день D-71).
+> **Не сделано** — список и порядок в разделе «Что делать дальше» ниже (пересмотрен 2026-10-22).
 >
 > **Важно для продолжения:**
 > 1. Хост перезагружался: VM `debian13-kornode1..4` были выключены, их запускают `virsh -c qemu:///system start
 >    <имя>`; после этого hub-VM `192.168.122.123`, registry-контейнер и раннер поднимаются сами.
-> 2. `gh` зависает без вывода, пока gnome-keyring заблокирован. До разблокировки: `git push` по SSH работает,
->    статус CI читается через публичный API (`curl https://api.github.com/repos/r4ven-me/kornode/commits/<sha>/check-runs`),
->    слияние — локальным `git merge --no-ff` + `git push origin main` (CI на `main` идёт по push). Создать PR или
->    запустить `gh workflow run e2e.yml` может только владелец, разблокировав keyring (`gh auth status` должен снова печатать).
+> 2. `gh` работает (2026-10-22): `gh workflow run`, `gh run list|view --log`, `gh api`. Если снова зависнет без вывода —
+>    заблокирован gnome-keyring: тогда `git push` по SSH, статус CI через публичный API
+>    (`curl https://api.github.com/repos/r4ven-me/kornode/commits/<sha>/check-runs`), слияние — локальным
+>    `git merge --no-ff` + `git push origin main`. Деплой окружения `kornode-e2e` одобряет только владелец.
 > 3. На hub-VM нужно ≥8 ГиБ свободного места (preflight harness): `docker builder prune -af`. Перед E2E прогрей
 >    образы вручную (`docker build --builder default --file Dockerfile[.agent] .`, с повторами): иначе harness
 >    падает «local image command failed» из-за нестабильного PyPI.
@@ -54,9 +54,9 @@
 > владелец, только protected-ветки), секреты окружения `E2E_SSH_KEY`/`E2E_SSH_KNOWN_HOSTS` (отдельный ключ из
 > `~/.e2e` на hub-VM, не личный), переменные `E2E_*_HOST`, `E2E_SSH_USER/PORT`, `E2E_PREVIOUS_*_IMAGE`,
 > `E2E_ENVIRONMENT_APPROVAL_CONFIGURED=true`; self-hosted runner `kornode-e2e-hub` (метка `kornode-e2e`, сервис
-> systemd на hub-VM) — **последний раз показывал `offline`**: он подключается, но брокер GitHub из VM отвечает
-> медленно (проверить `gh api repos/r4ven-me/kornode/actions/runners`, логи — `~/actions-runner/_diag/`); `main`
-> защищена от force-push и удаления.
+> systemd на hub-VM) — **2026-10-22 `online`**; ему нужны 4 ГБ ОЗУ hub-VM и MTU 1400 на маршруте по умолчанию
+> (`kornode-route-mtu.service`), иначе он уходит в `offline` (проверка — `gh api repos/r4ven-me/kornode/actions/runners`,
+> логи — `~/actions-runner/_diag/`); `main` защищена от force-push и удаления.
 
 Вставь всё ниже черты в новую сессию Claude Code в
 `/home/lans/Cloud/Projects/public/kornode`. Начни в режиме плана.
@@ -65,7 +65,7 @@
 
 Продолжаем редизайн kornode (hub+agents, один reconciler). Язык — русский, обращайся ко мне «Ivan».
 Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (фаза P4), раздел «Дальнейшие
-действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-71, S-07), `docs/spec/07-fabric.md`,
+действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-79, S-07), `docs/spec/07-fabric.md`,
 `docs/runbooks/vm-e2e.md`. Активируй проект Serena `kornode` до поиска по коду.
 
 ## Что уже сделано (не переделывай)
@@ -140,9 +140,10 @@
   (`exit_in_use`), компилятор пакета перепроверяет цель. Тесты: `tests/test_net_transit.py`, `tests/test_agent_exit.py`,
   golden `hub_transit`/`agent_exit`/`exit_node` (загружаются в ядро в netlab). Harness: `exit_role`,
   `access_policy(via=...)`, `fleet.tcp_unreachable`, `ext` публикует 9100.
-- Остаются skip в `tests/e2e/test_routed_fabric.py`: E2E-07 (в редакции спецификации — хаб-источник и доменные
-  выходы, часть 2; реальный сценарий выхода агентов называется `test_e2e_07_client_of_agent_a_...` и проходит),
-  NL-05, NL-07…NL-09, NL-13-forwarding, E2E-06-clients (причины — в самом файле).
+- **P4-06 части 2–3, P4-07, фаза 5, база E2E-06, `e2e.yml`** (D-72…D-79) — см. абзацы сессий в начале файла.
+- Остаются skip в `tests/e2e/test_routed_fabric.py` (`BLOCKED`): устаревшая заглушка E2E-07 (все три сценария
+  E2E-07 — клиент agent-a, источник хаба, доменный выход — уже есть), NL-05, NL-07…NL-09, NL-13-forwarding,
+  E2E-06-clients (причины — в самом файле).
 
 ## Окружение
 - Используй `.venv`: `.venv/bin/python -m pytest`, `.venv/bin/python -m mypy --strict backend`,
@@ -154,14 +155,14 @@
 - Фронтенд: системный npm 9.2 падает на `vite` 8 (`edgesOut`); обновлять lock через `npx -y npm@11 update <пакет>`.
 - Shell пользователя — zsh: переменные с аргументами `ssh` не разбиваются. Используй функцию
   `vm() { ssh -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 lans@192.168.122.123 "$@"; }`.
-- `gh` (аккаунт `r4ven-me`) сейчас **не работает** (заблокирован keyring, см. начало файла); `git push` по SSH работает.
-  Push, слияние PR и запуск workflow владелец разрешил для задач редизайна (2026-10-20) — после зелёного CI и без обхода проверок.
+- `gh` (аккаунт `r4ven-me`) работает, `git push` — по SSH. Push, слияние PR и запуск workflow владелец разрешил для
+  задач редизайна (2026-10-20) — после зелёного CI и без обхода проверок.
 - **Одноразовые VM:** hub `192.168.122.123`, agent-a `.211`, agent-b `.26`, ext `.202`. SSH: пользователь
   `lans`, ключ `~/.ssh/id_ed25519`, `-o IdentitiesOnly=yes`, passwordless sudo. Синхронизация дерева на hub:
   `rsync -a --delete` с исключением `/artifacts`, `.git`, `.venv`, `node_modules` в `~/kornode/`.
   Старый netlab-стенд `.30` недоступен; **netlab гоняется на hub-VM** (там поставлены `ocserv openconnect
   nftables gnutls-bin`, есть `tcpdump iproute2`): `sudo -n .venv/bin/python -m pytest -m netlab -q`
-  из `~/kornode` (полный набор ≈ 7 мин, 68 passed). В фоне: `(nohup sudo -n ... > /var/tmp/x.out 2>&1 < /dev/null &)`.
+  из `~/kornode` (полный набор ≈ 7 мин, 71 passed на 2026-10-22). В фоне: `(nohup sudo -n ... > /var/tmp/x.out 2>&1 < /dev/null &)`.
 - **E2E на hub:** `. ~/.e2e/env.sh; export TMPDIR=/var/tmp`, затем `.venv/bin/python -m tests.e2e preflight`
   и `.venv/bin/python -m pytest tests/e2e/test_routed_fabric.py --e2e-run -q --tb=short` (кейс `routed` целиком ≈ 25 мин, один сценарий 3–9 мин). Запускай в фоне (`nohup ... > /var/tmp/x.out`) и жди по `grep` в файле вывода,
   а не по `pgrep -f` (он находит собственную команду). После падения:
@@ -172,32 +173,39 @@
 - Вывод harness намеренно скрыт (`output withheld`). Для разбора сетевых падений используй `net_dump`.
 
 ## Что делать дальше (по порядку)
-1. ~~Проверить CI на `main`~~ — сделано (vite 8.3.x, `main` зелёный).
-2. ~~Spike S-07~~ — сделано (D-71): vhost `fabric.<fabric.domain>`, отдельный сертификат `fabric.crt`, `ocpasswd-enroll`,
-   guard по `$VHOST`, токен `sni`, пакет `hubs[].server_name`; `fabric.enabled` удалён и влит в `main`.
-2a. ~~P4-06 часть 2 + P5-03~~ — сделано (D-72, D-73). Остаток: доменные/set-выходы агентов и хаба, NL-17/NL-18 (netlab),
-   E2E-07 по спеке, NL-05, прогон E2E `routed` на четырёх VM.
-3. ~~P4-07~~ — сделано (D-74): `FabricService`, `korctl fabric`, `/api/fabric`, вкладка Fabric. `POST /api/config/fabric-settings` свёрнут в `FabricService` (D-77).
-4. **Прогон `e2e.yml` на GitHub Actions**: настроено (см. начало файла). Нужно, чтобы владелец разблокировал keyring, затем
-   `gh workflow run e2e.yml --ref main -f confirmation=DISPOSABLE_VMS` и одобрение деплоя (required reviewer — владелец).
-   Раннер должен быть `online`; иначе смотреть `~/actions-runner/_diag/` на hub-VM.
-5. **Пересобрать базу E2E-06 (флаг-день D-71):** образы «предыдущей версии» в registry-контейнере на hub-VM собраны до
-   vhost'ов и теперь несовместимы; собрать новые из текущего `main` тем же способом, что при слиянии PR #1, и обновить
-   `E2E_PREVIOUS_HUB_IMAGE`/`E2E_PREVIOUS_AGENT_IMAGE` (без работающего `gh` — только владелец).
-6. Известные нерешённые мелочи: нестабильный по таймауту `test_suppress_rule_keeps_connected_routes_ahead_of_policy_table`
-   (netlab, HTTP 2 с; при повторе в одиночку проходит — если повторится в CI, поднять таймаут); E2E NL-04 один раз упал в полном прогоне (дамп маршрутов был полным, в одиночку и в
-   повторе проходит); E2E-04 в цикле из 5 прогонов — 5 passed (если вернётся, снять `audit.jsonl` хаба по ходу
-   прогона); сертификат слушателя access живёт 825 дней, обновление — `korctl agent access set <имя> --hostname H
-   --reissue`, doctor хаба предупреждает за 30 дней; первый apply после рестарта *процесса* агента перезапускает ocserv
-   (принято, D-67); E2E-06 использует образы из слияния PR #1 (registry-контейнер на hub-VM) — когда контракт пакета
-   изменится несовместимо, собрать новые так же.
-7. Обновлять `PLAN.ru.md`, `ROADMAP.md`, `CHANGELOG.md` и этот файл вместе с изменениями; отчёт — по формату
+Сделано и в список не входит: CI на `main`, S-07 (D-71), P4-06 части 1–3 (D-69, D-72, D-79), P4-07 (D-74, D-77), фаза 5
+по коду (D-73, D-75, D-76, D-78, P5-05), пересборка базы E2E-06, запуск `e2e.yml` через GitHub Actions.
+
+1. **Зелёный полный `e2e.yml`.** Последний прогон (`39760790926`, `7d0733e`): 17 passed / 1 failed / 7 skipped, упал
+   `test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed` («VPN login to the access server of
+   agent-a failed»: адрес выдан, туннель не виден); вручную на тех же VM проходит. Диагностика клиента и ожидание
+   адреса туннеля до 30 с (`5b8479f`) появились **после** этого прогона. Запустить `gh workflow run e2e.yml --ref main
+   -f confirmation=DISPOSABLE_VMS` (владелец одобряет деплой), при падении разбирать по диагностике клиента
+   (`gh run view <id> --log`).
+2. **Снять устаревшую заглушку E2E-07** в `BLOCKED` (`tests/e2e/test_routed_fabric.py`): её причина («нужны
+   set-выходы, D-78») снята D-79, все три сценария E2E-07 существуют. Skip станет 6.
+3. **Netlab NL-17/NL-18** (spec 09): источник `wgusers` на хабе, `via: exit:2` по набору и полным туннелем, node2
+   офлайн → ICMP unreachable, не uplink хаба; scrape node2 по фабричному адресу. Сейчас netlab только загружает
+   golden `hub_egress_exit`/`hub_transit_set` в ядро; на VM путь покрыт E2E-07 (источник хаба).
+4. **«Готово, когда» фазы 4** автоматическими тестами: NL-05 (клиент Amnezia/awg через `upstream:office`, при
+   падении `ext` — ICMP unreachable, ничего на uplink), NL-07, NL-08 на VM, NL-09 (5 % потерь + 50 мс — 50 МБ),
+   восстановление фабрики после 60 с разрыва (E2E), NL-13-forwarding, E2E-06-clients.
+5. **«Готово, когда» фазы 5:** все `examples/` проходят полный netlab и E2E (сейчас — только валидация
+   `tests/test_examples.py`); E2E-06 проходит — держать зелёным.
+6. **Доводка поверхностей:** редактирование префиксов и источников хаба во вкладке Fabric (сейчас чтение), общий
+   редактор правил для `AgentPolicy.tsx` (сейчас сырой JSON), doctor-проверки источников хаба (D-68).
+7. Известные мелочи: E2E NL-04 один раз упал в полном прогоне (дамп маршрутов был полным, в одиночку и в повторе
+   проходит); E2E-04 в цикле из 5 прогонов — 5 passed (если вернётся, снять `audit.jsonl` хаба по ходу прогона);
+   сертификат слушателя access живёт 825 дней, обновление — `korctl agent access set <имя> --hostname H --reissue`,
+   doctor хаба предупреждает за 30 дней; первый apply после рестарта *процесса* агента перезапускает ocserv (принято,
+   D-67); при следующем несовместимом изменении контракта пакета пересобрать базу E2E-06 так же, как 2026-10-22
+   (образы в registry hub-VM, переменные `E2E_PREVIOUS_*_IMAGE` и `~/.e2e/env.sh`).
+8. Обновлять `PLAN.ru.md`, `ROADMAP.md`, `CHANGELOG.md` и этот файл вместе с изменениями; отчёт — по формату
    из `CLAUDE.md` (что изменилось, ID задач, доказательства тестами, записи в `DECISIONS.md`).
 
 ## Что нужно от меня (напомни заранее)
-Разблокировать gnome-keyring (чтобы `gh` снова работал: PR, `gh workflow run`), одобрить деплой окружения
-`kornode-e2e` для первого прогона `e2e.yml`; решить, нужен ли `E2E_HUB_ADDRESS` (сейчас — адрес hub-VM); обновить `E2E_PREVIOUS_*_IMAGE` после пересборки базы E2E-06. Push и слияние
-по задачам P4 мне разрешены (2026-10-20) — после зелёных проверок.
+Одобрять деплой окружения `kornode-e2e` при каждом прогоне `e2e.yml`; решить, нужен ли `E2E_HUB_ADDRESS` (сейчас — адрес
+hub-VM). Push и слияние по задачам редизайна мне разрешены (2026-10-20) — после зелёных проверок.
 
 ## Правила
 Каждая задача — по `CLAUDE.md`: spec → тесты → код → docs → `make lint typecheck test render parity` → netlab. Тесты не ослаблять; если
