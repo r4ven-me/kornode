@@ -1,4 +1,4 @@
-"""Unimplemented P4 expectations are explicit blockers, never fabricated success.
+"""P4 expectations that are not VM scenarios are explicit skips, never fabricated success.
 
 The P3 cache/upgrade probes exercise fabric/upstream connectivity, not client
 throughput, no-NAT routed prefixes or wg-easy access/exit runtime.
@@ -16,14 +16,12 @@ pytestmark = pytest.mark.e2e
 BLOCKED = {
     "NL-07": "covered by the netlab suppress-rule test (D-80)",
     "NL-08": "covered by netlab tunnel-bounce leak tests and the E2E-07 fail-closed checks (D-80)",
-    "E2E-06-clients": "an upgrade restarts the agent's ocserv: client continuity is a re-login "
-    "and needs its own contract (D-80)",
 }
 
 
 @pytest.mark.parametrize("scenario,reason", BLOCKED.items(), ids=BLOCKED)
 def test_pending_runtime_contract(scenario: str, reason: str) -> None:
-    pytest.skip(f"{scenario} blocked: {reason}")
+    pytest.skip(f"{scenario} is not a VM scenario: {reason}")
 
 
 HUB_FABRIC_ADDRESS = "10.99.0.1"
