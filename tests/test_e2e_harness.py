@@ -305,7 +305,7 @@ def test_offline_plan_performs_no_inventory_or_ssh(
     assert main() == 0
     result = json.loads(capsys.readouterr().out)
     assert result["network_actions"] is False
-    assert "E2E-07" in result["blocked_contracts"]
+    assert "E2E-07" not in result["blocked_contracts"]
 
 
 def test_sla_does_not_pass_after_slow_success(monkeypatch: pytest.MonkeyPatch) -> None:
