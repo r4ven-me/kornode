@@ -50,15 +50,14 @@ jobs:
           # ledger of an interrupted previous run.
           clean: false
           ref: ${{ github.sha }}
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
+      # The runner is the Debian 13 hub VM: setup-python has no 3.12 build for it, so the
+      # system Python (3.13 >= the project's 3.12) is used; Debian ships no `python` alias.
       - name: Provision ephemeral pinned SSH credentials
         env:
           E2E_SSH_KEY: ${{ secrets.E2E_SSH_KEY }}
           E2E_SSH_KNOWN_HOSTS: ${{ secrets.E2E_SSH_KNOWN_HOSTS }}
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import os
           from pathlib import Path
           directory = Path(os.environ['RUNNER_TEMP']) / 'kornode-e2e-ssh'
@@ -74,7 +73,7 @@ jobs:
               handle.write(f'E2E_SSH_KEY_FILE={directory / "key"}\n')
               handle.write(f'E2E_KNOWN_HOSTS_FILE={directory / "known_hosts"}\n')
           PY
-      - run: python -m venv .e2e-venv && .e2e-venv/bin/python -m pip install -e '.[dev]'
+      - run: python3 -m venv .e2e-venv && .e2e-venv/bin/python -m pip install -e '.[dev]'
       - name: Check harness locally before remote access
         run: |
           .e2e-venv/bin/python -m mypy --explicit-package-bases tests/e2e
@@ -97,7 +96,7 @@ jobs:
       - name: Remove ephemeral SSH material
         if: always()
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import os
           from pathlib import Path
           directory = Path(os.environ['RUNNER_TEMP']) / 'kornode-e2e-ssh'
