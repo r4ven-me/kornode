@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (netlab NL-17/NL-18, branch `redesign/netlab-nl17-nl18`)
+
+- `tests/netlab/test_p4_exit_set.py` (+ `exit_set_driver.py`): a source of the hub leaves through node 2 with the real compiler and kernel writer, over an ipip tunnel standing for the ocserv session. NL-17: listed set → node 2's uplink address, the rest → hub's; node 2 offline → fast failure and nothing on the hub uplink. NL-18: full tunnel `exit:2` leaves only through node 2; the hub reaches node 2 by its fabric address without NAT.
+
 ### Removed (stale E2E-07 stub, branch `redesign/e2e-drop-stale-e2e07-stub`)
 
 - The `E2E-07` entry of `BLOCKED` in `tests/e2e/test_routed_fabric.py`: its reason (set exits, D-78) was lifted by D-79 and all three E2E-07 scenarios exist as real tests. Skips in the `routed` case: 7 → 6.
