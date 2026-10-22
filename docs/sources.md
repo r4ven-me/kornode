@@ -51,6 +51,8 @@ The same is available as `PUT /api/agents/{name}/sources/{source}` and in the pa
 
 ## Foreign NAT is an error
 
+On a node this is `kornode-agent doctor`; on the hub it is the `sources` check of `korctl doctor` (and `GET /api/diagnostics/doctor`), which also reports a source whose interface is absent. Both use the same inspection code (`kornode.net.sourcecheck`).
+
 `doctor` looks for NAT that is not kornode's:
 
 - nftables (any table other than `inet kornode`/`ip kornode_nat`) with `masquerade`/`snat`

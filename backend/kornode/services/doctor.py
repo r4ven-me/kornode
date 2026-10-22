@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import ipaddress
+import json
+from pathlib import Path
 from typing import Any
 
 from kornode.config.models import AppConfig
+from kornode.net.sourcecheck import foreign_nat, iptables_nat
 from kornode.services.command import CommandResult, CommandRunner
 from kornode.services.net import NetService
 
@@ -39,6 +42,7 @@ class DoctorService:
             ("nft-version", self._check_nft_version),
             ("carrier-exclusions", self._check_carrier_exclusions),
             ("access-certificates", self._check_access_certificates),
+            ("sources", self._check_sources),
         )
         results: dict[str, CommandResult] = {}
         for name, check in checks:
@@ -154,6 +158,47 @@ class DoctorService:
         listeners = sum(1 for node in nodes if node.access.get("cert_not_after"))
         return CommandResult(argv, 0, f"{listeners} agent access listener(s) valid", "", False)
 
+    def _check_sources(self) -> CommandResult:
+        """Hub sources (D-72, D-68): the interface of every source exists, and no foreign NAT
+        (wg-easy PostUp, Amnezia) matches its subnet or interface: kornode owns NAT and
+        forwarding for it. Findings are errors only when traffic is provably affected; a
+        missing interface is reported too, because the rules then match nothing."""
+        argv = ("doctor", "sources")
+        sources = tuple(
+            (item.name, item.interface, item.cidr) for item in self.config.egress_policy().sources
+        )
+        if not sources:
+            return CommandResult(argv, 0, "no sources configured", "", False)
+        problems: list[str] = []
+        links = self.runner.run(["ip", "-j", "link", "show"], check=False, timeout=10)
+        try:
+            present = {str(link["ifname"]) for link in json.loads(links.stdout)}
+        except (ValueError, TypeError, KeyError):
+            return CommandResult(argv, 1, "", "could not list network interfaces", False)
+        problems += [
+            f"source {name}: interface {interface} is absent"
+            for name, interface, _ in sources
+            if interface not in present
+        ]
+        ruleset = self.runner.run(["nft", "-j", "list", "ruleset"], check=False, timeout=10)
+        try:
+            if not ruleset.ok:
+                raise ValueError("cannot list ruleset")
+            found = foreign_nat(json.loads(ruleset.stdout), sources)
+            problems += [f["message"] for f in found if f["code"] == "foreign_nat_on_source"]
+        except (ValueError, TypeError, AttributeError):
+            problems.append("could not inspect the nft ruleset for foreign NAT")
+        if _legacy_nat_loaded():
+            legacy = self.runner.run(["iptables-legacy-save", "-t", "nat"], check=False, timeout=10)
+            if legacy.ok:
+                found = iptables_nat(legacy.stdout, sources)
+                problems += [f["message"] for f in found if f["code"] == "foreign_nat_on_source"]
+        if problems:
+            return CommandResult(argv, 1, "", "; ".join(problems[:5]), False)
+        return CommandResult(
+            argv, 0, f"{len(sources)} source(s) present, no foreign NAT", "", False
+        )
+
     def _check_nft_version(self) -> CommandResult:
         nft_result = self.runner.run(["nft", "--version"], check=False, timeout=5)
         if not nft_result.ok:
@@ -168,3 +213,13 @@ class DoctorService:
         # actually back with real knowledge of every kernel/nft pairing.
         message = f"nft: {nft_result.stdout.strip()}; kernel: {kernel}"
         return CommandResult(("nft", "--version"), 0, message, "", False)
+
+
+def _legacy_nat_loaded() -> bool:
+    """Asking `iptables-legacy-save -t nat` creates an empty legacy nat table that can pre-empt
+    nftables NAT: only look when the table already exists (the doctor must not change what it
+    inspects)."""
+    try:
+        return "nat" in Path("/proc/net/ip_tables_names").read_text().split()
+    except OSError:
+        return False

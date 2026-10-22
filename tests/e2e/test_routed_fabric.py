@@ -16,10 +16,10 @@ pytestmark = pytest.mark.e2e
 BLOCKED = {
     "NL-05": "source client through upstream:office needs a source client and the ext upstream "
     "in one case (kill switch itself: client netlab suite); wg-easy image/kernel module absent",
-    "NL-07": "P4 local delivery with the new egress model",
-    "NL-08": "VM client leak capture requires the P4 client data path",
-    "NL-09": "VM client loss/MTU transfer requires the P4 client data path",
-    "E2E-06-clients": "fabric probes covered; upgrade with access-client traffic requires P4",
+    "NL-07": "covered by the netlab suppress-rule test (D-80)",
+    "NL-08": "covered by netlab tunnel-bounce leak tests and the E2E-07 fail-closed checks (D-80)",
+    "E2E-06-clients": "an upgrade restarts the agent's ocserv: client continuity is a re-login "
+    "and needs its own contract (D-80)",
 }
 
 

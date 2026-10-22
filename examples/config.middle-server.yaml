@@ -87,7 +87,7 @@ sets:
 egress:
   - from: [clients, host]
     to: {set: private}
-    via: upstream:private-main
+    via: upstream:private_main
   - from: [clients]
     to: any
     via: local

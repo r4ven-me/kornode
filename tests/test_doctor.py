@@ -264,6 +264,7 @@ def test_run_returns_every_check(tmp_path: Path) -> None:
         "nft-version",
         "carrier-exclusions",
         "access-certificates",
+        "sources",
     }
 
 
@@ -354,3 +355,49 @@ def test_cli_doctor_exits_zero_when_every_check_passes(
     cli.doctor()
 
     assert "all required sysctls are applied" in capsys.readouterr().out
+
+
+SOURCES = {"sources": [{"name": "wg", "interface": "wg0", "cidr": "10.8.1.0/24"}]}
+NAT_JSON = (
+    '{"nftables": [{"rule": {"family": "ip", "table": "wgnat", "chain": "post", "expr": ['
+    '{"match": {"op": "==", "left": {"payload": {"protocol": "ip", "field": "saddr"}}, '
+    '"right": {"prefix": {"addr": "10.8.1.0", "len": 24}}}}, {"masquerade": null}]}}]}'
+)
+
+
+def test_sources_check_is_quiet_without_sources(tmp_path: Path) -> None:
+    results = DoctorService(_config(tmp_path), runner=FakeRunner({}), net=FakeNet()).run()
+
+    assert results["sources"].ok and "no sources" in results["sources"].stdout
+
+
+def test_sources_check_passes_with_the_interface_and_no_foreign_nat(tmp_path: Path) -> None:
+    runner = FakeRunner(
+        {
+            ("ip", "-j"): _ok('[{"ifname": "wg0"}]'),
+            ("nft", "-j"): _ok(NAT_JSON.replace("masquerade", "counter")),
+        }
+    )
+    service = DoctorService(_config(tmp_path, **SOURCES), runner=runner, net=FakeNet())
+
+    assert service.run()["sources"].ok
+
+
+def test_sources_check_flags_a_missing_interface(tmp_path: Path) -> None:
+    runner = FakeRunner(
+        {("ip", "-j"): _ok('[{"ifname": "lo"}]'), ("nft", "-j"): _ok('{"nftables": []}')}
+    )
+    service = DoctorService(_config(tmp_path, **SOURCES), runner=runner, net=FakeNet())
+
+    result = service.run()["sources"]
+
+    assert not result.ok and "wg0 is absent" in result.stderr
+
+
+def test_sources_check_flags_foreign_nat_on_the_source_subnet(tmp_path: Path) -> None:
+    runner = FakeRunner({("ip", "-j"): _ok('[{"ifname": "wg0"}]'), ("nft", "-j"): _ok(NAT_JSON)})
+    service = DoctorService(_config(tmp_path, **SOURCES), runner=runner, net=FakeNet())
+
+    result = service.run()["sources"]
+
+    assert not result.ok and "foreign NAT" in result.stderr
