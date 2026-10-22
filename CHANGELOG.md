@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (E2E NL-13-forwarding and 60 s recovery, branch `redesign/e2e-nl13-forwarding-recovery`)
+
+- `test_nl_13_forwarding_access_client_keeps_the_internet_while_the_hub_is_down`: a VPN client of agent-a keeps reaching ext with the hub stopped; after agent-a restarts from its cached bundle (hub still down) a new login works. `test_fabric_recovers_after_a_60_second_hub_outage_without_operator_action`: after 60 s without the hub both agents reconnect and the hub reaches them by fabric address. Both passed on the four VMs (2 passed, 9 min). The `NL-13-forwarding` stub is removed from `BLOCKED` (skips: 6 → 5).
+
 ### Added (netlab NL-17/NL-18, branch `redesign/netlab-nl17-nl18`)
 
 - `tests/netlab/test_p4_exit_set.py` (+ `exit_set_driver.py`): a source of the hub leaves through node 2 with the real compiler and kernel writer, over an ipip tunnel standing for the ocserv session. NL-17: listed set → node 2's uplink address, the rest → hub's; node 2 offline → fast failure and nothing on the hub uplink. NL-18: full tunnel `exit:2` leaves only through node 2; the hub reaches node 2 by its fabric address without NAT.
