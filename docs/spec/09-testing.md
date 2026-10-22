@@ -54,8 +54,8 @@ Scenario list (must all exist by the end of P4; each maps to a task "Done when")
 | NL-14 | overlapping prefix in registry | rejected with conflict details |
 | NL-15 | carrier exclusion with `host → any via fabric` | no loop, tunnel stays up |
 | NL-16 | regression set from v1.1.5 incidents (P1-06) | green |
-| NL-17 | two-host topology: source `wgusers` on hub, `via: exit:2` by set, rest `local` | listed destinations leave via node2's uplink with node2's address, others via hub; node2 offline → listed destinations get ICMP unreachable, never hub uplink |
-| NL-18 | same topology, full tunnel (`to: any via exit:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real fabric address |
+| NL-17 (`tests/netlab/test_p4_exit_set.py`, done) | two-host topology: source `wgusers` on hub, `via: exit:2` by set, rest `local` | listed destinations leave via node2's uplink with node2's address, others via hub; node2 offline → listed destinations get ICMP unreachable, never hub uplink |
+| NL-18 (same file, done) | same topology, full tunnel (`to: any via exit:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real fabric address |
 
 NL-08 is `test_tunnel_drop_and_reconnect_through_a_running_reconciler_leaks_nothing`:
 openconnect is killed and redialled under traffic while `korctl net run` is
@@ -184,7 +184,7 @@ mTLS probes (not access-client forwarding); it requires paired **different immut
 `E2E_PREVIOUS_HUB_IMAGE` / `E2E_PREVIOUS_AGENT_IMAGE` digest refs with compatible
 CLI/schema. Missing baselines skip; identical images fail rather than pass as an upgrade.
 
-`test_routed_fabric.py` runs NL-01…NL-04 and NL-06 on real VMs (case `routed`; all passed on 2026-10-20: D-65, D-66, D-67, D-68) and keeps explicit P4 skips: E2E-07, NL-05, NL-07…09, full NL-13
+`test_routed_fabric.py` runs NL-01…NL-04 and NL-06 on real VMs (case `routed`; all passed on 2026-10-20: D-65, D-66, D-67, D-68) and keeps explicit P4 skips: NL-05, NL-07…09, full NL-13
 client forwarding and E2E-06 client continuity. They are listed in offline plan
 and run summary. There is no claimed wg-easy/domain/leak/throughput/host-network
 coverage. None of the real VM cases has been run; local faked SSH/Docker safety

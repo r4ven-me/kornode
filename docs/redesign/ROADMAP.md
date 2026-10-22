@@ -120,7 +120,7 @@ Done when:
 - hub Prometheus scrapes `agent-b:9100` by its real address [e2e];
 - an `agent-a` client reaches a service in `agent-b`'s LAN through the hub, no NAT [netlab + e2e];
 - an Amnezia client on `agent-b` exits via `upstream:office` (`ext`) and, with `ext` down, gets ICMP unreachable, never the uplink [netlab + e2e];
-- a wg-easy source on the hub exits via an agent by list and in full mode; with the agent offline, listed traffic is rejected, not leaked [netlab NL-17/18 + e2e E2E-07];
+- a wg-easy source on the hub exits via an agent by list and in full mode; with the agent offline, listed traffic is rejected, not leaked [netlab NL-17/18 (`tests/netlab/test_p4_exit_set.py`, done 2026-10-22) + e2e E2E-07 (done)];
 - after a 60 s link outage the fabric recovers without operator action [e2e];
 - 5 % packet loss: 50 MB transfer across the fabric completes [netlab].
 
