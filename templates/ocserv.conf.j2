@@ -114,10 +114,9 @@ camouflage_realm = {{ config.server.camouflage.realm }}
 
 # Agents and enrollment (S-07, D-71): a virtual host selected by TLS SNI on the same
 # port. Everything below belongs to it, so it stays the last section of the file.
+# Ports are global-only since ocserv 1.4.2 (a hard error inside a vhost, D-83);
+# the vhost inherits udp-port, and with it DTLS, from the default host.
 [vhost:{{ fabric_vhost.name }}]
-{% if config.server.udp_enabled %}
-udp-port = {{ config.server.port }}
-{% endif %}
 server-cert = {{ fabric_vhost.server_cert }}
 server-key = {{ fabric_vhost.server_key }}
 ca-cert = {{ fabric_vhost.ca_cert }}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import TracebackType
 from typing import Any
 
@@ -99,3 +100,24 @@ def test_all_failures_are_reported_together() -> None:
 
     assert str(exc.value).count("No such device") == 2
     assert kernel.applied == [RULE]
+
+
+def test_sysctls_are_written_under_kornode_proc_sys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-83: under host networking Docker keeps /proc/sys read-only, so the compose files
+    bind-mount the host's /proc/sys/net elsewhere and point KORNODE_PROC_SYS at it."""
+    target = tmp_path / "net" / "ipv4" / "ip_forward"
+    target.parent.mkdir(parents=True)
+    target.write_text("0\n", encoding="utf-8")
+    monkeypatch.setenv("KORNODE_PROC_SYS", str(tmp_path))
+
+    Kernel()._apply_one(None, SYSCTL)
+
+    assert target.read_text(encoding="utf-8") == "1\n"
+
+
+def test_proc_sys_defaults_to_proc(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KORNODE_PROC_SYS", raising=False)
+
+    assert Kernel().proc_sys == Path("/proc/sys")

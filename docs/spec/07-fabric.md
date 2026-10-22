@@ -21,9 +21,10 @@ selected by TLS SNI.
   certificate `certs/fabric.crt` (hub CA, SAN = the name, key kept on renewal so the pin
   is stable), `ca-cert` = hub CA, `crl`, `auth = plain[passwd=ocpasswd-enroll]` (enroll
   accounts only) with `enable-auth = certificate`, `cert-user-oid = 2.5.4.3`,
-  `cert-group-oid = 2.5.4.11`, `config-per-user`/`config-per-group`. `udp-port` is repeated in
-  the section, otherwise the vhost sends no DTLS address. The section is the last one in
-  `ocserv.conf`.
+  `cert-group-oid = 2.5.4.11`, `config-per-user`/`config-per-group`. No port options in the
+  section: since ocserv 1.4.2 they are global-only (a hard error inside a vhost) and the vhost
+  inherits `udp-port`, and so DTLS, from the default host (D-83; S-07 ran on 1.3.0, which
+  needed `udp-port` repeated). The section is the last one in `ocserv.conf`.
 
 Because the fabric vhost accepts every certificate of the hub CA, the connect-script
 guard (`$VHOST`) lets only `agents` sessions (user `agent-<id>` with a per-user file) and

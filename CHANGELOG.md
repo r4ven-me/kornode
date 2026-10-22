@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed (Quick Start)
+
+- `.env.example` still set `KORNODE_FABRIC__ENABLED=false`, a key removed by D-71, so the Quick Start (`cp .env.example .env && docker compose up`) failed at startup with `fabric.enabled: Extra inputs are not permitted`. The line is removed; `test_config_example_loads_with_env_example` loads `config.example.yaml` with `.env.example`.
+- The hub in `compose.yaml` (and the agent in `compose.agent.yaml`) could not start under `network_mode: host`: Docker keeps `/proc/sys` read-only, so the reconciler failed to set `src_valid_mark`. The host's `/proc/sys/net` is now bind-mounted at `/host/proc/sys/net` and `KORNODE_PROC_SYS` points `kornode.net.Kernel` there; `kernel.*` stays read-only (D-83, `tests/test_compose.py`).
+- ocserv 1.5.0 (the image) refused the config: `udp-port` inside the fabric vhost is a hard error since ocserv 1.4.2, and the vhost inherits it from the default host. It is no longer repeated in the vhost (D-83; `test_ocserv_render_vhost_repeats_udp_port` encoded the ocserv 1.3.0 behaviour and is replaced by `test_ocserv_render_vhost_has_no_global_only_options`).
+- `compose.web.yaml` could not turn the panel on for the example config: `config.example.yaml` pinned `web.enabled/listen/port/tls/admin_password*`, and YAML wins over the environment. Those keys are commented out (`test_compose_web_override_enables_the_panel_of_the_example_config`).
+
 ### Changed (E2E skips, D-82)
 
 - `BLOCKED` in `tests/e2e/test_routed_fabric.py` now lists only NL-07 and NL-08 (covered by netlab, D-80); NL-05 is a real scenario, E2E-06-clients and the E2E of `examples/` are settled by D-82 (their halves are the NL-13-forwarding test and the netlab/example suites). Skips in `routed`: 2.

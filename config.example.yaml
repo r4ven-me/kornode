@@ -221,17 +221,19 @@ internal_dns:
   local_records: []
 
 web:
-  enabled: false
-  listen: 127.0.0.1
-  port: 8443
-  tls: true
+  # Left to the environment (.env, compose.web.yaml): a key written here wins over
+  # KORNODE_WEB__*, so the override could not turn the panel on.
+  # enabled: false
+  # listen: 127.0.0.1
+  # port: 8443
+  # tls: true
   tls_cert: null
   tls_key: null
-  allow_insecure_http: false
+  # allow_insecure_http: false
   trusted_proxies: []
   admin_user: admin
-  admin_password: null
-  admin_password_hash: null
+  # admin_password: null
+  # admin_password_hash: null
   terminal_enabled: false
   terminal_idle_timeout: 900
   terminal_max_sessions: 2
