@@ -210,7 +210,7 @@ subprocess.run(["openconnect","--background","--pid-file="+d+"/pid",
  input=(o["password"]+"\\n").encode(),stdout=open(d+"/log","ab"),
  stderr=subprocess.STDOUT,timeout=60,check=True)
 addr=None
-for _ in range(50):
+for _ in range(150):
  r=subprocess.run(["ip","-4","-j","addr","show","dev","kn-vpnc0"],capture_output=True)
  if r.returncode==0 and json.loads(r.stdout)[0]["addr_info"]:
   addr=json.loads(r.stdout)[0]["addr_info"][0]["local"];break
@@ -935,6 +935,16 @@ class Worker:
                 timeout=10,
             )  # fmt: skip
             out["client_log"] = log.decode(errors="replace")
+            # Whether the tunnel device came up at all, and what is still running there.
+            _, state = self.run(
+                [
+                    "docker", "exec", self.container("client"), "sh", "-c",
+                    "ip -4 addr show; ip -4 route show; pgrep -a openconnect",
+                ],
+                allowed=tuple(range(256)),
+                timeout=10,
+            )  # fmt: skip
+            out["client_state"] = state.decode(errors="replace")[:2500]
         return {key: value[-3000:] for key, value in out.items()}
 
     def access_client_stop(self) -> Any:
