@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed (agent policy editor, D-81, branch `redesign/hub-doctor-sources`)
+
+- The agent policy form uses the shared ordered rule editor (`EgressRules`: drag/arrows, structured to/via fields) instead of JSON-per-destination inputs; test `AgentPolicy.test.tsx`. The Fabric tab points at Network → Egress and sources for hub sources/prefixes instead of duplicating the editor.
+
 ### Added (hub doctor for sources, branch `redesign/hub-doctor-sources`)
 
 - `korctl doctor` / `GET /api/diagnostics/doctor` got a `sources` check: absent source interface and foreign NAT (nft and legacy iptables) matching a hub source's subnet or interface (D-68 for the hub). The inspection moved from `kornode_agent.doctor` to `kornode.net.sourcecheck` and is shared; agent behaviour is unchanged.

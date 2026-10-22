@@ -31,6 +31,7 @@ export function FabricView({ token }: { token: string | null }) {
         <li><span>hub · {data.hub.fabric_address} · {data.hub.server_name} · {prefixes(data.hub.prefixes)}</span></li>
         {data.nodes.map(n => <li key={n.id}><span>{n.name} · {n.fabric_address} · {n.state}{n.state === "active" ? (n.online ? " · online" : " · offline") : ""}{n.roles.length ? ` · ${n.roles.join(", ")}` : ""} · {prefixes(n.prefixes)}</span></li>)}
       </ul>}
+      {data && <p className="field-help">Hub prefixes follow the client pool and the hub sources; add, change or remove a source (and whether it is exported) in Network → Egress and sources.</p>}
       {data && data.sources.length > 0 && <><h3>Hub sources</h3><ul className="agent-items">{data.sources.map(s => <li key={s.name}><span>{s.name} · {s.interface} · {s.cidr}{s.export === false ? " · not exported" : ""}</span></li>)}</ul></>}
     </section>
     <section className="panel" data-capability="fabric.settings">
