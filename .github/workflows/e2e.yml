@@ -79,6 +79,9 @@ jobs:
           .e2e-venv/bin/python -m mypy --explicit-package-bases tests/e2e
           .e2e-venv/bin/python -m pytest tests/test_e2e_harness.py -q --tb=short
       - name: Preflight, lease, build/load images, deploy, run and teardown
+        env:
+          # Image archives are about 1 GB: /tmp of the runner VM is a 1 GB tmpfs.
+          TMPDIR: ${{ runner.temp }}
         run: .e2e-venv/bin/python -m pytest tests/e2e --e2e-run -q --tb=short --junitxml=artifacts/e2e/junit.xml
       - name: Recover interrupted owned runs
         if: always()
