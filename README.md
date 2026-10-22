@@ -862,7 +862,7 @@ upstream:
 ```
 
 Give `interface` explicitly. kornode never creates, brings up, tears down or redials this interface; it only
-applies the egress rules, NAT and kill switch on top of it (`via: upstream:site-b-wireguard`). Dial-specific
+applies the egress rules, NAT and kill switch on top of it (`via: upstream:site_b_wireguard`, the profile slug). Dial-specific
 fields (`server`, `auth_type`, ...) do not apply. The watchdog only observes the link state.
 
 ### Host DNS

@@ -214,10 +214,10 @@ sets:
 egress:
   - from: [host]
     to: {set: site-b}
-    via: upstream:site-b-wireguard
+    via: upstream:site_b_wireguard
   - from: [clients]
     to: {set: private}
-    via: upstream:private-main
+    via: upstream:private_main
   - from: [clients]
     to: any
     via: local

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added (examples in a real kernel, branch `redesign/examples-kernel`)
+
+- `tests/netlab/test_examples_kernel.py` (+ `example_driver.py`): every file in `examples/` is compiled with the real `HubNetInputs` and converged in a namespace (second pass empty). Phase 5 "done when" for the netlab half.
+- Fixed by it: `examples/config.full.yaml`, `config.middle-server.yaml` and the README referenced upstream profiles by their display name (`upstream:private-main`, `upstream:site-b-wireguard`); the compiler only knows the slug (`private_main`, `site_b_wireguard`), so applying those examples failed with "unknown upstream". Examples and README now use slugs; `tests/test_examples.py` checks it.
+
 ### Added (netlab NL-09, branch `redesign/netlab-nl09-loss`)
 
 - `test_nl09_50_mb_transfer_completes_through_the_tunnel_with_loss_and_latency`: 5 % loss and 25 ms each way (netem on both uplinks) on the carrier of a real full tunnel; 50 MB from the hub's LAN to the node arrive complete (219 s on the hub-VM). Netem on one side only was not enough: the bulk data flows the other way (11.9 s).
