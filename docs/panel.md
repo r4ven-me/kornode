@@ -100,6 +100,43 @@ and NAT.
 
 An agent keeps forwarding with its last signed bundle while the hub is unreachable.
 
+### Deploying an agent
+
+The agent is a separate image, `kornode-agent` (`Dockerfile.agent`), published as
+`ghcr.io/r4ven-me/kornode-agent`.
+
+1. **Prepare the hub once.**
+   - Turn the control plane on: `control: {enabled: true}` in the hub config (Config →
+     Advanced → Persistent YAML, or the file itself), then restart the hub container. The
+     control API is a supervisor program rendered at start-up. The Agents header shows
+     "Control API enabled".
+   - Config → Server → **Common name** (`server.cn`) must be a name or address the new node
+     can reach: the enroll token carries `server.cn:server.port` as the hub address.
+   - That port, 443/tcp by default, must be open. The agent only dials out.
+2. **Create the agent.** Agents → Add agent → "Create agent and token". Copy the token right
+   away: it is shown once and expires after 60 minutes (`control.enroll_token_ttl_minutes`).
+   A new token for a pending agent: its Settings → "Issue enrollment token".
+3. **Start it on the new node.** It needs Docker with `/dev/net/tun`. Copy `compose.agent.yaml`
+   there; the rest of the repository is not needed:
+
+   ```bash
+   export KORNODE_AGENT_IMAGE=ghcr.io/r4ven-me/kornode-agent:latest
+   docker compose -f compose.agent.yaml pull
+   docker compose -f compose.agent.yaml run --rm agent kornode-agent enroll <token>
+   docker compose -f compose.agent.yaml up -d
+   ```
+
+   Without `KORNODE_AGENT_IMAGE`, run the same commands in a checkout of the repository; they
+   build the image locally. Keep `./agent-data` next to the compose file: it holds the
+   agent's keys, certificate and cached bundle.
+4. **Check.** The agent shows `active · online` under Agents with desired and reported
+   versions equal, and appears in Fabric → Topology. On the node,
+   `docker compose -f compose.agent.yaml exec agent kornode-agent status` (or `doctor`)
+   works even without the hub.
+
+To send hub clients through the agent, give it the `exit` role and add a rule with
+`via exit:<its node ID>` in Network → Egress rules.
+
 ## Fabric
 
 - **Topology** — the hub and each agent: fabric address, state, roles, announced prefixes.
