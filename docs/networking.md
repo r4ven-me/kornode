@@ -76,7 +76,7 @@ Domain sets are filled by `DomainResolverService` into nft sets with element tim
 should use the node's dnsmasq (service address) so they connect to the addresses that were put in the set.
 
 Inspect and edit with `korctl egress` (`show`, `check`, `set`, `edit`), `korctl source`, `/api/egress`, `/api/sources`
-or the panel's Network → Egress and sources. `korctl net explain SRC DST` answers "where does this packet go and why".
+or the panel's Network → Egress rules and Network → Sources. `korctl net explain SRC DST` answers "where does this packet go and why".
 
 ## Kernel layout
 

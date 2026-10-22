@@ -23,19 +23,19 @@ export function FabricView({ token }: { token: string | null }) {
     catch (reason) { fail(reason); } finally { setBusy(false); }
   }
   const prefixes = (list: Prefix[]) => list.length ? list.map(p => `${p.prefix}${p.export ? "" : " (not exported)"}`).join(", ") : "no prefixes";
-  return <div className="fabric-view">
+  return <div className="view-stack">
     <section className="panel" data-capability="fabric.show">
-      <div className="panel-header"><h2>Topology</h2><span className="pill muted">{data?.fabric.cidr ?? "fabric"}</span></div>
+      <div className="panel-header"><div><h2>Topology</h2><p className="muted-line">The hub and every agent with their fabric address and the networks they announce.</p></div><span className="pill muted">{data?.fabric.cidr ?? "fabric"}</span></div>
       {error && <p role="alert">{error}</p>}{note && <p role="status">{note}</p>}
       {data && <ul className="agent-items">
         <li><span>hub · {data.hub.fabric_address} · {data.hub.server_name} · {prefixes(data.hub.prefixes)}</span></li>
         {data.nodes.map(n => <li key={n.id}><span>{n.name} · {n.fabric_address} · {n.state}{n.state === "active" ? (n.online ? " · online" : " · offline") : ""}{n.roles.length ? ` · ${n.roles.join(", ")}` : ""} · {prefixes(n.prefixes)}</span></li>)}
       </ul>}
-      {data && <p className="field-help">Hub prefixes follow the client pool and the hub sources; add, change or remove a source (and whether it is exported) in Network → Egress and sources.</p>}
-      {data && data.sources.length > 0 && <><h3>Hub sources</h3><ul className="agent-items">{data.sources.map(s => <li key={s.name}><span>{s.name} · {s.interface} · {s.cidr}{s.export === false ? " · not exported" : ""}</span></li>)}</ul></>}
+      {data && <p className="field-help">Hub prefixes follow the client pool and the hub sources; add, change or remove a source (and whether it is exported) in Network → Sources.</p>}
+      {data && data.sources.length > 0 && <><h3 className="panel-section-title">Hub sources</h3><ul className="agent-items">{data.sources.map(s => <li key={s.name}><span>{s.name} · {s.interface} · {s.cidr}{s.export === false ? " · not exported" : ""}</span></li>)}</ul></>}
     </section>
     <section className="panel" data-capability="fabric.settings">
-      <div className="panel-header"><h2>Fabric settings</h2></div>
+      <div className="panel-header"><div><h2>Fabric settings</h2><p className="muted-line">Addresses of every node derive from these values; <code>{"{id}"}</code> is the node ID. The defaults fit most setups: change them only when they collide with your own networks.</p></div></div>
       {draft && <form onSubmit={e => { e.preventDefault(); void save(); }}>
         <fieldset className="agent-fields" disabled={busy}>
           <label>Hub node ID<input type="number" min={1} max={254} value={draft.node_id} onChange={e => setDraft({ ...draft, node_id: Number(e.target.value) || 1 })} required /></label>

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed (panel look and navigation, branch `fix/panel-design-nav`)
+
+- The sidebar is grouped by task: Dashboard; Access (Users, Groups, Sessions); Routing (Network, Agents, Fabric); System (Config, Diagnostics, Logs, Terminal). Every section has its own icon, and the line under the page title describes the open section instead of repeating the version (it stays in the sidebar footer).
+- Network opens with what you edit: **Egress rules** and **Sources** are now two panels at the top, followed by Reconciler, Plan and Explain. Save source sits in the panel footer instead of inside the field grid.
+- The v2 forms (Agents, Fabric, Network) share the panel styles: the `agent-*` form rules moved from `agents.css`, scoped to `.agents-view`, to `styles.css`, so Fabric and Network no longer show browser-default fieldset frames, list bullets and native checkboxes. Checkboxes are switches, as elsewhere in the panel. Fabric panels got their spacing (`view-stack`) and short descriptions.
+- On narrow screens an egress rule and the Rules/JSON tabs no longer stick out of the panel.
+- New `docs/panel.md`: what each section does and a first-setup order. New Playwright spec `e2e/v2-views.spec.ts` (look, overflow and sidebar order at 1440/390 px, light/dark).
+
 ### Fixed (Quick Start)
 
 - `.env.example` still set `KORNODE_FABRIC__ENABLED=false`, a key removed by D-71, so the Quick Start (`cp .env.example .env && docker compose up`) failed at startup with `fabric.enabled: Extra inputs are not permitted`. The line is removed; `test_config_example_loads_with_env_example` loads `config.example.yaml` with `.env.example`.
