@@ -110,7 +110,7 @@ class SSH:
     def call(self, action: str, case: str = "", **payload: Any) -> Any:
         timeout = (
             360
-            if action in {"restore", "pull_previous"}
+            if action in {"restore", "pull_previous", "awg_pull"}
             else 30
             if action in {"probe", "status"}
             else 180

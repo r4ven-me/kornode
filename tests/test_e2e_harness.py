@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -459,7 +460,9 @@ def test_worker_never_uses_shell_true_or_global_prune() -> None:
                 for k in node.keywords
             )
     assert '"prune"' not in text
-    assert '"network_mode"' not in text
+    # Never the host's network; only the wg-easy source shares the node container's own (NL-05).
+    assert re.findall(r'"network_mode": "([^"]*)"', text) == ["service:node"]
+    assert text.count('"network_mode"') == 1
     assert '"/var/run/docker.sock"' not in text
 
 

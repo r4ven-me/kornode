@@ -12,6 +12,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import stat
@@ -47,6 +48,11 @@ SOURCE_CLIENT_ADDRESS = "10.8.3.20"
 HUB_SOURCE_CIDR = "10.8.1.0/24"
 HUB_SOURCE_NODE_ADDRESS = "10.8.1.2"
 HUB_SOURCE_CLIENT_ADDRESS = "10.8.1.20"
+# NL-05: a real wg-easy (AmneziaWG, userspace implementation) is the source of agent-a. It shares
+# the node container's network namespace, so `wg0` lives where the node's policy applies.
+AWG_IMAGE = "ghcr.io/wg-easy/wg-easy:15.4.0"
+AWG_PORT = 51820
+AWG_SOURCE_CIDR = "10.8.2.0/24"  # agent-a is node 2: its source network is 10.8.<id>.0/24
 IMAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:-]*(?:@sha256:[0-9a-f]{64})?$")
 
 PROXY = """import select, socket, socketserver
@@ -65,6 +71,35 @@ class Server(socketserver.ThreadingTCPServer):
  allow_reuse_address=True
  daemon_threads=True
 with Server(("0.0.0.0",18444),Handler) as server: server.serve_forever()
+"""
+# Runs inside the wg-easy container: wait for its API, switch its NAT/FORWARD hooks off (kornode
+# owns NAT for the source, D-68), create the client and print its configuration.
+AWG_API = """const o=process.env, base="http://127.0.0.1:"+o.PORT;
+const auth="Basic "+Buffer.from(o.INIT_USERNAME+":"+o.INIT_PASSWORD).toString("base64");
+async function call(method,path,body){
+ const headers={Authorization:auth,"Content-Type":"application/json"};
+ const r=await fetch(base+path,{method,headers,
+  body:body===undefined?undefined:JSON.stringify(body)});
+ const text=await r.text();
+ if(!r.ok) throw new Error(method+" "+path+" "+r.status);
+ return text;
+}
+(async()=>{
+ for(let i=0;;i++){
+  try{ await call("GET","/api/admin/hooks"); break }
+  catch(e){ if(i>=90) throw e; await new Promise(r=>setTimeout(r,1000)) }
+ }
+ await call("POST","/api/admin/hooks",{preUp:"",postUp:"",preDown:"",postDown:""});
+ const made=JSON.parse(await call("POST","/api/client",{name:"awg3",expiresAt:null}));
+ const config=await call("GET","/api/client/"+made.clientId+"/configuration");
+ console.log(JSON.stringify({config}));
+})().catch(e=>{console.error(e.message);process.exit(1)});
+"""
+AWG_CONNECT = """const o=JSON.parse(require("fs").readFileSync(0,"utf8"));
+const s=require("net").connect({host:o.host,port:o.port,timeout:3000});
+s.on("connect",()=>{console.log(JSON.stringify({ok:true}));s.destroy()});
+const fail=()=>{console.log(JSON.stringify({ok:false}));s.destroy()};
+s.on("error",fail);s.on("timeout",fail);
 """
 PROBE = """import http.client, json, ssl, subprocess, sys
 from pathlib import Path
@@ -510,6 +545,10 @@ class Worker:
                 "web": {"enabled": False},
                 "egress": [],
             }
+            if self.role == "ext" and self.case == "routed":
+                # NL-05: ext is the "office" upstream and lets its clients (the agent's tunnel)
+                # out locally: the default policy, not the empty one of the hub.
+                del config["egress"]
             atomic(config_path, config)
         agent = self.role.startswith("agent-")
         service: dict[str, Any] = {
@@ -536,8 +575,14 @@ class Worker:
         }
         if agent:
             if self.role == "agent-a" and self.case == "routed":
-                # The access server of agent-a (P4-04, NL-03) must be reachable on the VM.
-                service["ports"] = [f"{ACCESS_PORT}:{ACCESS_PORT}/tcp"]
+                # The access server of agent-a (P4-04, NL-03) and its wg-easy source (NL-05)
+                # must be reachable on the VM.
+                service["ports"] = [
+                    f"{ACCESS_PORT}:{ACCESS_PORT}/tcp",
+                    f"{AWG_PORT}:{AWG_PORT}/udp",
+                ]
+            if self.role == "agent-b" and self.case == "routed":
+                service["ports"] = ["9100:9100/tcp"]  # NL-05: the "internet" behind the upstream
             (self.directory / "agent").mkdir(mode=0o700)
             service["volumes"].append(
                 {
@@ -592,6 +637,47 @@ class Worker:
             }
             compose["networks"] = {
                 "source": {"ipam": {"config": [{"subnet": source_cidr}]}},
+            }
+        if self.role == "agent-a" and self.case == "routed":
+            (self.directory / "awg").mkdir(mode=0o700)
+            services["awg"] = {
+                "image": AWG_IMAGE,
+                "network_mode": "service:node",
+                "cap_add": ["NET_ADMIN"],
+                "devices": ["/dev/net/tun:/dev/net/tun"],
+                "volumes": [
+                    {
+                        "type": "bind",
+                        "source": str(self.directory / "awg"),
+                        "target": "/etc/wireguard",
+                    }
+                ],
+                "environment": {
+                    "EXPERIMENTAL_AWG": "true",
+                    "OVERRIDE_AUTO_AWG": "awg",
+                    "DISABLE_IPV6": "true",
+                    "INSECURE": "true",
+                    "HOST": "127.0.0.1",
+                    "PORT": "51821",
+                    "INIT_ENABLED": "true",
+                    "INIT_USERNAME": "e2e",
+                    "INIT_PASSWORD": secrets.token_hex(12) + "Aa1!",
+                    "INIT_HOST": "127.0.0.1",
+                    "INIT_PORT": str(AWG_PORT),
+                    "INIT_DNS": "9.9.9.9",
+                    "INIT_IPV4_CIDR": AWG_SOURCE_CIDR,
+                    "INIT_IPV6_CIDR": "fd00:db8::/64",
+                    "INIT_ALLOWED_IPS": "0.0.0.0/0",
+                },
+                "labels": service["labels"],
+            }
+        if self.role == "agent-b" and self.case == "routed":
+            services["awg-client"] = {
+                "image": AWG_IMAGE,
+                "entrypoint": ["sleep", "infinity"],
+                "cap_add": ["NET_ADMIN"],
+                "devices": ["/dev/net/tun:/dev/net/tun"],
+                "labels": service["labels"],
             }
         atomic(self.directory / "compose.json", compose)
         self.compose("create" if agent else "up", *([] if agent else ["-d"]), "node")
@@ -704,6 +790,29 @@ class Worker:
             except (ValueError, subprocess.TimeoutExpired):
                 out = b"unavailable"
             dump[name] = out.decode(errors="replace")[:6000]
+        return dump
+
+    def awg_diag(self) -> Any:
+        """State of the wg-easy source (agent-a) or of its client (agent-b): interfaces,
+        routes, handshake. `awg show` hides private keys; nothing here is a credential."""
+        if self.role not in {"agent-a", "agent-b"} or self.case != "routed":
+            raise ValueError("routed case, agents only")
+        service = "awg" if self.role == "agent-a" else "awg-client"
+        container = self.container(service)
+        dump = {}
+        for name, argv in (
+            ("awg", ["awg", "show"]),
+            ("addr", ["ip", "-br", "addr"]),
+            ("routes", ["ip", "route", "show", "table", "all"]),
+            ("nat", ["iptables", "-t", "nat", "-S"]),
+        ):
+            try:
+                _, out = self.run(
+                    ["docker", "exec", container, *argv], allowed=tuple(range(256)), timeout=20
+                )
+            except (ValueError, subprocess.TimeoutExpired):
+                out = b"unavailable"
+            dump[name] = out.decode(errors="replace")[:4000]
         return dump
 
     def resolved_sets(self) -> Any:
@@ -947,6 +1056,108 @@ class Worker:
             out["client_state"] = state.decode(errors="replace")[:2500]
         return {key: value[-3000:] for key, value in out.items()}
 
+    def awg_pull(self) -> Any:
+        """Pull the wg-easy image on this VM (a separate, longer action: the registry is slow)."""
+        if self.role not in {"agent-a", "agent-b"} or self.case != "routed":
+            raise ValueError("routed case, agents only")
+        for attempt in range(5):  # ghcr.io from the VMs drops TLS handshakes now and then
+            try:
+                self.run(["docker", "pull", AWG_IMAGE], timeout=60)
+                return {"pulled": True}
+            except (ValueError, subprocess.TimeoutExpired):
+                if attempt == 4:
+                    raise
+        raise AssertionError("unreachable")
+
+    def awg_server(self) -> Any:
+        """Start the wg-easy source of agent-a (NL-05) and return a client configuration."""
+        if self.role != "agent-a" or self.case != "routed":
+            raise ValueError("routed case, agent-a only")
+        self.compose("up", "-d", "awg", timeout=600)
+        container = self.container("awg")
+        raw = self.run(["docker", "exec", "-i", container, "node", "-e", AWG_API], timeout=150)[1]
+        # The default hooks installed NAT and FORWARD rules in the node's namespace when the
+        # interface first came up; kornode owns both for a source, so take them out again.
+        for rule in (
+            f"-t nat POSTROUTING -s {AWG_SOURCE_CIDR} -o eth0 -j MASQUERADE",
+            f"INPUT -p udp -m udp --dport {AWG_PORT} -j ACCEPT",
+            "FORWARD -i wg0 -j ACCEPT",
+            "FORWARD -o wg0 -j ACCEPT",
+        ):
+            table, chain = (
+                (["-t", "nat"], rule.split()[2:]) if rule.startswith("-t") else ([], rule.split())
+            )
+            argv = ["iptables", *table, "-D", *chain]
+            self.run(["docker", "exec", container, *argv], allowed=(0, 1, 2, 4), timeout=20)
+        return json.loads(raw)
+
+    def awg_policy(self) -> Any:
+        """The wg-easy source of agent-a leaves through `upstream:office`, kill switch on (hub)."""
+        if self.role != "hub" or self.case != "routed":
+            raise ValueError("routed case, hub only")
+        path = self.directory / "awg-egress.json"
+        atomic(
+            path,
+            {
+                "sources": [
+                    {"name": "awg", "interface": "wg0", "cidr": AWG_SOURCE_CIDR, "export": True}
+                ],
+                "egress": [
+                    {"id": "awg-out", "from": ["awg"], "to": "any", "via": "upstream:office",
+                     "kill_switch": True},
+                ],
+            },
+        )  # fmt: skip
+        try:
+            return self.cli("agent", "egress", "set", "agent-a", "--file", str(path))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def awg_client(self) -> Any:
+        """Bring up the AmneziaWG client (agent-b VM) from the server's configuration; only the
+        listed routes go through the tunnel."""
+        if self.role != "agent-b" or self.case != "routed":
+            raise ValueError("routed case, agent-b only")
+        o = self.payload
+        endpoint = f"{ipaddress.ip_address(o['endpoint_host'])}:{AWG_PORT}"
+        routes = [str(ipaddress.ip_network(route)) for route in o["routes"]]
+        if not isinstance(o["config"], str):
+            raise ValueError("invalid config")
+        lines: list[str] = []
+        for line in o["config"].splitlines():
+            key = line.split("=", 1)[0].strip()
+            if key in {"DNS", "AllowedIPs", "Endpoint", "PersistentKeepalive"}:
+                continue
+            if key == "Address":  # IPv6 is switched off
+                value = ",".join(
+                    v.strip() for v in line.split("=", 1)[1].split(",") if ":" not in v
+                )
+                line = f"Address = {value}"
+            lines.append(line)
+            if key == "PublicKey":
+                lines += [
+                    f"Endpoint = {endpoint}",
+                    f"AllowedIPs = {', '.join(routes)}",
+                    "PersistentKeepalive = 5",
+                ]
+        self.compose("up", "-d", "awg-client", timeout=600)
+        container = self.container("awg-client")
+        self.run(
+            ["docker", "exec", container, "awg-quick", "down", "/tmp/awg0.conf"], allowed=(0, 1)
+        )
+        self.run(
+            ["docker", "exec", "-i", container, "sh", "-c", "cat > /tmp/awg0.conf"],
+            data=("\n".join(lines) + "\n").encode(),
+        )
+        self.run(["docker", "exec", container, "awg-quick", "up", "/tmp/awg0.conf"], timeout=60)
+        return {"up": True}
+
+    def awg_client_stop(self) -> Any:
+        if self.role != "agent-b" or self.case != "routed":
+            raise ValueError("routed case, agent-b only")
+        self.compose("stop", "awg-client")
+        return {"stopped": True}
+
     def access_client_stop(self) -> Any:
         if self.role != "agent-b" or self.case != "routed":
             raise ValueError("routed case, agent-b only")
@@ -1002,6 +1213,11 @@ class Worker:
         if source is not None:
             source = str(ipaddress.ip_address(source))
         data = json.dumps({"host": host, "port": 9100, "source": source}).encode()
+        if self.payload.get("awg"):
+            if self.role != "agent-b":
+                raise ValueError("the AmneziaWG client runs on agent-b")
+            argv = ["docker", "exec", "-i", self.container("awg-client"), "node", "-e", AWG_CONNECT]
+            return json.loads(self.run(argv, data=data, timeout=20)[1])
         if self.payload.get("client"):
             if self.role not in {"agent-b", "hub"}:
                 raise ValueError("the client container runs on agent-b or the hub")
@@ -1320,6 +1536,12 @@ class Worker:
             "access_client",
             "access_diag",
             "access_client_stop",
+            "awg_diag",
+            "awg_pull",
+            "awg_server",
+            "awg_policy",
+            "awg_client",
+            "awg_client_stop",
             "fabric_listen",
             "fabric_connect",
             "inject_bundle",

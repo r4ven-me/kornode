@@ -42,7 +42,7 @@ Scenario list (must all exist by the end of P4; each maps to a task "Done when")
 | NL-02 | node3 agent → `monitoring.kornode.internal` on hub | resolves, TCP ok |
 | NL-03 | cli3 → internet | exit per rules, MSS ≤ path MTU |
 | NL-04 | cli3 → service in node2 LAN | via hub, no NAT |
-| NL-05 | awg3 client → internet via `upstream:office` | via ext; ext down → ICMP unreachable, nothing on uplink |
+| NL-05 (`test_routed_fabric.py`, done) | awg3 client → internet via `upstream:office` | via ext; ext down → ICMP unreachable, nothing on uplink |
 | NL-06 | awg3 client → hub monitoring | via fabric, hub sees `10.8.3.2` |
 | NL-07 | hub client → hub docker bridge with `via: upstream` rule | local delivery |
 | NL-08 | openconnect bounce under traffic | zero marked packets on uplink |
@@ -184,7 +184,7 @@ mTLS probes (not access-client forwarding); it requires paired **different immut
 `E2E_PREVIOUS_HUB_IMAGE` / `E2E_PREVIOUS_AGENT_IMAGE` digest refs with compatible
 CLI/schema. Missing baselines skip; identical images fail rather than pass as an upgrade.
 
-`test_routed_fabric.py` runs NL-01…NL-04 and NL-06 on real VMs (case `routed`; all passed on 2026-10-20: D-65, D-66, D-67, D-68) and keeps explicit P4 skips: NL-05, NL-07…09, full NL-13
+`test_routed_fabric.py` runs NL-01…NL-04 and NL-06 on real VMs (case `routed`; all passed on 2026-10-20: D-65, D-66, D-67, D-68) and keeps explicit P4 skips: NL-07…09, full NL-13
 client forwarding and E2E-06 client continuity. They are listed in offline plan
 and run summary. There is no claimed wg-easy/domain/leak/throughput/host-network
 coverage. None of the real VM cases has been run; local faked SSH/Docker safety

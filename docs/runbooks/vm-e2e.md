@@ -264,3 +264,14 @@ The harness does not create snapshots or reimage VMs automatically.
    not that execution. Container-isolated E2E does not close host-network risks.
 6. Compatible previous images for E2E-06 and P4 runtime/client scenarios for full
    spec coverage. No phase/task is marked finally Done by this implementation.
+
+## VM prerequisites found in practice (2026-10-22)
+
+- **MTU 1400 on the default route of every VM** (`kornode-route-mtu.service`, a oneshot running
+  `ip route change default via <gateway> dev <nic> proto dhcp src <address> metric 100 mtu 1400`).
+  Without it TLS handshakes to `ghcr.io` / GitHub endpoints time out (path-MTU blackhole); the
+  runner on the hub VM also goes `offline`.
+- **NL-05 pulls `ghcr.io/wg-easy/wg-easy:15.4.0`** on agent-a and agent-b at test time (worker
+  action `awg_pull`, five attempts). wg-easy runs AmneziaWG with `amneziawg-go` (userspace); it needs
+  `/dev/net/tun` in the container, not a kernel module. Docker networks of a failed run that
+  were not removed make the next deploy fail with "Pool overlaps": remove `ke2e-*` networks.

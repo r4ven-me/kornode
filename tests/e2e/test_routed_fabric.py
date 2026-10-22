@@ -1,4 +1,4 @@
-"""Unimplemented P4 expectations are explicit blockers, never fabricated success.
+"""P4 expectations that are not VM scenarios are explicit skips, never fabricated success.
 
 The P3 cache/upgrade probes exercise fabric/upstream connectivity, not client
 throughput, no-NAT routed prefixes or wg-easy access/exit runtime.
@@ -14,18 +14,14 @@ from tests.e2e.inventory import E2EError
 pytestmark = pytest.mark.e2e
 
 BLOCKED = {
-    "NL-05": "source client through upstream:office needs a source client and the ext upstream "
-    "in one case (kill switch itself: client netlab suite); wg-easy image/kernel module absent",
     "NL-07": "covered by the netlab suppress-rule test (D-80)",
     "NL-08": "covered by netlab tunnel-bounce leak tests and the E2E-07 fail-closed checks (D-80)",
-    "E2E-06-clients": "an upgrade restarts the agent's ocserv: client continuity is a re-login "
-    "and needs its own contract (D-80)",
 }
 
 
 @pytest.mark.parametrize("scenario,reason", BLOCKED.items(), ids=BLOCKED)
 def test_pending_runtime_contract(scenario: str, reason: str) -> None:
-    pytest.skip(f"{scenario} blocked: {reason}")
+    pytest.skip(f"{scenario} is not a VM scenario: {reason}")
 
 
 HUB_FABRIC_ADDRESS = "10.99.0.1"
@@ -516,3 +512,61 @@ def test_fabric_recovers_after_a_60_second_hub_outage_without_operator_action(
     for role in ("agent-a", "agent-b"):
         address = cluster.call(role, "fabric_address")["address"]
         assert cluster.tcp_peer(role, "hub", address) == HUB_FABRIC_ADDRESS
+
+
+@pytest.mark.e2e_case("routed")
+def test_nl_05_awg_client_leaves_through_upstream_office_and_fails_closed_when_it_is_gone(
+    cluster: Cluster,
+) -> None:
+    """NL-05: a real wg-easy (AmneziaWG) is the source of agent-a (same network namespace as
+    the node, NAT hooks off). Its client reaches the "internet" (a listener on the agent-b VM)
+    through `upstream:office` (the ext VM masquerades it); with ext gone nothing arrives,
+    neither from ext nor from agent-a's own uplink."""
+    inventory = cluster.fleet.inventory
+    agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
+    ext = inventory.host("ext").address
+    for role in ("agent-a", "agent-b"):
+        cluster.call(role, "awg_pull")
+    cluster.configure_upstream()
+    before = cluster.status("agent-a")["applied_version"]
+    config = cluster.call("agent-a", "awg_server")["config"]
+    cluster.call("hub", "awg_policy")
+    wait_for(
+        lambda: cluster.status("agent-a")["applied_version"] > before,
+        60,
+        "agent-a did not apply the bundle with the wg-easy source",
+    )
+    try:
+        cluster.call(
+            "agent-b", "awg_client", config=config, endpoint_host=agent_a, routes=[f"{agent_b}/32"]
+        )
+        del config
+
+        def through_office() -> str | None:
+            try:
+                return cluster.tcp_peer("agent-b", "agent-b", agent_b, awg=True, seconds=30)
+            except E2EError:
+                return None
+
+        try:
+            wait_for(
+                lambda: through_office() == ext,
+                150,
+                "the AmneziaWG client did not leave through upstream:office",
+            )
+        except E2EError as exc:
+            dumps = {role: cluster.call(role, "awg_diag") for role in ("agent-a", "agent-b")}
+            dumps["net"] = cluster.call("agent-a", "net_dump")
+            dumps["status"] = cluster.status("agent-a")
+            raise E2EError(f"{exc}: {dumps}") from None
+
+        cluster.call("ext", "stop")
+        time.sleep(15)  # the upstream tunnel notices the server going away
+        try:
+            assert cluster.tcp_unreachable("agent-b", "agent-b", agent_b, awg=True), (
+                "AmneziaWG client traffic arrived while the upstream was down"
+            )
+        finally:
+            cluster.call("ext", "restart")
+    finally:
+        cluster.call("agent-b", "awg_client_stop")
