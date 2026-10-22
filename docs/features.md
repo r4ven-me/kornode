@@ -115,7 +115,7 @@ What leaves the hub and where is one declarative policy: `egress` rules (first m
 named `sources` (wg-easy, Amnezia) and destination `sets` of routes and domains
 (`docs/spec/02-egress-and-sources.md`). A rule says `from` (clients, host, fabric, a source),
 `to` (any, a set, inline routes/domains, a node) and `via` (local, fabric, drop,
-`upstream:<profile>`, `exit:<node>`). Traffic of clients and sources that no rule matches
+`upstream:<profile>`, `node:<n>`). Traffic of clients and sources that no rule matches
 is dropped; without an `egress` key clients leave through the uplink (D-72).
 
 Supported:

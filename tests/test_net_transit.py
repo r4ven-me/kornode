@@ -67,13 +67,13 @@ def test_hub_marks_agent_traffic_for_the_exit_nodes_table() -> None:
     lines = lines_of(compiled.script)
 
     pass_line = next(i for i, line in enumerate(lines) if "ip daddr @fabric_v4 return" in line)
-    transit = next(i for i, line in enumerate(lines) if 'comment "transit exit:3"' in line)
+    transit = next(i for i, line in enumerate(lines) if 'comment "transit node:3"' in line)
     guard = next(i for i, line in enumerate(lines) if 'comment "agents: no exit declared"' in line)
     assert pass_line < transit < guard
     mark = "0x0c000100"
     assert (
         f"iifname @fabric_ifaces ip saddr @transit3_v4 meta mark set {mark} "
-        f'ct mark set meta mark accept comment "transit exit:3"'
+        f'ct mark set meta mark accept comment "transit node:3"'
     ) in lines
     assert "iifname @fabric_ifaces reject with icmpx admin-prohibited" in lines[guard]
     assert "set transit3_v4 {" in compiled.script and "set transit_ifaces {" in compiled.script
@@ -87,7 +87,7 @@ def test_hub_marks_agent_traffic_for_the_exit_nodes_table() -> None:
 
 def test_the_exit_nodes_session_gets_a_table_that_fails_closed() -> None:
     online = compile_policy(EgressPolicy(), hub_facts())
-    table = next(e.table for e in online.exits if e.name == "exit:3")
+    table = next(e.table for e in online.exits if e.name == "node:3")
     routes = {(r.table, r.dst, r.type, r.dev) for r in online.desired.routes}
     assert (table, "default", "unicast", "vpns1") in routes or any(
         r.table == table and r.dst == "default" and r.dev == "vpns1" for r in online.desired.routes
@@ -105,7 +105,7 @@ def test_the_exit_nodes_session_gets_a_table_that_fails_closed() -> None:
     assert not any(r.dev for r in routes if r.dst == "default")
     assert elements(offline, "transit_ifaces") == frozenset()
     # Offline: still marked (never the uplink) and the kill switch is in place.
-    assert 'comment "transit exit:3"' in offline.script
+    assert 'comment "transit node:3"' in offline.script
     assert 'oifname "eth0" reject' in offline.script or 'oifname "eth0"' in offline.script
 
 
@@ -133,7 +133,7 @@ def agent_policy() -> EgressPolicy:
         {
             "egress": [
                 {"id": "to-fabric", "from": ["clients", "host"], "to": "fabric", "via": "fabric"},
-                {"id": "out", "from": ["clients"], "to": "any", "via": "exit:3"},
+                {"id": "out", "from": ["clients"], "to": "any", "via": "node:3"},
             ]
         }
     )
@@ -145,7 +145,7 @@ def agent_facts() -> NodeFacts:
         client_pool=n("10.100.2.0/24"),
         tunnels={
             "fabric": TunnelFact("oc-hub0", True, ("203.0.113.2",)),
-            "exit:3": TunnelFact("oc-hub0", True),
+            "node:3": TunnelFact("oc-hub0", True),
         },
         node_prefixes={1: HUB_PREFIXES[1], 2: HUB_PREFIXES[2], 3: HUB_PREFIXES[3]},
         fabric_ifaces=("oc-hub0",),
@@ -156,7 +156,7 @@ def agent_facts() -> NodeFacts:
 
 def test_an_agent_exit_node_sends_through_the_hub_tunnel_without_nat() -> None:
     compiled = compile_policy(agent_policy(), agent_facts())
-    exit_ = next(e for e in compiled.exits if e.name == "exit:3")
+    exit_ = next(e for e in compiled.exits if e.name == "node:3")
     assert exit_.interface == "oc-hub0" and exit_.up and not exit_.nat and exit_.kill_switch
     assert any(
         r.table == exit_.table and r.dst == "default" and r.dev == "oc-hub0"
@@ -180,10 +180,10 @@ def test_an_agent_exit_to_a_node_that_is_offline_is_marked_and_fails_closed() ->
     facts = agent_facts()
     down = dataclasses.replace(
         facts,
-        tunnels={"fabric": TunnelFact("oc-hub0", False), "exit:3": TunnelFact("oc-hub0", False)},
+        tunnels={"fabric": TunnelFact("oc-hub0", False), "node:3": TunnelFact("oc-hub0", False)},
     )
     compiled = compile_policy(agent_policy(), down)
-    exit_ = next(e for e in compiled.exits if e.name == "exit:3")
+    exit_ = next(e for e in compiled.exits if e.name == "node:3")
     assert not exit_.up
     assert [r.type for r in compiled.desired.routes if r.table == exit_.table] == [
         "unreachable",
@@ -191,18 +191,18 @@ def test_an_agent_exit_to_a_node_that_is_offline_is_marked_and_fails_closed() ->
     ]
 
 
-def exit_node_policy() -> EgressPolicy:
+def gateway_node_policy() -> EgressPolicy:
     return EgressPolicy.model_validate(
         {
             "egress": [
                 {"id": "to-fabric", "from": ["clients", "host"], "to": "fabric", "via": "fabric"},
-                {"id": "exit-local", "from": ["fabric"], "to": "any", "via": "local"},
+                {"id": "gateway-local", "from": ["fabric"], "to": "any", "via": "local"},
             ]
         }
     )
 
 
-def exit_node_facts() -> NodeFacts:
+def gateway_node_facts() -> NodeFacts:
     return NodeFacts(
         node_id=3,
         client_pool=n("10.100.3.0/24"),
@@ -215,7 +215,7 @@ def exit_node_facts() -> NodeFacts:
 
 
 def test_the_exit_node_masquerades_what_the_fabric_sends_it() -> None:
-    compiled = compile_policy(exit_node_policy(), exit_node_facts())
+    compiled = compile_policy(gateway_node_policy(), gateway_node_facts())
     local = next(e for e in compiled.exits if e.name == "local")
     lines = lines_of(compiled.script)
     assert (
@@ -233,10 +233,10 @@ def test_the_exit_node_masquerades_what_the_fabric_sends_it() -> None:
 
 def test_prefix_routes_in_main_bring_the_answers_back() -> None:
     facts = dataclasses.replace(
-        exit_node_facts(),
+        gateway_node_facts(),
         session_routes=((n("10.100.2.0/24"), "oc-hub0"), (n("10.99.0.0/24"), "oc-hub0")),
     )
-    routes = compile_policy(exit_node_policy(), facts).desired.routes
+    routes = compile_policy(gateway_node_policy(), facts).desired.routes
     main = {(r.dst, r.dev, r.proto) for r in routes if r.table == 254}
     assert ("10.100.2.0/24", "oc-hub0", 77) in main and ("10.99.0.0/24", "oc-hub0", 77) in main
 
@@ -245,19 +245,19 @@ def hub_transit_case() -> tuple[EgressPolicy, NodeFacts]:
     return EgressPolicy(), hub_facts()
 
 
-def hub_egress_exit_case() -> tuple[EgressPolicy, NodeFacts]:
+def hub_egress_gateway_case() -> tuple[EgressPolicy, NodeFacts]:
     """The hub's own clients and a hub source leave through node 3 (egress.hub)."""
     policy = EgressPolicy.model_validate(
         {
             "sources": [{"name": "wg", "interface": "wg0", "cidr": "10.8.1.0/24"}],
-            "egress": [{"from": ["clients", "wg"], "to": "any", "via": "exit:3"}],
+            "egress": [{"from": ["clients", "wg"], "to": "any", "via": "node:3"}],
         }
     )
     facts = hub_facts()
     facts = dataclasses.replace(
         facts,
         sources={"wg": SourceFact(present=True)},
-        tunnels={"exit:3": TunnelFact(interface="vpns1", up=True)},
+        tunnels={"node:3": TunnelFact(interface="vpns1", up=True)},
         node_prefixes={**facts.node_prefixes, 1: (*facts.node_prefixes[1], n("10.8.1.0/24"))},
         transit_exits=(*facts.transit_exits, TransitExit(3, (), "vpns1")),
     )
@@ -277,16 +277,16 @@ def hub_transit_set_case() -> tuple[EgressPolicy, NodeFacts]:
     )
 
 
-def agent_exit_case() -> tuple[EgressPolicy, NodeFacts]:
+def agent_gateway_case() -> tuple[EgressPolicy, NodeFacts]:
     return agent_policy(), agent_facts()
 
 
-def exit_node_case() -> tuple[EgressPolicy, NodeFacts]:
-    return exit_node_policy(), exit_node_facts()
+def gateway_node_case() -> tuple[EgressPolicy, NodeFacts]:
+    return gateway_node_policy(), gateway_node_facts()
 
 
 def test_hub_transit_matches_set_exits_by_source_and_destination_in_policy_order() -> None:
-    """D-79: an agent's `to: <set> via exit:3` followed by `to: any via exit:3` is marked
+    """D-79: an agent's `to: <set> via node:3` followed by `to: any via node:3` is marked
     by source+destination first, then by source alone — the order the agent classified in."""
     sources = (n("10.100.2.0/24"),)
     facts = dataclasses.replace(

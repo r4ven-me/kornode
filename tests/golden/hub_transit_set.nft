@@ -66,8 +66,8 @@ table inet kornode {
     ip6 daddr @carrier_v6 return
     iifname @fabric_ifaces ip daddr @fabric_v4 return comment "agents: fabric destinations are routed"
     iifname @fabric_ifaces ip6 daddr @fabric_v6 return comment "agents: fabric destinations are routed"
-    iifname @fabric_ifaces ip saddr @transit3_v4 ip daddr @transit3_0_d4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit exit:3"
-    iifname @fabric_ifaces ip saddr @transit3_1_v4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit exit:3"
+    iifname @fabric_ifaces ip saddr @transit3_v4 ip daddr @transit3_0_d4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
+    iifname @fabric_ifaces ip saddr @transit3_1_v4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
     ip saddr 10.100.1.0/24 reject with icmpx admin-prohibited comment "egress rule 0"
     iifname @fabric_ifaces reject with icmpx admin-prohibited comment "agents: no exit declared"
   }

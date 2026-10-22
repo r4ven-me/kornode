@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed (role `gateway`, `via: node:<n>`, D-84, branch `redesign/rename-gateway-role`)
+
+- The agent role `exit` is now **`gateway`**, and a rule sends traffic through it with **`via: node:<n>`** instead of `via: exit:<n>`. CLI (`korctl agent create|set --role gateway`), API, panel (role checkboxes with a hint, rule editor `via` = `node`), docs, specs and examples use the new names. Error codes: `gateway_node`, `gateway_in_use`.
+- Old data keeps working: `exit:<n>` in the hub `egress` or a stored agent policy is read as `node:<n>` and saved back as such; registry migration 0004 renames the role; an agent boots from a bundle cached with the role `exit`; the hub accepts the agent report field `exit_sets` next to the new `gateway_sets`. Tests: `tests/test_gateway_rename.py`, `AgentPolicy.test.tsx`.
+- Golden cases renamed to `agent_gateway`, `gateway_node`, `hub_egress_gateway`; the generated rules are unchanged except the nft comment `transit node:<n>`. `tests/test_agent_exit.py` is now `tests/test_agent_gateway.py`.
+
 ### Added (agent image in GHCR, branch `fix/agent-image-release`)
 
 - `Release image` publishes `ghcr.io/<owner>/kornode-agent` (`Dockerfile.agent`) next to the hub image, as `v<version>` and `latest`. Each image checks its own tag, so the agent image is published for the current version even though the hub image already exists; build caches are scoped per image.

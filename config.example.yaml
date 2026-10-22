@@ -170,7 +170,7 @@ routing:
 # What leaves the hub and where (docs/spec/02-egress-and-sources.md). First match
 # wins; traffic of clients and sources that no rule matches is dropped. Without
 # this key the hub uses one rule: clients -> any via local. `via` is local,
-# fabric, drop, upstream:<profile> or exit:<node>.
+# fabric, drop, upstream:<profile> or node:<n>.
 # egress:
 #   - from: [clients]
 #     to: any

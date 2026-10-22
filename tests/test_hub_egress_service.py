@@ -50,7 +50,7 @@ class World:
         registry = Registry(open_registry(self.config.system.data_dir / "registry.db"))
         migrate(registry.conn)
         registry.create_node(id=1, name="hub", state="active")
-        registry.create_node(id=2, name="out", state="active", roles=["exit"])
+        registry.create_node(id=2, name="out", state="active", roles=["gateway"])
 
 
 @pytest.fixture
@@ -91,14 +91,14 @@ def test_invalid_policy_is_refused_and_nothing_is_written(world: World) -> None:
 
 
 def test_exit_target_is_checked_against_the_registry(world: World) -> None:
-    exit_rule = {"egress": [{"from": ["clients"], "to": "any", "via": "exit:2"}]}
+    exit_rule = {"egress": [{"from": ["clients"], "to": "any", "via": "node:2"}]}
     with pytest.raises(ManagementError) as err:
         world.service().set_policy(exit_rule)
-    assert (err.value.status, err.value.error) == (409, "exit_node")
+    assert (err.value.status, err.value.error) == (409, "gateway_node")
 
     world.add_exit_node()
     world.service().set_policy(exit_rule)
-    assert load_config(world.path).egress[0].via == "exit:2"
+    assert load_config(world.path).egress[0].via == "node:2"
 
 
 def test_check_changes_nothing(world: World) -> None:

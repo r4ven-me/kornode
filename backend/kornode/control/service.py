@@ -28,7 +28,7 @@ from kornode.bundle.errors import BundleError
 from kornode.config.models import AppConfig
 from kornode.control.auth import RateLimiter, RevocationList, agent_identity
 from kornode.control.errors import ControlError
-from kornode.net.lists import parse_exit_sets
+from kornode.net.lists import parse_gateway_sets, report_gateway_sets
 from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.models import Command, StoredBundle
 from kornode.registry.repository import Registry, RegistryNotFound
@@ -56,13 +56,17 @@ class ReportBody(BaseModel):
     applied_version: StrictInt = Field(ge=0, le=MAX_VERSION)
     pending_version: StrictInt | None = Field(default=None, ge=0, le=MAX_VERSION)
     high_water_version: StrictInt | None = Field(default=None, ge=0, le=MAX_VERSION)
-    # Addresses the agent resolved for the destinations of its `exit:<n>` rules (D-79).
+    # Addresses the agent resolved for the destinations of its `node:<n>` rules (D-79);
+    # agents before D-84 send them as `exit_sets`.
+    gateway_sets: dict[str, list[str]] | None = None
     exit_sets: dict[str, list[str]] | None = None
 
-    @field_validator("exit_sets")
+    @field_validator("gateway_sets", "exit_sets")
     @classmethod
-    def _valid_exit_sets(cls, value: dict[str, list[str]] | None) -> dict[str, list[str]] | None:
-        parse_exit_sets(value, strict=True)
+    def _valid_gateway_sets(
+        cls, value: dict[str, list[str]] | None
+    ) -> dict[str, list[str]] | None:
+        parse_gateway_sets(value, strict=True)
         return value
 
 
@@ -205,9 +209,9 @@ class ControlService:
         changed = False
         with self.registry() as registry, transaction(registry.conn):
             previous = registry.list_reports(node_id, 1)
-            changed = parse_exit_sets(report.exit_sets) != parse_exit_sets(
-                previous[0].body.get("exit_sets") if previous else None
-            )
+            changed = parse_gateway_sets(
+                report_gateway_sets(report.model_dump(exclude_none=True))
+            ) != parse_gateway_sets(report_gateway_sets(previous[0].body) if previous else None)
             registry.add_report(node_id, data, keep=REPORTS_KEPT)
             registry.update_node(node_id, applied_version=report.applied_version)
             if report.high_water_version is not None:

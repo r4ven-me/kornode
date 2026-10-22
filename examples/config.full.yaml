@@ -197,7 +197,7 @@ routing:
 
 # Destination sets and egress rules (docs/spec/02-egress-and-sources.md): first match wins,
 # traffic of clients and sources that no rule matches is dropped. `via` is local, fabric,
-# drop, upstream:<profile> or exit:<node>.
+# drop, upstream:<profile> or node:<n>.
 sets:
   private:
     routes:

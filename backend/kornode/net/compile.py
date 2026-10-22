@@ -46,7 +46,7 @@ Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 class TunnelFact:
     """An exit's tunnel as it is right now. `interface` is the device the
     exit sends through (agent: tun to the hub for `fabric`; hub: an agent's
-    vpnsN session for `exit:<node>`)."""
+    vpnsN session for `node:<n>`)."""
 
     interface: str
     up: bool
@@ -70,7 +70,7 @@ class EnrollGuard:
 
 @dataclass(frozen=True, slots=True)
 class TransitExit:
-    """Hub only (D-69): the traffic of agents whose policy says `exit:<node>` leaves
+    """Hub only (D-69): the traffic of agents whose policy says `node:<n>` leaves
     through that node's ocserv session. `sources` are the prefixes those agents send
     from (client pool, source subnets); `exit_iface` is the node's session device right
     now, None while it is offline (the exit table then only fails closed)."""
@@ -171,13 +171,13 @@ def _addresses(facts: NodeFacts) -> frozenset[Address]:
     return frozenset(Address("lo", f"{address}/32") for address in bound if address is not None)
 
 
-def node_exit_tunnels(policy: EgressPolicy, interface: str, up: bool) -> dict[str, TunnelFact]:
-    """An agent reaches `exit:<node>` through its tunnel to the hub (D-69): one tunnel
-    fact per exit node named by the policy, all on the fabric interface."""
+def gateway_tunnels(policy: EgressPolicy, interface: str, up: bool) -> dict[str, TunnelFact]:
+    """An agent reaches `node:<n>` through its tunnel to the hub (D-69): one tunnel
+    fact per gateway node named by the policy, all on the fabric interface."""
     return {
         rule.parsed_via.name: TunnelFact(interface=interface, up=up)
         for rule in policy.egress
-        if rule.parsed_via.kind == "exit"
+        if rule.parsed_via.kind == "node"
     }
 
 
@@ -226,12 +226,12 @@ def _validate(policy: EgressPolicy, facts: NodeFacts) -> None:
         via = rule.parsed_via
         if via.kind == "upstream" and via.target not in facts.upstreams:
             raise PolicyError(f"rule {index}: unknown upstream {via.target!r}")
-        if via.kind == "exit":
+        if via.kind == "node":
             node = int(via.target or 0)
             if node == facts.node_id:
-                raise PolicyError(f"rule {index}: exit:{node} is this node")
+                raise PolicyError(f"rule {index}: node:{node} is this node")
             if node not in facts.node_prefixes:
-                raise PolicyError(f"rule {index}: unknown node {node} in exit:{node}")
+                raise PolicyError(f"rule {index}: unknown node {node} in node:{node}")
         if isinstance(rule.to, NodeRef) and rule.to.node not in facts.node_prefixes:
             raise PolicyError(f"rule {index}: unknown node {rule.to.node}")
         if "clients" in rule.from_ and facts.client_pool is None:
@@ -301,13 +301,13 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
         if via.kind == "drop" or via.name in exits:
             continue
         exits[via.name] = _make_exit(via, len(exits) + 1, policy, facts)
-    # Hub (D-69): the exits declared by agents' policies, one per exit node.
+    # Hub (D-69): the exits declared by agents' policies, one per gateway node.
     for transit in facts.transit_exits:
-        name = f"exit:{transit.node}"
+        name = f"node:{transit.node}"
         if name not in exits:
             exits[name] = Exit(
                 name=name,
-                kind="exit",
+                kind="node",
                 index=len(exits) + 1,
                 interface=transit.exit_iface,
                 up=transit.exit_iface is not None,
@@ -475,8 +475,8 @@ def _transit_head(
                 "transit",
                 match,
                 to_sets,
-                exits[f"exit:{transit.node}"],
-                label=f"transit exit:{transit.node}",
+                exits[f"node:{transit.node}"],
+                label=f"transit node:{transit.node}",
             )
         )
     return head

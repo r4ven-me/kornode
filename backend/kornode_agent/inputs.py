@@ -17,7 +17,7 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from kornode.bundle.validator import Validated
-from kornode.net.compile import NodeFacts, SourceFact, TunnelFact, compile_policy, node_exit_tunnels
+from kornode.net.compile import NodeFacts, SourceFact, TunnelFact, compile_policy, gateway_tunnels
 from kornode.net.model import EgressPolicy, Rule
 from kornode.net.state import DesiredState
 from kornode_agent.access import DEVICE as ACCESS_DEVICE
@@ -154,9 +154,9 @@ class AgentNetInputs:
             carrier=self.carriers.carrier(FABRIC),
         )
         if active:
-            # `exit:<node>` goes through the hub tunnel: same device, same carrier (D-69).
+            # `node:<n>` goes through the hub tunnel: same device, same carrier (D-69).
             tunnels.update(
-                node_exit_tunnels(
+                gateway_tunnels(
                     active.bundle.policy, fabric_iface, links.get(fabric_iface, False)
                 )
             )

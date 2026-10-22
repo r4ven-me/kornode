@@ -64,8 +64,8 @@ changes on reconnect.
 
 Hub egress for `from: fabric` (transit) is part of the hub's YAML policy;
 default compiled rules: `fabric → fabric via fabric` (agent ↔ agent),
-`fabric → any via local` only for agents that list `exit:1` in their policy
-(the hub accepts exit traffic only from nodes whose bundle declares it).
+`fabric → any via local` only for agents that list `node:1` in their policy
+(the hub accepts transit traffic only from nodes whose bundle declares it).
 
 ## Agent side
 
@@ -115,9 +115,9 @@ Zone `<fabric.domain>` (default `kornode.internal`), D-66.
 Implemented for **agent-originated traffic** in P4-06 (D-69); the hub-originated case below
 is the second part.
 
-`via: exit:<n>` on agent A sends the matching traffic through A's fabric tunnel (no NAT).
+`via: node:<n>` on agent A sends the matching traffic through A's fabric tunnel (no NAT).
 
-- **Agent A.** `exit:n` is a second exit on the hub tunnel (`oc-hub0`): the same device,
+- **Agent A.** `node:n` is a second exit on the hub tunnel (`oc-hub0`): the same device,
   a table with `default dev oc-hub0` and the usual `unreachable default`; the first exit
   on the tunnel (`fabric`) owns the answer mark. It is accepted for `to: any` only (the hub
   does not repeat set/domain matching), `from: clients` and sources only (the node's own
@@ -125,7 +125,7 @@ is the second part.
   must be exported (answers find their way back by prefix).
 - **Hub.** For every active node whose policy has such a rule the hub marks packets whose
   source is one of that node's prefixes (client pool, source subnets) with the mark of
-  `exit:n`, whose table has `default dev <vpnsX of n's session>` and an `unreachable
+  `node:n`, whose table has `default dev <vpnsX of n's session>` and an `unreachable
   default`. Matching is by **source prefix** against a named set, not by session device, so
   the nft script does not change when sessions come and go (strict reverse path guarantees
   that only the owning agent can send from its prefixes); the table follows the device.
@@ -136,9 +136,9 @@ is the second part.
   rejected** (spec: the hub accepts exit traffic only from nodes whose policy declares it;
   before P4-06 such traffic was forwarded unmarked and un-NATed).
 - **Answers.** Answers from node n arrive on its session with the internet's addresses:
-  established/related packets from the exit nodes' sessions skip the strict reverse-path
+  established/related packets from the gateway nodes' sessions skip the strict reverse-path
   check and are routed by the main table's prefix routes back to A.
-- **Node n (role `exit`).** The bundle compiler adds `{from: [fabric], to: any, via: local}`
+- **Node n (role `gateway`).** The bundle compiler adds `{from: [fabric], to: any, via: local}`
   unless the operator wrote a `from: fabric` rule; the node masquerades what the hub sends
   it. Answers come back from the internet addressed to fabric prefixes: a node whose policy
   has a `from: fabric` rule installs **prefix routes in main** (`<prefix> dev oc-hub0 proto
@@ -146,24 +146,24 @@ is the second part.
   tunnel. Re-marking the answers does not work: `src_valid_mark=1` makes the reverse-path
   check look the internet source up in the marked (fabric) table, where there is no route,
   and the answer is dropped (found by E2E-07).
-- **Validation (hub).** n must be another **active** agent with role `exit`
-  (409 `exit_node` / `role_required`); an agent used as an exit keeps its role while in use
-  (409 `exit_in_use`); the bundle compiler refuses an `exit:n` whose target is no exit node
+- **Validation (hub).** n must be another **active** agent with role `gateway`
+  (409 `gateway_node` / `role_required`); an agent used as a gateway keeps its role while in use
+  (409 `gateway_in_use`); the bundle compiler refuses an `node:n` whose target is no gateway node
   even if the registry was written another way.
 
 ### Exit through an agent from the hub itself
 
 The same mechanism applies to traffic that originates on the hub: hub
 clients, hub-attached sources (e.g. wg-easy on the hub) or hub host traffic
-with `via: exit:<n>`. The hub keeps one table per exit node,
+with `via: node:<n>`. The hub keeps one table per gateway node,
 `default dev <vpnsX of node n's current session>` + `unreachable default`;
 the reconciler updates the device on ocserv connect/disconnect events
 (connect-script → reconciler socket, plus netlink link events as a safety
 net). No NAT on the hub for this traffic; node n masquerades it (03).
 
 Node n must accept it: its bundle contains `from: [fabric] to: any via local`
-(or narrower) and the hub refuses to compile `exit:<n>` for a node whose role
-list lacks `exit`. Example — wg-easy on the hub, internet through node 2,
+(or narrower) and the hub refuses to compile `node:<n>` for a node whose role
+list lacks `gateway`. Example — wg-easy on the hub, internet through node 2,
 split by list:
 
 ```yaml
@@ -173,6 +173,6 @@ sets:
   via_host1: { routes: [203.0.113.0/24], domains: [example.org] }
 egress:
   - { from: [wgusers], to: fabric,              via: fabric }
-  - { from: [wgusers], to: { set: via_host1 },   via: "exit:2" }
-  - { from: [wgusers], to: any,                  via: local }      # or "exit:2" for full tunnel
+  - { from: [wgusers], to: { set: via_host1 },   via: "node:2" }
+  - { from: [wgusers], to: any,                  via: local }      # or "node:2" for full tunnel
 ```

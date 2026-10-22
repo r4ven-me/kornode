@@ -33,7 +33,7 @@ from kornode.net.compile import (
     SourceFact,
     TunnelFact,
     compile_policy,
-    node_exit_tunnels,
+    gateway_tunnels,
 )
 from kornode.net.errors import NetError
 from kornode.net.model import NAME_PATTERN, EgressPolicy, InlineDest, SetRef, Source
@@ -62,7 +62,7 @@ ACCESS_CERT_DAYS = 825
 
 RUNTIME_GAPS = {
     "access": True,
-    "exit": True,
+    "gateway": True,
     "routed_prefixes": True,
     "domain_sets": False,
     "p12": False,
@@ -859,7 +859,7 @@ class AgentService:
                     409, "interface_conflict", "sources and tunnels must have distinct interfaces"
                 )
             tunnels = {"fabric": TunnelFact("oc-hub0", False)}
-            tunnels.update(node_exit_tunnels(policy, "oc-hub0", False))
+            tunnels.update(gateway_tunnels(policy, "oc-hub0", False))
             tunnels.update(
                 {
                     f"upstream:{e.name}": TunnelFact(str(e.spec.get("interface", "")), False)
@@ -882,7 +882,7 @@ class AgentService:
                     },
                 ),
             )
-        self._check_exit_role_kept(r, changed)
+        self._check_gateway_role_kept(r, changed)
         f = self.config.fabric
         conflicts = check_overlaps(
             owned,
@@ -900,37 +900,39 @@ class AgentService:
             )
 
     def _check_exits(self, r: Registry, node: Node, policy: EgressPolicy) -> None:
-        """`via: exit:<n>` (D-69): n must be another active agent with role `exit`; only
+        """`via: node:<n>` (D-69, D-84): n must be another active agent with role `gateway`; only
         `to: any` (the hub does not repeat domain/set matching), only clients and
         sources (host traffic carries the uplink address, which the hub's strict reverse
         path drops), and a source must be exported so that answers find their way back."""
         nodes = {item.id: item for item in r.list_nodes()}
         for rule in policy.egress:
             via = rule.parsed_via
-            if via.kind != "exit":
+            if via.kind != "node":
                 continue
             target = int(via.target or 0)
             other = nodes.get(target)
             if target == node.id or other is None or other.state != "active":
                 raise ManagementError(
-                    409, "exit_node", f"exit:{target} needs another active agent with role exit"
+                    409,
+                    "gateway_node",
+                    f"node:{target} needs another active agent with role gateway",
                 )
-            if "exit" not in other.roles:
+            if "gateway" not in other.roles:
                 raise ManagementError(
-                    409, "role_required", f"agent {other.name} lacks the exit role"
+                    409, "role_required", f"agent {other.name} lacks the gateway role"
                 )
             if not (rule.to == "any" or isinstance(rule.to, SetRef | InlineDest)):
                 raise ManagementError(
                     409,
                     "runtime_unsupported",
-                    "exit via another node supports `to: any`, a set or an inline "
+                    "leaving through another node supports `to: any`, a set or an inline "
                     "destination, not `fabric` or a node",
                 )
             if "host" in rule.from_:
                 raise ManagementError(
                     409,
                     "runtime_unsupported",
-                    "the node's own traffic cannot use exit:<n>; use clients or sources",
+                    "the node's own traffic cannot use node:<n>; use clients or sources",
                 )
             for name in rule.from_:
                 source = next((item for item in policy.sources if item.name == name), None)
@@ -938,13 +940,14 @@ class AgentService:
                     raise ManagementError(
                         409,
                         "source_export",
-                        f"source {name} must be exported to use an exit (answers return by prefix)",
+                        f"source {name} must be exported to leave through a gateway "
+                        "(answers return by prefix)",
                     )
 
-    def _check_exit_role_kept(self, r: Registry, changed: int) -> None:
-        """A node that other agents use as their exit keeps its role (and stays active)."""
+    def _check_gateway_role_kept(self, r: Registry, changed: int) -> None:
+        """A node that other agents use as their gateway keeps its role (and stays active)."""
         node = r.get_node(changed)
-        if "exit" in node.roles and node.state == "active":
+        if "gateway" in node.roles and node.state == "active":
             return
         for other in r.list_nodes():
             if other.id == changed or other.state == "revoked":
@@ -954,13 +957,13 @@ class AgentService:
             except ManagementError:
                 continue  # another node's stale policy is not this mutation's problem
             if any(
-                rule.parsed_via.kind == "exit" and rule.parsed_via.target == str(changed)
+                rule.parsed_via.kind == "node" and rule.parsed_via.target == str(changed)
                 for rule in policy.egress
             ):
                 raise ManagementError(
                     409,
-                    "exit_in_use",
-                    f"agent {other.name} uses {node.name} as its exit; change its policy first",
+                    "gateway_in_use",
+                    f"agent {other.name} uses {node.name} as its gateway; change its policy first",
                 )
 
     def _reload_ocserv(self) -> None:

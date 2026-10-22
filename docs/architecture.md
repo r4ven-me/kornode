@@ -95,7 +95,7 @@ their data flow (`views/network/HubEgress.tsx`, `views/fabric/FabricView.tsx`, `
 ## Egress and the reconciler
 
 What leaves where is declarative: one ordered `egress` list per node (first match wins) over `clients`, `host`,
-`fabric` and named `sources`, with `via` one of `local`, `fabric`, `exit:<node>`, `upstream:<profile>`, `drop`
+`fabric` and named `sources`, with `via` one of `local`, `fabric`, `node:<n>`, `upstream:<profile>`, `drop`
 (`docs/spec/02-egress-and-sources.md`). On the hub it comes from `config.yaml` (`egress`, `sources`, `sets`;
 `HubEgressService`); for agents it is stored per node in the registry and delivered in the bundle.
 
@@ -127,7 +127,7 @@ fail-closed rules still land (`docs/spec/04-netcore-reconciler.md`). Only `korno
   apply-with-confirm (verify health within a window, else roll back) and reports status.
 - A cached bundle is enough to boot and forward without the hub.
 - Roles: `access` runs a local ocserv listener for users of that node (password and certificate, hashes delivered
-  in the bundle); `exit` accepts `from: fabric` traffic and masquerades it for other nodes' `via: exit:<node>`.
+  in the bundle); `gateway` accepts `from: fabric` traffic and masquerades it for other nodes' `via: node:<n>`.
 - Sources (wg-easy, Amnezia) attach to a node as named sources; kornode owns their routing and NAT.
 
 ### External upstreams

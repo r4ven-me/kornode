@@ -54,8 +54,8 @@ Scenario list (must all exist by the end of P4; each maps to a task "Done when")
 | NL-14 | overlapping prefix in registry | rejected with conflict details |
 | NL-15 | carrier exclusion with `host → any via fabric` | no loop, tunnel stays up |
 | NL-16 | regression set from v1.1.5 incidents (P1-06) | green |
-| NL-17 (`tests/netlab/test_p4_exit_set.py`, done) | two-host topology: source `wgusers` on hub, `via: exit:2` by set, rest `local` | listed destinations leave via node2's uplink with node2's address, others via hub; node2 offline → listed destinations get ICMP unreachable, never hub uplink |
-| NL-18 (same file, done) | same topology, full tunnel (`to: any via exit:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real fabric address |
+| NL-17 (`tests/netlab/test_p4_exit_set.py`, done) | two-host topology: source `wgusers` on hub, `via: node:2` by set, rest `local` | listed destinations leave via node2's uplink with node2's address, others via hub; node2 offline → listed destinations get ICMP unreachable, never hub uplink |
+| NL-18 (same file, done) | same topology, full tunnel (`to: any via node:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real fabric address |
 
 NL-08 is `test_tunnel_drop_and_reconnect_through_a_running_reconciler_leaks_nothing`:
 openconnect is killed and redialled under traffic while `korctl net run` is
@@ -169,7 +169,7 @@ E2E scenarios must ultimately mirror NL-01..NL-13 on real hosts plus:
 | E2E-04 | revoke agent-b → fabric down, control API 403 |
 | E2E-05 | hub backup → wipe → restore → agents reconnect without re-enroll |
 | E2E-06 | upgrade hub and agents from previous pre-release with live traffic, ≤ 30 s interruption |
-| E2E-07 | two-host run with only `hub` (wg-easy attached as a source) and `agent-a` (role `exit`): a wg-easy client exits via agent-a by domain/subnet list, then in full mode; hub Prometheus scrapes agent-a |
+| E2E-07 | two-host run with only `hub` (wg-easy attached as a source) and `agent-a` (role `gateway`): a wg-easy client exits via agent-a by domain/subnet list, then in full mode; hub Prometheus scrapes agent-a |
 
 ### Current executable scope, not execution evidence
 

@@ -25,11 +25,11 @@ PREFIXES = {1: (n("10.99.0.0/24"), n("10.100.1.0/24"), n(SOURCE)), 2: (n("10.100
 def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
     rules: list[dict[str, object]] = (
         [
-            {"from": ["wgusers"], "to": {"set": "listed"}, "via": "exit:2"},
+            {"from": ["wgusers"], "to": {"set": "listed"}, "via": "node:2"},
             {"from": ["wgusers"], "to": "any", "via": "local"},
         ]
         if scenario == "set"
-        else [{"from": ["wgusers"], "to": "any", "via": "exit:2"}]
+        else [{"from": ["wgusers"], "to": "any", "via": "node:2"}]
     )
     policy = EgressPolicy.model_validate(
         {
@@ -41,7 +41,7 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
     facts = NodeFacts(
         node_id=1,
         client_pool=n("10.100.1.0/24"),
-        tunnels={} if offline else {"exit:2": TunnelFact("vpns1", True)},
+        tunnels={} if offline else {"node:2": TunnelFact("vpns1", True)},
         sources={"wgusers": SourceFact(present=True)},
         node_prefixes=PREFIXES,
         fabric_ifaces=() if offline else ("vpns1",),

@@ -719,7 +719,7 @@ On the hub (or in the panel: Agents → Add agent; the token is shown once and e
 `control.enroll_token_ttl_minutes`, 60 by default):
 
 ```bash
-docker compose exec kornode korctl agent create site-a --role exit   # roles: access, exit (optional)
+docker compose exec kornode korctl agent create site-a --role gateway   # roles: access, gateway (optional)
 docker compose exec kornode korctl agent token site-a                # one-time enroll token
 ```
 
@@ -768,7 +768,7 @@ sets:                          # reusable destination sets
 egress:
   - from: [clients, wg]        # clients, host, fabric or a source name
     to: {set: corp}            # any | fabric | {set: n} | {routes, domains} | {node: id}
-    via: upstream:office       # local | fabric | exit:<node> | upstream:<profile> | drop
+    via: upstream:office       # local | fabric | node:<n> | upstream:<profile> | drop
   - from: [clients, wg]
     to: any
     via: local

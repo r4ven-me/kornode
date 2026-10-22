@@ -8,7 +8,7 @@ vi.mock("../../agentsApi", () => ({ agentGet: mocks.get, agentWrite: mocks.write
 const fabric = {
   fabric: { node_id: 1, cidr: "10.99.0.0/24", client_pool: "10.100.{id}.0/24", source_pool: "10.8.{id}.0/24", enroll_pool: "10.99.255.240/28", domain: "kornode.internal", reserved: [] },
   hub: { fabric_address: "10.99.0.1", server_name: "fabric.kornode.internal", prefixes: [] },
-  nodes: [{ id: 2, name: "alpha", roles: ["exit"], state: "active", online: true, fabric_address: "10.99.0.2", prefixes: [{ prefix: "192.168.50.0/24", kind: "lan", export: true }] }],
+  nodes: [{ id: 2, name: "alpha", roles: ["gateway"], state: "active", online: true, fabric_address: "10.99.0.2", prefixes: [{ prefix: "192.168.50.0/24", kind: "lan", export: true }] }],
   sources: [{ name: "wg", interface: "wg0", cidr: "10.8.1.0/24", export: true }]
 };
 
@@ -22,7 +22,7 @@ beforeEach(() => {
 describe("Fabric view", () => {
   it("shows the topology with prefixes and hub sources", async () => {
     render(<FabricView token="session" />);
-    await screen.findByText(/alpha · 10\.99\.0\.2 · active · online · exit · 192\.168\.50\.0\/24/);
+    await screen.findByText(/alpha · 10\.99\.0\.2 · active · online · gateway · 192\.168\.50\.0\/24/);
     expect(screen.getByText(/hub · 10\.99\.0\.1 · fabric\.kornode\.internal/)).toBeTruthy();
     expect(screen.getByText(/wg · wg0 · 10\.8\.1\.0\/24/)).toBeTruthy();
   });

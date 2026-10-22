@@ -43,7 +43,7 @@ class AgentCreate(Model):
     name: str = Field(pattern=NAME_PATTERN)
     id: int | None = Field(default=None, ge=2, le=254)
     description: str = Field(default="", max_length=1024)
-    roles: list[Literal["access", "exit"]] = Field(default_factory=list, max_length=2)
+    roles: list[Literal["access", "gateway"]] = Field(default_factory=list, max_length=2)
     force_reuse: bool = False
     dry_run: bool = False
 
@@ -57,7 +57,7 @@ class AgentCreate(Model):
 
 class AgentPatch(Model):
     description: str | None = Field(default=None, max_length=1024)
-    roles: list[Literal["access", "exit"]] | None = Field(default=None, max_length=2)
+    roles: list[Literal["access", "gateway"]] | None = Field(default=None, max_length=2)
     transport: Transport | None = None
 
     @field_validator("roles")

@@ -20,21 +20,21 @@ def test_node_repository_round_trips_json_columns(tmp_path: Path) -> None:
             id=2,
             name="agent-b",
             description="Branch",
-            roles=["access", "exit"],
+            roles=["access", "gateway"],
             policy={"egress": ["main"]},
             transport={"dpd": 30},
         )
 
-        assert created.roles == ["access", "exit"]
+        assert created.roles == ["access", "gateway"]
         assert created.policy == {"egress": ["main"]}
         assert created.transport == {"dpd": 30}
         assert created.created_at.endswith("Z")
         assert registry.get_node(2) == created
         assert registry.get_node_by_name("agent-b") == created
 
-        updated = registry.update_node(2, description="HQ", roles=["exit"], policy={"sets": []})
+        updated = registry.update_node(2, description="HQ", roles=["gateway"], policy={"sets": []})
         assert updated.description == "HQ"
-        assert updated.roles == ["exit"]
+        assert updated.roles == ["gateway"]
         assert updated.policy == {"sets": []}
 
 

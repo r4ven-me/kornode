@@ -338,7 +338,7 @@ def test_stale_policy_of_one_agent_does_not_block_another(world) -> None:  # typ
     service.create(AgentCreate(name="branch"))
     old = env.registry.get_node_by_name("old")
     # A policy the hub would refuse today (exit node gone), left over from earlier.
-    stale = {"egress": [{"from": ["clients"], "to": "any", "via": "exit:9"}]}
+    stale = {"egress": [{"from": ["clients"], "to": "any", "via": "node:9"}]}
     env.registry.update_node(old.id, policy=stale)
 
     saved = service.set_policy("branch", {"egress": []})
@@ -346,7 +346,7 @@ def test_stale_policy_of_one_agent_does_not_block_another(world) -> None:  # typ
     assert saved["name"] == "branch"
     with pytest.raises(ManagementError) as exc:
         service.set_policy("old", stale)
-    assert exc.value.error == "exit_node"
+    assert exc.value.error == "gateway_node"
 
 
 @pytest.mark.parametrize(

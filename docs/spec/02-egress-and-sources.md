@@ -52,7 +52,7 @@ egress:
 - `via`:
   - `local` — main routing table (uplink), masquerade to uplink;
   - `fabric` — the fabric exit (agent: tun to hub; hub: per-session routes);
-  - `exit:<node>` — send through the fabric to node `<node>`, which applies
+  - `node:<n>` — send through the fabric to node `<node>`, which applies
     its own `from: fabric` rules to it;
   - `upstream:<profile>` — the named external upstream, masquerade to it;
   - `drop` — explicit reject (ICMP admin-prohibited).
@@ -77,7 +77,7 @@ egress:
 ## Validation
 
 - Every name referenced in `from`, `to.set`, `via` exists.
-- `exit:<node>` refers to an existing node ≠ self; the target node must have a
+- `node:<n>` refers to an existing node ≠ self; the target node must have a
   rule accepting `from: fabric` traffic to `any` or the destination (checked
   on the hub at bundle compile; warning only on agents).
 - **Dead rules**: a rule fully shadowed by earlier rules (every `from` source
@@ -107,7 +107,7 @@ egress:
   admin-prohibited`.
 - NAT: one masquerade rule per (`via` that needs NAT, outgoing interface),
   matched on `meta mark` and `oifname`. No NAT is emitted for `fabric` or
-  `exit:<node>`.
+  `node:<n>`.
 
 ## Domain-based sets
 
@@ -120,16 +120,16 @@ dnsmasq forwards the fabric zone to (else `/etc/resolv.conf`) and downloads the
 lists itself. Interval: TTL-aware, 30 s to 1 h. An unresolved set is empty
 (traffic assigned to it matches nothing).
 
-`exit:<n>` with a set or inline destination (D-79): a hub rule needs nothing extra, the
+`node:<n>` with a set or inline destination (D-79): a hub rule needs nothing extra, the
 hub's own resolver feeds its classification. For an agent rule the agent classifies by the
 addresses it resolved itself, marks the flow and sends it into the fabric tunnel; the hub
 cannot see the mark, so it steers the transit traffic by source prefix **and** destination.
 To make both sides agree the agent reports the addresses behind each such destination
-(`exit_sets` in its report, keyed like `NodeFacts.resolved`) and the hub matches those plus
+(`gateway_sets` in its report, keyed like `NodeFacts.resolved`) and the hub matches those plus
 the static routes of the set. The hub emits its transit rules in the order of the agent's
 policy (first match wins, like on the agent). Until the hub has seen a new address the
 flow matches no transit rule and falls to the fabric guard (dropped): it fails closed,
-it never leaves through the hub's uplink. `to: fabric` and `to: {node: n}` with `exit` stay
+it never leaves through the hub's uplink. `to: fabric` and `to: {node: n}` with `node:<n>` stay
 refused. A set that resolves into a fabric prefix is routed inside the fabric (the hub
 passes fabric destinations before the transit rules), not exited.
 
