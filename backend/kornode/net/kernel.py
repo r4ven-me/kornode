@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import socket
 import subprocess
 from collections.abc import Iterable
@@ -104,9 +105,11 @@ DESTRUCTIVE_OPS = (DelRule, DelRoute, DeleteForeignRule)
 
 
 class Kernel:
-    def __init__(self, *, nft: str = "nft", proc_sys: Path = Path("/proc/sys")) -> None:
+    def __init__(self, *, nft: str = "nft", proc_sys: Path | None = None) -> None:
         self.nft = nft
-        self.proc_sys = proc_sys
+        # A container on the host network has a read-only /proc/sys; compose bind-mounts
+        # the host's /proc/sys/net elsewhere and names its root here (D-83).
+        self.proc_sys = proc_sys or Path(os.environ.get("KORNODE_PROC_SYS") or "/proc/sys")
 
     # -- read ---------------------------------------------------------------
 

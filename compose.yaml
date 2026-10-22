@@ -10,6 +10,7 @@ services:
       - .env
     environment:
       KORNODE_CONFIG: /etc/kornode/config.yaml
+      KORNODE_PROC_SYS: /host/proc/sys
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -21,6 +22,10 @@ services:
       # only when /dev/vhost-net exists (`modprobe vhost_net`).
       # - /dev/vhost-net:/dev/vhost-net
     volumes:
+      # Docker mounts /proc/sys read-only and refuses `sysctls:` with host networking;
+      # the reconciler sets ip_forward/src_valid_mark/rp_filter through the host's
+      # net.* only (D-83), never privileged or with unmasked /proc.
+      - /proc/sys/net:/host/proc/sys/net
       - ./config:/etc/kornode
       - ./data:/var/lib/kornode
       - ./logs:/var/log/kornode

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -183,13 +184,16 @@ def test_ocserv_render_puts_agents_on_a_fabric_vhost(tmp_path: Path) -> None:
     assert "[vhost:" not in vhost
 
 
-def test_ocserv_render_vhost_repeats_udp_port(tmp_path: Path) -> None:
-    """S-07: a vhost without its own udp-port sends no DTLS address (TCP only)."""
+def test_ocserv_render_vhost_has_no_global_only_options(tmp_path: Path) -> None:
+    """D-83: ocserv >= 1.4.2 (the image builds 1.5.0) refuses to start on a global-only
+    option inside a vhost; the vhost inherits the ports (and DTLS) from the default host."""
     config = _fabric_config(tmp_path)
 
-    _, _, vhost = OcservConfigRenderer().render(config).partition("[vhost:")
+    head, _, vhost = OcservConfigRenderer().render(config).partition("[vhost:")
 
-    assert f"udp-port = {config.server.port}" in vhost
+    assert f"udp-port = {config.server.port}" in head
+    for option in ("udp-port", "tcp-port", "listen-host", "socket-file", "run-as-user"):
+        assert not re.search(rf"^{option}\s*=", vhost, re.MULTILINE), option
 
 
 def test_connect_script_fabric_guard(tmp_path: Path) -> None:

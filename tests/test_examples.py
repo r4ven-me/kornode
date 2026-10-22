@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from kornode.config.loader import load_config
 from kornode.config.models import profile_slug
@@ -54,3 +55,20 @@ def test_config_example_loads_with_env_example() -> None:
     config = load_config(ROOT / "config.example.yaml", env_file=ROOT / ".env.example", environ={})
 
     assert config.egress_policy() is not None
+
+
+def test_compose_web_override_enables_the_panel_of_the_example_config() -> None:
+    """README "Web API and GUI": `compose.web.yaml` turns the panel on through the
+    environment, which only works if the example does not pin those keys (YAML wins)."""
+    compose = yaml.safe_load((ROOT / "compose.web.yaml").read_text(encoding="utf-8"))
+    environ = {
+        key: re.sub(r"\$\{[A-Z_]+:-([^}]*)\}", r"\1", str(value))
+        for key, value in compose["services"]["kornode"]["environment"].items()
+    }
+
+    config = load_config(
+        ROOT / "config.example.yaml", env_file=ROOT / ".env.example", environ=environ
+    )
+
+    assert config.web.enabled
+    assert config.web.admin_password

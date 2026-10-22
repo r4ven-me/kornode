@@ -16,7 +16,11 @@ services:
     network_mode: host
     devices:
       - /dev/net/tun:/dev/net/tun
+    environment:
+      KORNODE_PROC_SYS: /host/proc/sys
     volumes:
+      # Read-only /proc/sys under host networking: net.* only, see compose.yaml (D-83).
+      - /proc/sys/net:/host/proc/sys/net
       - ./agent-data:/var/lib/kornode-agent
     entrypoint: []
     command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/kornode-agent.conf"]
