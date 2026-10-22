@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added (hub doctor for sources, branch `redesign/hub-doctor-sources`)
+
+- `korctl doctor` / `GET /api/diagnostics/doctor` got a `sources` check: absent source interface and foreign NAT (nft and legacy iptables) matching a hub source's subnet or interface (D-68 for the hub). The inspection moved from `kornode_agent.doctor` to `kornode.net.sourcecheck` and is shared; agent behaviour is unchanged.
+
 ### Added (examples in a real kernel, branch `redesign/examples-kernel`)
 
 - `tests/netlab/test_examples_kernel.py` (+ `example_driver.py`): every file in `examples/` is compiled with the real `HubNetInputs` and converged in a namespace (second pass empty). Phase 5 "done when" for the netlab half.
