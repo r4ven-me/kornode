@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (Quick Start)
+
+- `.env.example` still set `KORNODE_FABRIC__ENABLED=false`, a key removed by D-71, so the Quick Start (`cp .env.example .env && docker compose up`) failed at startup with `fabric.enabled: Extra inputs are not permitted`. The line is removed; `test_config_example_loads_with_env_example` loads `config.example.yaml` with `.env.example`.
+
 ### Changed (E2E skips, D-82)
 
 - `BLOCKED` in `tests/e2e/test_routed_fabric.py` now lists only NL-07 and NL-08 (covered by netlab, D-80); NL-05 is a real scenario, E2E-06-clients and the E2E of `examples/` are settled by D-82 (their halves are the NL-13-forwarding test and the netlab/example suites). Skips in `routed`: 2.

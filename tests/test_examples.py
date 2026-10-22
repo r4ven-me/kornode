@@ -46,3 +46,11 @@ def test_example_upstream_references_use_the_profile_slug(path: Path) -> None:
         via = rule.parsed_via
         if via.kind == "upstream":
             assert via.target in slugs, (path.name, via.target, sorted(slugs))
+
+
+def test_config_example_loads_with_env_example() -> None:
+    """`cp config.example.yaml config/config.yaml && cp .env.example .env` is the Quick
+    Start; a key removed from the models must not survive in `.env.example`."""
+    config = load_config(ROOT / "config.example.yaml", env_file=ROOT / ".env.example", environ={})
+
+    assert config.egress_policy() is not None
