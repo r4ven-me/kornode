@@ -5,8 +5,10 @@ host actually uses for its own lookups (a client with its own DNS or DoH
 bypasses dnsmasq entirely): this service resolves every domain of the
 policy's destination sets itself, on its own schedule, and records the
 addresses per set in `generated_dir/resolved/<set>.txt` (the set name is the
-key of NodeFacts.resolved, D-25). The file is rewritten wholesale every
-cycle, so a domain dropped from config also drops out on the next one.
+key of NodeFacts.resolved, D-25). Completed lookups replace a group's snapshot;
+transient DNS failures retain its previous addresses until a completed cycle.
+Removed groups are never retained. Partial failures conservatively retain the
+whole group's old snapshot because the files carry no per-domain provenance.
 
 It only changes that input and wakes the reconciler -- kernel state
 (nft sets) is kornode.net's business alone.
@@ -61,7 +63,8 @@ class RefreshOutcome:
     # Whether any set's addresses differ from what was recorded before.
     changed: bool
     # How long to wait before the next cycle -- the lowest TTL seen this
-    # cycle, clamped to [MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS].
+    # cycle, clamped to [MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS]; a
+    # transient DNS failure always requests MIN_INTERVAL_SECONDS.
     next_interval_seconds: int
 
 
@@ -93,8 +96,11 @@ def domain_groups(
 
 
 class DnsLookup:
-    """Thin wrapper around dnspython so tests can substitute a fake
-    without touching the network."""
+    """Thin wrapper around dnspython so tests can substitute a fake.
+
+    DNS exceptions remain typed: refresh distinguishes authoritative negatives
+    from transient failures instead of mistaking an outage for an empty answer.
+    """
 
     def __init__(self, timeout: float = LOOKUP_TIMEOUT_SECONDS) -> None:
         self.timeout = timeout
@@ -103,18 +109,13 @@ class DnsLookup:
         self, domain: str, nameservers: Sequence[str], rdtype: str
     ) -> tuple[list[str], int | None]:
         if not nameservers:
-            return [], None
+            # dnspython does not annotate its exception constructors.
+            raise dns.resolver.NoResolverConfiguration()  # type: ignore[no-untyped-call]
         resolver = dns.resolver.Resolver(configure=False)
         resolver.nameservers = list(nameservers)
         resolver.timeout = self.timeout
         resolver.lifetime = self.timeout
-        try:
-            answer = resolver.resolve(domain, rdtype, raise_on_no_answer=False)
-        except dns.exception.DNSException as exc:
-            _LOGGER.warning(
-                "domain resolve: %s %s via %s failed: %s", domain, rdtype, nameservers, exc
-            )
-            return [], None
+        answer = resolver.resolve(domain, rdtype, raise_on_no_answer=False)
         if answer.rrset is None:
             return [], None
         return [str(rdata) for rdata in answer], answer.rrset.ttl
@@ -151,6 +152,10 @@ class DomainResolverService:
 
     def refresh(self, *, dry_run: bool = False) -> RefreshOutcome:
         policy = self.config.egress_policy()
+        directory = self.state_dir()
+        previous = {
+            path.stem: self.files.read_lines(path) for path in sorted(directory.glob("*.txt"))
+        }
         url_domains: dict[str, list[str]] = {}
         url_routes: dict[str, list[str]] = {}
         for name, dest in policy.sets.items():
@@ -171,22 +176,48 @@ class DomainResolverService:
         groups = domain_groups(self.config, policy, url_domains)
         resolved: list[ResolvedSet] = []
         min_ttl: int | None = None
+        transient_failure = False
         for group in groups:
             ips: list[str] = []
+            group_failed = False
             for domain in group.domains:
+                domain_ips: list[str] = []
+                domain_failed = False
                 for rdtype in ("A", "AAAA"):
-                    found, ttl = self.lookup.resolve(domain, group.nameservers, rdtype)
-                    ips.extend(found)
+                    try:
+                        found, ttl = self.lookup.resolve(domain, group.nameservers, rdtype)
+                    except dns.resolver.NXDOMAIN:
+                        # NXDOMAIN is name-wide, unlike an empty answer for one
+                        # family. Do not let another-family outage mask it.
+                        domain_ips = []
+                        domain_failed = False
+                        break
+                    except dns.resolver.NoAnswer:
+                        continue
+                    except dns.exception.DNSException as exc:
+                        domain_failed = True
+                        _LOGGER.warning(
+                            "domain resolve: %s %s via %s temporarily failed: %s",
+                            domain,
+                            rdtype,
+                            group.nameservers,
+                            exc,
+                        )
+                        continue
+                    domain_ips.extend(found)
                     if ttl is not None and (min_ttl is None or ttl < min_ttl):
                         min_ttl = ttl
+                ips.extend(domain_ips)
+                group_failed |= domain_failed
+            if group_failed:
+                transient_failure = True
+                # Reuse only a still-configured group's snapshot. Rebuilding
+                # after a completed cycle removes this conservative superset.
+                ips.extend(line for line in previous.get(group.name, []) if line)
             ips.extend(url_routes.pop(group.name, []))
             resolved.append(ResolvedSet(group.name, sorted(_dedup(ips))))
         resolved += [ResolvedSet(name, sorted(_dedup(items))) for name, items in url_routes.items()]
 
-        directory = self.state_dir()
-        previous = {
-            path.stem: self.files.read_lines(path) for path in sorted(directory.glob("*.txt"))
-        }
         current = {item.name: item.ips for item in resolved}
         changed = {
             name: [line for line in lines if line] for name, lines in previous.items()
@@ -201,5 +232,9 @@ class DomainResolverService:
                 (directory / f"{name}.txt").unlink(missing_ok=True)
             self.net.wake()
         return RefreshOutcome(
-            resolved=resolved, changed=changed, next_interval_seconds=_clamp_interval(min_ttl)
+            resolved=resolved,
+            changed=changed,
+            next_interval_seconds=(
+                MIN_INTERVAL_SECONDS if transient_failure else _clamp_interval(min_ttl)
+            ),
         )

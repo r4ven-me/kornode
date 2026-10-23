@@ -153,6 +153,7 @@ def test_activation_renders_once_then_reloads_authoritative_candidate_inside_loc
     response = client.post(
         "/api/certificates/external",
         auth=AUTH,
+        data={"reload": "true"},
         files={
             "server_cert": ("server.crt", b"certificate"),
             "server_key": ("server.key", b"key"),

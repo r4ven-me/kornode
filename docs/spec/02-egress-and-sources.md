@@ -159,8 +159,33 @@ per set (`NodeFacts.resolved`, D-25; no nft element timeouts). On the hub
 `route_urls` downloaded hourly and cached, D-75); on an agent `kornode_agent.resolver`
 does it from the bundle's policy (D-78): it queries the hub resolver the node's
 dnsmasq forwards the fabric zone to (else `/etc/resolv.conf`) and downloads the
-lists itself. Interval: TTL-aware, 30 s to 1 h. An unresolved set is empty
-(traffic assigned to it matches nothing).
+lists itself. Interval: TTL-aware, 30 s to 1 h. An initially unresolved DNS
+contribution is empty (without static routes, traffic assigned to it matches
+nothing).
+
+On the hub, timeout, SERVFAIL/exhausted nameservers and missing nameserver
+configuration are **transient**, not authoritative empty answers. A transient
+failure retains the last-known-good snapshot of each still-configured group,
+unioned with current successful DNS answers and URL routes, and requests a
+retry in **30 seconds**, regardless of other answers' TTLs. Current YAML static
+routes are compiled independently and remain available. With no prior snapshot,
+failed DNS contributes nothing; it never invents an address or a local-bypass rule.
+
+A completed group cycle (positive answers and/or authoritative NXDOMAIN/NODATA,
+without remaining transient failures) replaces the old snapshot rather than
+accumulating it. NXDOMAIN is name-wide: it discards that name's answers and
+supersedes an earlier family timeout; NoAnswer/empty RRsets apply only to that
+address family. An authoritative-negative group therefore removes its previous
+addresses. Other failing groups cannot keep that group's old results alive.
+
+Retention is intentionally **per group**, using the existing resolved files;
+there is no new cache database or per-domain persistence. During partial group
+failures this is a conservative superset: old members of successful, removed or
+now-negative domains (and prior URL-route members) in that same group may remain
+until a completed cycle rebuilds it. Entire groups removed from configuration
+are always deleted, even while another group fails. Snapshot retention also
+works across resolver-service restarts. These input-file changes do not flush
+conntrack or reclassify established marked flows.
 
 `node:<n>` with a set or inline destination (D-79): a hub rule needs nothing extra, the
 hub's own resolver feeds its classification. For an agent rule the agent classifies by the

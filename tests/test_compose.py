@@ -47,6 +47,10 @@ def test_release_workflow_publishes_the_hub_and_the_agent_image() -> None:
     assert images == {"kornode": "Dockerfile", "kornode-agent": "Dockerfile.agent"}
     assert job["strategy"]["fail-fast"] is False
     # Each image checks its own tag, so the agent is published for a version the hub already has.
-    assert "/${{ matrix.name }}" in steps
+    version_step = next(step for step in job["steps"] if step.get("id") == "version")
+    assert version_step["env"]["IMAGE_NAME"] == "${{ matrix.name }}"
+    assert "os.environ['IMAGE_NAME']" in version_step["run"]
+    exists_step = next(step for step in job["steps"] if step.get("id") == "exists")
+    assert exists_step["env"]["IMAGE"] == "${{ steps.version.outputs.image }}"
     assert "file: ${{ matrix.dockerfile }}" in steps
     assert "scope=${{ matrix.name }}" in steps

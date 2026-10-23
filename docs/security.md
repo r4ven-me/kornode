@@ -19,7 +19,12 @@
   trusted sources -- otherwise a client able to reach that proxy could spoof another
   VPN user's source IP or bypass the login lockout.
 - Browser authentication uses an `HttpOnly`, `SameSite=Strict`, secure cookie and
-  CSRF token. Basic authentication remains available for non-browser API clients.
+  CSRF token. Basic authentication remains available for non-browser API clients
+  only while administrator TOTP is disabled; it never bypasses the second factor.
+- Password and TOTP changes require current-password reauthentication and the
+  current OTP when enabled. They revoke existing sessions. Generic config writes
+  cannot change these protected fields. Reverse proxies must provide the correct
+  scheme/Host for strict full-origin CSRF validation.
 - Interactive terminal access is disabled by default and has idle/session limits.
 - Terminal tickets are one-time, terminal sessions are audited, and xterm.js talks
   directly to a bounded PTY WebSocket without rendering command output as HTML.

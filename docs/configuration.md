@@ -29,6 +29,16 @@ Environment values fill omitted YAML fields; they do not override values already
 saved in YAML. API/CLI saves preserve `${SECRET:NAME}` references so rotation in
 the environment continues to take effect.
 
+The named `sets` collection is replaced as a whole at each explicit precedence
+level; `sets: {}` clears inherited sets. Ordinary nested sections still merge.
+
+API and CLI configuration writes share a read/validate/commit lock. Full YAML
+source saves require the ETag returned by `GET /api/config/source`, sent as
+`If-Match` or JSON `etag`; missing versions return 428 and stale versions return
+412. A `saved_but_not_applied` error means YAML was committed but runtime writes
+failed: reload source and repair/rerender before reloading services. Admin password
+and MFA fields use dedicated reauthenticated actions, not generic config writes.
+
 ## Environment variable mapping
 
 Use prefix:
