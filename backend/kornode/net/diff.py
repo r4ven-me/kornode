@@ -1,8 +1,9 @@
 """diff(actual, desired) -> Plan, and a pure simulator of applying a plan.
 
-Order (docs/spec/04-netcore-reconciler.md): sysctl -> routes into exit
-tables (non-unicast first, so the kill-switch route exists before the tunnel
-route it backs) -> rules (new before old) -> nft -> stale routes last.
+Order (docs/spec/04-netcore-reconciler.md): fail-closed nft routing barrier
+when needed (sets filled atomically) -> sysctl -> routes into exit tables
+(non-unicast first) -> rules (new before old) -> stale routes -> final nft.
+Without a compiled routing barrier, legacy unmanaged plans retain stale routes last.
 Only kornode-owned rules/routes/nft tables ever appear in a plan.
 """
 
@@ -62,6 +63,8 @@ class NftLoad:
     come back empty; the plan always follows it with UpdateElements."""
 
     ruleset: NftRuleset
+    # Temporary fail-closed barrier before routing tables can be reassigned.
+    guard: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +144,38 @@ def diff(actual: ActualState, desired: DesiredState) -> Plan:
     for rule in sorted(actual_rules - desired.rules, key=_rule_sort_key):
         ops.append(DelRule(rule))
 
+    desired_keys = {route.key for route in desired.routes}
+    stale = [route for route in actual_routes if route.key not in desired_keys]
+    stale_routes = [DelRoute(route) for route in sorted(stale, key=_route_sort_key)]
+    routing_changes = bool(stale_routes) or any(
+        isinstance(op, (ReplaceRoute, AddRule, DelRule)) for op in ops
+    )
+    if (
+        routing_changes
+        and desired.nft is not None
+        and "  chain validate_connection {" in desired.nft.script
+    ):
+        # Table indices are bounded kernel slots, not identities. Even with
+        # stable marks, changing their contents under the old ruleset could
+        # temporarily send a pinned flow into another exit's tunnel.
+        script = desired.nft.script
+        for chain in ("forward", "postrouting"):
+            hook = f"    type filter hook {chain} priority filter; policy accept;"
+            script = script.replace(
+                hook,
+                hook + "\n    meta mark & 0xff000000 == 0x0c000000 drop",
+            )
+        guard_ruleset = NftRuleset(script)
+        guard = replace(desired, nft=guard_ruleset)
+        guard_ops = _nft_ops(replace(actual, nft_schema_hash=None), guard)
+        guard_ops[0] = NftLoad(guard_ruleset, guard=True)
+        # Empty destination sets would let host-only split rules fall through
+        # unmarked to main. Fill the guard's sets in its *same* nft transaction.
+        ops = [*guard_ops, *ops, *stale_routes]
+        stale_routes = []
+        # A final reload is needed even when the original schema was unchanged.
+        actual = replace(actual, nft_schema_hash=None)
+
     ops.extend(_nft_ops(actual, desired))
 
     for foreign in sorted(desired.foreign_rules - actual.foreign_rules, key=repr):
@@ -149,10 +184,7 @@ def diff(actual: ActualState, desired: DesiredState) -> Plan:
     for foreign in sorted(actual.foreign_rules - desired.foreign_rules, key=repr):
         ops.append(DeleteForeignRule(foreign))
 
-    desired_keys = {route.key for route in desired.routes}
-    stale = [route for route in actual_routes if route.key not in desired_keys]
-    for route in sorted(stale, key=_route_sort_key):
-        ops.append(DelRoute(route))
+    ops.extend(stale_routes)
 
     return Plan(tuple(ops))
 

@@ -62,6 +62,90 @@ def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     assert config.certificates.letsencrypt.auto_renew_interval_unit == "days"
 
 
+@pytest.mark.parametrize(
+    "raw_sets,expected",
+    [
+        (None, {"corp": {"routes": ["192.0.2.0/24"]}, "env_only": {}}),
+        ({}, {}),
+        ({"yaml_only": {}}, {"yaml_only": {}}),
+        ({"corp": {"domains": ["yaml.example"]}}, {"corp": {"domains": ["yaml.example"]}}),
+    ],
+)
+def test_sets_yaml_is_a_whole_collection_override(
+    tmp_path: Path,
+    raw_sets: dict[str, object] | None,
+    expected: dict[str, object],
+) -> None:
+    from kornode.config.loader import validate_config_data
+    from kornode.net.model import DestSet
+
+    path = tmp_path / "config.yaml"
+    raw = {} if raw_sets is None else {"sets": raw_sets}
+    path.write_text(yaml.safe_dump(raw))
+    env = {"KORNODE_SETS": '{"corp":{"routes":["192.0.2.0/24"]},"env_only":{}}'}
+    loaded = load_config(path, environ=env)
+    assert loaded == validate_config_data(raw, path, environ=env)
+    assert loaded.sets == {name: DestSet.model_validate(value) for name, value in expected.items()}
+
+
+@pytest.mark.parametrize(
+    "cli,expected",
+    [
+        ({}, {"yaml_only": {}, "corp": {"routes": ["198.51.100.0/24"]}}),
+        ({"sets": {}}, {}),
+        ({"sets": {"cli_only": {}}}, {"cli_only": {}}),
+        (
+            {"sets": {"corp": {"domains": ["cli.example"]}}},
+            {"corp": {"domains": ["cli.example"]}},
+        ),
+    ],
+)
+def test_sets_cli_is_a_whole_collection_override(
+    tmp_path: Path,
+    cli: dict[str, object],
+    expected: dict[str, object],
+) -> None:
+    from kornode.config.loader import validate_config_data
+    from kornode.net.model import DestSet
+
+    path = tmp_path / "config.yaml"
+    raw = {"sets": {"yaml_only": {}, "corp": {"routes": ["198.51.100.0/24"]}}}
+    path.write_text(yaml.safe_dump(raw))
+    env = {"KORNODE_SETS": '{"env_only":{},"corp":{"domains":["env.example"]}}'}
+    loaded = load_config(path, cli_overrides=cli, environ=env)
+    assert loaded == validate_config_data(raw, path, cli_overrides=cli, environ=env)
+    assert loaded.sets == {name: DestSet.model_validate(value) for name, value in expected.items()}
+
+
+@pytest.mark.parametrize("sets", [{}, {"env_only": {}}])
+def test_explicit_env_sets_replace_default_collection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sets: dict[str, object],
+) -> None:
+    import json
+
+    from kornode.config.defaults import DEFAULT_CONFIG
+
+    monkeypatch.setitem(DEFAULT_CONFIG, "sets", {"default_only": {}})
+    config = load_config(tmp_path / "missing.yaml", environ={"KORNODE_SETS": json.dumps(sets)})
+    assert set(config.sets) == set(sets)
+
+
+def test_empty_ordinary_sections_still_inherit_omitted_fields(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    raw = {"server": {}, "system": {}}
+    path.write_text(yaml.safe_dump(raw))
+    config = load_config(
+        path,
+        environ={"KORNODE_SERVER__PORT": "4443", "KORNODE_SYSTEM__LOG_LEVEL": "warning"},
+        cli_overrides={"server": {}, "system": {}},
+    )
+    assert config.server.port == 4443
+    assert config.system.log_level == "warning"
+    assert config.server.realm == "Korvus VPN Server"
+
+
 def test_fabric_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",

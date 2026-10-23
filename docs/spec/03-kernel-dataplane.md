@@ -19,6 +19,9 @@ Kernel uses max(all, iface) for `rp_filter`; therefore strict `all=1` must be
 lowered to 2 (S-06). Values the host already has looser are left untouched.
 Per-interface values are applied on netlink `RTM_NEWLINK` events, so
 ocserv `vpnsN` devices and openconnect tuns are covered without hooks.
+A dotted device name is a literal `/proc/sys` component, e.g.
+`net.ipv4.conf.eth0.100.rp_filter` maps to
+`net/ipv4/conf/eth0.100/rp_filter`, not `conf/eth0/100/rp_filter`.
 
 ## Policy routing
 
@@ -51,20 +54,25 @@ table inet kornode {
   map exit_ok         { type mark : ifname; }              # mark → expected oif
 
   chain prerouting   { type filter hook prerouting priority mangle; policy accept;
-                       ct direction reply ct mark != 0 meta mark set ct mark   # restore for replies
+                       jump session_rpf                 # where ocserv sessions need RPF
+                       ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark goto validate_connection
                        jump egress_classify }
   chain output       { type route hook output priority mangle; policy accept;
-                       ct direction reply ct mark != 0 meta mark set ct mark
-                       ct direction original jump egress_classify_host }
+                       ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark goto validate_connection
+                       jump egress_classify_host }
+  chain validate_connection {
+                       ct mark & 0xffffff00 == <mark_i> ct label == <parenthesized OR of identity bit indices> return  # per current exit
+                       drop }
   chain egress_classify       { … compiled rules for clients/sources/fabric … }
   chain egress_classify_host  { … compiled rules for host … }
   chain input        { type filter hook input priority mangle; policy accept;
-                       ct state new iifname @tunnel_ifaces ct mark set <mark of that iface's exit> }
+                       ct state new iifname @tunnel_ifaces ct mark set <mark of that iface's exit>
+                         ct label set <identity of that iface's exit> }
   chain forward      { type filter hook forward priority filter; policy accept;
                        tcp flags syn / syn,rst tcp option maxseg size set rt mtu
                        meta mark & 0xffffff00 != 0 meta mark & 0xffffff00 . oifname != @exit_ok … reject
                        meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { <every exit's mark> }
-                         oifname "<uplink>" reject }   # stale marks, D-32
+                         reject }   # stale marks on any interface, D-32/A02
   chain postrouting  { type filter hook postrouting priority filter; policy accept;
                        oifname "lo" accept
                        tcp flags syn / syn,rst tcp option maxseg size set rt mtu
@@ -80,17 +88,37 @@ table ip kornode_nat {
 
 Notes:
 
-- The classify chains set `meta mark` and `ct mark` together on the first
-  packet of a connection (`ct mark set meta mark`), and later packets restore
-  from `ct mark`. Routing decisions are thus stable for the life of a
-  connection even if sets change (no mid-connection path flips).
+- The classify chains set `meta mark`, `ct mark` and the concrete exit's
+  128-bit `ct label` together on the first packet of a connection; later
+  packets restore from `ct mark` and must pass `validate_connection` before
+  routing. Kornode owns the conntrack label of its marked flows; the kernel
+  must support `CONFIG_NF_CONNTRACK_LABELS` (unsupported kernels reject apply,
+  with no routing mutation if the initial guard could not be installed).
+  nftables `ct_label` literals are bit **indices** (0..127), not raw hex
+  bitmaps. The renderer expands the digest into a parenthesized OR expression
+  such as `(0 | 1 | 127)` for both assignment and comparison, and uses explicit
+  `==` for exact 128-bit equality, not implicit flag membership. Commas are
+  **not** valid in assignment grammar. Native `nft --check --debug=netlink`
+  regressions verify full 16-byte immediate and equality operands (not just
+  Python-rendered text); packet tests also exercise actual kernel loading.
+  The kernel setter ORs bits (`nft_ct_set_eval`, `NFT_CT_LABELS`), so every
+  classification goes directly to identity validation **after** assignment
+  too. Foreign preexisting bits or a failed label write cannot pass the
+  first packet and then fail only on later packets. Kornode does not clear
+  other software's labels; coexistence on its marked flows fails closed.
+  Routing decisions remain stable for the life of a connection even if sets
+  change (no mid-connection path flips).
 - Stale marks (D-32): a connection keeps the ct mark of the exit it started
   on. When a policy change removes that exit (profile switch, upstream
   disabled, rules reordered), the mark has no ip rule and no kill-switch any
   more and would fall through to main. Forward and postrouting therefore
-  reject/drop any kornode mark that is not a current exit's toward the uplink
-  (on every interface when the uplink is unknown). Such connections break
-  instead of leaking; new connections are classified by the new policy.
+  reject/drop any kornode mark that is not a current exit's on **every**
+  interface. Early-hook label validation also rejects a removed identity
+  whose truncated numeric mark collides with a new exit. Such connections
+  break instead of leaking; new connections are classified by the new policy.
+  Valid old positional marks (indices 1..99) are disjoint from the new slots;
+  unlabeled legacy connections are dropped on upgrade, not reclassified.
+  No conntrack flush or persisted allocator is needed; callers must reconnect.
 - The input chain records inbound connections arriving through a tunnel so
   replies use the same tunnel (existing behaviour, kept).
 - The `local` exit also gets a mark (no ip rule needed: unmatched marks fall
@@ -123,7 +151,11 @@ Notes:
   is accepted in `input`; `forward` drops the pool in both directions.
 - Those rules match by source address, so they only hold if a session cannot
   forge one. `prerouting` therefore starts with a strict reverse-path check
-  scoped to IPv4 on ocserv session devices: `iifname "<server.device>*" meta
-  nfproto ipv4 fib saddr . iif oif missing drop` (D-47). The tunnels' `rp_filter=2` is untouched.
+  scoped to IPv4 on ocserv session devices in a regular `session_rpf` chain:
+  `iifname "<server.device>*" meta nfproto ipv4 fib saddr . iif oif missing drop`
+  (D-47). Transit replies may return from this regular chain to skip RPF, but
+  never from base prerouting: mark restore/identity validation must still run.
+  The exemption requires `ct direction reply`, not merely established state.
+  The tunnels' `rp_filter=2` is untouched.
 - ocserv `isolate-workers` stays on; routes for agent prefixes come from
   `iroute` (S-03).

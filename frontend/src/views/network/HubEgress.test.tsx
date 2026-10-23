@@ -14,9 +14,17 @@ afterEach(cleanup);
 beforeEach(() => { vi.clearAllMocks(); mocks.get.mockResolvedValue(shown); mocks.write.mockResolvedValue(shown); });
 
 describe("Hub egress", () => {
-  it("lists sources and removes one after confirmation", async () => {
+  it("keeps separate rules/source panels with audit controls and removes a source after confirmation", async () => {
     render(<HubEgress token="session" />);
     await screen.findByText(/wg · wg0/);
+    const rulesPanel = screen.getByRole("heading", { name: "Egress rules" }).closest("section")!;
+    const sourcePanel = screen.getByRole("heading", { name: "Sources" }).closest("section")!;
+    expect(rulesPanel).not.toBe(sourcePanel);
+    expect(rulesPanel.querySelector('form[data-capability="egress.hub.set"]')).toBeTruthy();
+    expect(rulesPanel.contains(screen.getByRole("heading", { name: "Destination sets" }))).toBe(true);
+    expect(sourcePanel.querySelector('form[data-capability="sources.hub.set"]')).toBeTruthy();
+    expect(sourcePanel.contains(screen.getByLabelText("Source description"))).toBe(true);
+    expect(sourcePanel.contains(screen.getByLabelText("Allow outside derived source pool"))).toBe(true);
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     expect(mocks.write).toHaveBeenCalledWith("/api/sources/wg", "DELETE", undefined, "session");
@@ -29,7 +37,30 @@ describe("Hub egress", () => {
     await userEvent.type(screen.getByLabelText("Source interface"), "awg0");
     await userEvent.type(screen.getByLabelText("Source CIDR"), "10.8.2.0/24");
     await userEvent.click(screen.getByRole("button", { name: "Save source" }));
-    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/sources/amnezia", "PUT", { interface: "awg0", cidr: "10.8.2.0/24", export: true }, "session"));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/sources/amnezia", "PUT", { interface: "awg0", cidr: "10.8.2.0/24", export: true, allow_outside_pool: false, description: "" }, "session"));
+  });
+
+  it("edits and clears source pool override and description explicitly", async () => {
+    mocks.get.mockResolvedValue({ ...shown, policy: { ...shown.policy, sources: [{ ...shown.policy.sources[0], allow_outside_pool: true, description: "Old description" }] } });
+    render(<HubEgress token="session" />);
+    await screen.findByText(/wg · wg0/);
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const override = screen.getByLabelText("Allow outside derived source pool") as HTMLInputElement;
+    expect(override.checked).toBe(true);
+    await userEvent.click(override);
+    await userEvent.clear(screen.getByLabelText("Source description"));
+    await userEvent.click(screen.getByRole("button", { name: "Save source" }));
+    expect(mocks.write).toHaveBeenCalledWith("/api/sources/wg", "PUT", { interface: "wg0", cidr: "10.8.1.0/24", export: true, allow_outside_pool: false, description: "" }, "session");
+  });
+
+  it("saves structured destination lists through the whole-policy endpoint", async () => {
+    const corp = { routes: ["10.1.0.0/16"], domains: ["corp.example.com"], route_urls: ["https://example.com/routes"], domain_urls: ["https://example.com/domains"] };
+    mocks.get.mockResolvedValue({ ...shown, policy: { ...shown.policy, sets: { corp } } });
+    render(<HubEgress token="session" />);
+    const routes = await screen.findByLabelText("Set corp routes");
+    fireEvent.change(routes, { target: { value: "10.2.0.0/16" } });
+    await userEvent.click(screen.getByRole("button", { name: "Save policy" }));
+    expect(mocks.write).toHaveBeenCalledWith("/api/egress", "PUT", { ...shown.policy, sets: { corp: { ...corp, routes: ["10.2.0.0/16"] } } }, "session");
   });
 
   it("checks and saves the policy and shows backend refusals", async () => {

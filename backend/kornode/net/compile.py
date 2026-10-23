@@ -8,6 +8,7 @@ docs/spec/02-egress-and-sources.md, with the netlab-driven decisions D-20
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -92,6 +93,9 @@ class NodeFacts:
     local_networks: tuple[Network, ...] = ()
     resolved: Mapping[str, frozenset[str]] = field(default_factory=dict)
     upstreams: tuple[str, ...] = ()
+    # Alias selection is independent of tunnel/link availability.
+    active_upstream: str | None = None
+    disabled_upstreams: tuple[str, ...] = ()
     node_prefixes: Mapping[int, tuple[Network, ...]] = field(default_factory=dict)
     fabric_ifaces: tuple[str, ...] = ()
     # Hub: (exported agent prefix, ocserv session device) for connected agents;
@@ -125,7 +129,11 @@ class Exit:
 
     @property
     def mark(self) -> int:
-        return MARK_BASE | (self.index << 8)
+        return exit_mark(self.name)
+
+    @property
+    def identity_label(self) -> str:
+        return "0x" + hashlib.sha256(self.name.encode("utf-8")).hexdigest()[:32]
 
     @property
     def table(self) -> int:
@@ -164,6 +172,28 @@ class Compiled:
     classify_host: tuple[ClassifyRule, ...]
     script: str
     warnings: tuple[str, ...]
+
+
+def exit_mark(name: str) -> int:
+    """Stable identity, not a policy position. The high index bit separates
+    these marks from the legacy positional allocation (at most 99 exits).
+    Local/fabric marks are reserved, never candidates for upstream collisions.
+    Conntrack labels disambiguate even a collision with a *deleted* identity.
+    """
+    if name == "local":
+        slot = 0x8000
+    elif name == "fabric":
+        slot = 0x8001
+    else:
+        digest = hashlib.sha256(name.encode("utf-8")).digest()
+        slot = 0x8002 + int.from_bytes(digest[:4], "big") % 0x7FFE
+    return MARK_BASE | (slot << 8)
+
+
+def _resolved_via(via: Via, facts: NodeFacts) -> Via:
+    if via.name == "upstream:active" and facts.active_upstream is not None:
+        return Via("upstream", facts.active_upstream)
+    return via
 
 
 def _addresses(facts: NodeFacts) -> frozenset[Address]:
@@ -224,7 +254,7 @@ def dest_members(
 def _validate(policy: EgressPolicy, facts: NodeFacts) -> None:
     for index, rule in enumerate(policy.egress):
         via = rule.parsed_via
-        if via.kind == "upstream" and via.target not in facts.upstreams:
+        if via.kind == "upstream" and via.target != "active" and via.target not in facts.upstreams:
             raise PolicyError(f"rule {index}: unknown upstream {via.target!r}")
         if via.kind == "node":
             node = int(via.target or 0)
@@ -295,9 +325,15 @@ def dead_rules(policy: EgressPolicy) -> list[tuple[int, int]]:
 def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
     _validate(policy, facts)
 
+    if "active" in facts.upstreams:
+        raise PolicyError(
+            "upstream profile slug 'active' is reserved for the selected-profile alias"
+        )
+    if facts.active_upstream is not None and facts.active_upstream not in facts.upstreams:
+        raise PolicyError("active upstream is not a known profile")
     exits: dict[str, Exit] = {}
     for rule in policy.egress:
-        via = rule.parsed_via
+        via = _resolved_via(rule.parsed_via, facts)
         if via.kind == "drop" or via.name in exits:
             continue
         exits[via.name] = _make_exit(via, len(exits) + 1, policy, facts)
@@ -314,6 +350,15 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
                 kill_switch=True,
                 nat=False,
             )
+
+    # Priorities 100+i must stay inside 90..199; the mark space is separate.
+    if len(exits) > 99:
+        raise PolicyError("at most 99 distinct exits are supported")
+    marks: dict[int, str] = {}
+    for candidate in exits.values():
+        previous = marks.setdefault(candidate.mark, candidate.name)
+        if previous != candidate.name:
+            raise PolicyError(f"exit mark collision: {previous!r} and {candidate.name!r}")
 
     sets: dict[str, DestSetDecl] = {}
     elements: dict[str, set[str]] = {}
@@ -333,7 +378,7 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
                     if ipaddress.ip_network(member, strict=False).version == family
                 )
             to_sets = (f"{dest}_v4", f"{dest}_v6")
-        via = rule.parsed_via
+        via = _resolved_via(rule.parsed_via, facts)
         exit_ = None if via.kind == "drop" else exits[via.name]
         for source in rule.from_:
             target = classify_host if source == "host" else classify
@@ -484,16 +529,21 @@ def _transit_head(
 
 def _make_exit(via: Via, index: int, policy: EgressPolicy, facts: NodeFacts) -> Exit:
     tunnel = facts.tunnels.get(via.name)
-    rules = [rule for rule in policy.egress if rule.parsed_via.name == via.name]
+    rules = [
+        rule for rule in policy.egress if _resolved_via(rule.parsed_via, facts).name == via.name
+    ]
     # One table per exit, so one kill-switch per exit: if any rule using it
     # wants fail-closed, the exit fails closed (D-24).
-    kill_switch = any(rule.effective_kill_switch for rule in rules)
+    administratively_disabled = via.kind == "upstream" and (
+        via.target in facts.disabled_upstreams or via.target == "active"
+    )
+    kill_switch = administratively_disabled or any(rule.effective_kill_switch for rule in rules)
     return Exit(
         name=via.name,
         kind=via.kind,
         index=index,
         interface=tunnel.interface if tunnel else (facts.uplink if via.kind == "local" else None),
-        up=bool(tunnel and tunnel.up) or via.kind == "local",
+        up=(bool(tunnel and tunnel.up) and not administratively_disabled) or via.kind == "local",
         kill_switch=kill_switch and via.kind != "local",
         nat=via.kind in ("local", "upstream"),
     )

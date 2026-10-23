@@ -19,11 +19,25 @@ Default data paths:
 
 ## Precedence
 
-1. CLI flags.
-2. Environment variables.
-3. `.env` file.
-4. YAML config.
+1. CLI overrides.
+2. YAML config (explicit values, including empty lists).
+3. Process environment variables.
+4. `.env` file.
 5. Application defaults.
+
+Environment values fill omitted YAML fields; they do not override values already
+saved in YAML. API/CLI saves preserve `${SECRET:NAME}` references so rotation in
+the environment continues to take effect.
+
+The named `sets` collection is replaced as a whole at each explicit precedence
+level; `sets: {}` clears inherited sets. Ordinary nested sections still merge.
+
+API and CLI configuration writes share a read/validate/commit lock. Full YAML
+source saves require the ETag returned by `GET /api/config/source`, sent as
+`If-Match` or JSON `etag`; missing versions return 428 and stale versions return
+412. A `saved_but_not_applied` error means YAML was committed but runtime writes
+failed: reload source and repair/rerender before reloading services. Admin password
+and MFA fields use dedicated reauthenticated actions, not generic config writes.
 
 ## Environment variable mapping
 
@@ -45,6 +59,9 @@ Lists can be overridden as JSON:
 
 ```text
 KORNODE_SERVER__DNS='["8.8.8.8", "1.1.1.1"]'
+KORNODE_EGRESS='[]'
+KORNODE_SOURCES='[]'
+KORNODE_SETS='{"corp":{"routes":["10.20.0.0/16"],"domains":["corp.example"]}}'
 ```
 
 `.env` files support plain `KEY=value`, optional `export KEY=value`, single or double quoted

@@ -1,19 +1,23 @@
 import { useState } from "react";
-import { fetchConfigDiff, saveConfigSource, validateConfigSource } from "../../api";
+import { ApiError, fetchConfigDiff, fetchConfigSource, saveConfigSource, validateConfigSource } from "../../api";
+import { confirmAction } from "../../lib/async";
 import type { PanelCore } from "../core";
 
 // The raw YAML editor under Config → Advanced.
 export function useConfigEditor(core: PanelCore) {
-  const { authToken, loadAll, runAction, setState, state } = core;
+  const { authToken, loadAll, runAction, setState } = core;
   const [configDraft, setConfigDraft] = useState("");
   const [configDirty, setConfigDirty] = useState(false);
   const [configDiff, setConfigDiff] = useState("");
   const [configValidation, setConfigValidation] = useState("");
+  const [configEtag, setConfigEtag] = useState<string | null>(null);
+  const [configConflict, setConfigConflict] = useState("");
 
   core.registerHydrator("configEditor", ({ configSource }) => {
     // Never clobber unsaved edits with a background reload.
     if (!configDirty && configSource) {
       setConfigDraft(configSource.content);
+      setConfigEtag(configSource.etag);
     }
   });
 
@@ -22,10 +26,16 @@ export function useConfigEditor(core: PanelCore) {
     setConfigDirty(true);
   };
 
-  const reloadSource = () => {
-    setConfigDraft(state.configSource?.content ?? "");
+  const reloadSource = async () => {
+    if (configDirty && !confirmAction("Discard unsaved YAML edits and fetch the latest source? Copy any edits you want to keep before reloading.")) return;
+    const source = await runAction("config-source-reload", "Latest config source loaded", fetchConfigSource, { reload: false });
+    if (!source) return;
+    setConfigDraft(source.content);
+    setConfigEtag(source.etag);
     setConfigDirty(false);
+    setConfigConflict("");
     setConfigValidation("");
+    setState(current => ({ ...current, configSource: source }));
   };
 
   const validate = async () => {
@@ -49,11 +59,24 @@ export function useConfigEditor(core: PanelCore) {
     const result = await runAction(
       "config-save",
       "Config saved",
-      (token) => saveConfigSource(token, configDraft, true),
+      async (token) => {
+        try {
+          return await saveConfigSource(token, configDraft, true, configEtag ?? "");
+        } catch (error) {
+          if (error instanceof ApiError && (error.status === 412 || error.status === 428)) {
+            setConfigConflict(error.status === 412
+              ? "The YAML source changed on disk. Your edits are preserved and were not saved. Copy or reconcile them before using Reload to discard this draft and fetch the latest source."
+              : "The source version is missing. Your edits are preserved and were not saved. Copy them before using Reload to fetch a versioned source.");
+          }
+          throw error;
+        }
+      },
       { reload: false }
     );
     if (result && authToken) {
       setConfigDraft(result.content);
+      setConfigEtag(result.etag);
+      setConfigConflict("");
       setConfigDirty(false);
       setState((current) => ({
         ...current,
@@ -61,7 +84,8 @@ export function useConfigEditor(core: PanelCore) {
         configSource: {
           path: result.path,
           exists: true,
-          content: result.content
+          content: result.content,
+          etag: result.etag
         }
       }));
       await loadAll(authToken);
@@ -73,6 +97,7 @@ export function useConfigEditor(core: PanelCore) {
     configDirty,
     configDiff,
     configValidation,
+    configConflict,
     editDraft,
     reloadSource,
     validate,

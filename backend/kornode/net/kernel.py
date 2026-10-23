@@ -97,6 +97,14 @@ def _add_address(ipr: Any, address: Address) -> None:
 
 
 def _sysctl_path(proc_sys: Path, key: str) -> Path:
+    # Interface names may contain dots (e.g. eth0.100). Only the fixed
+    # prefix and final property delimit path components in conf keys.
+    if key.startswith(("net.ipv4.conf.", "net.ipv6.conf.")):
+        net, family, conf, rest = key.split(".", 3)
+        interface, separator, property_ = rest.rpartition(".")
+        if not separator or not interface or "/" in interface or interface in (".", ".."):
+            raise ValueError("invalid interface sysctl key")
+        return proc_sys / net / family / conf / interface / property_
     return proc_sys.joinpath(*key.split("."))
 
 
@@ -214,10 +222,15 @@ class Kernel:
                 check=False,
             )
             if result.returncode != 0:
-                if (family, table) == ("inet", "kornode"):
-                    return None, frozenset()
-                continue
-            for item in json.loads(result.stdout).get("nftables", []):
+                return None, frozenset()
+            objects = json.loads(result.stdout).get("nftables", [])
+            if not any(
+                item.get("table", {}).get("family") == family
+                and item.get("table", {}).get("name") == table
+                for item in objects
+            ):
+                return None, frozenset()
+            for item in objects:
                 if "table" in item and (family, table) == ("inet", "kornode"):
                     comment = item["table"].get("comment", "")
                     if comment.startswith(SCHEMA_COMMENT_PREFIX):
@@ -261,10 +274,12 @@ class Kernel:
         without its fail-closed rules. Deletions after a failure are skipped,
         so nothing is torn down on top of a half-applied pass. All failures
         are raised together as one ApplyError at the end; the next pass diffs
-        from what is really there."""
+        from what is really there. A routing barrier must succeed before any
+        mutation, and is never lifted over an errored partial routing update."""
         ops = list(plan.ops)
         errors: list[str] = []
         index = 0
+        guarded = False
         with IPRoute() as ipr:
             while index < len(ops):
                 op = ops[index]
@@ -282,13 +297,22 @@ class Kernel:
                         ):
                             batch.append(ops[index])  # type: ignore[arg-type]
                             index += 1
+                        if errors and any(isinstance(item, NftLoad) for item in batch) and guarded:
+                            # Do not lift the barrier over a partially updated route/rule set.
+                            continue
                         self._apply_nft(batch)
+                        if any(isinstance(item, NftLoad) and item.guard for item in batch):
+                            guarded = True
                     else:
                         index += 1
                         self._apply_one(ipr, op)
                 except ApplyError as exc:
+                    if isinstance(op, NftLoad) and op.guard:
+                        raise  # No routing mutation is safe without the barrier.
                     errors.append(str(exc))
                 except (NetlinkError, OSError) as exc:
+                    if isinstance(op, NftLoad) and op.guard:
+                        raise ApplyError(f"routing guard failed: {exc}") from exc
                     errors.append(f"{op}: {exc}")
         if errors:
             raise ApplyError("; ".join(errors))

@@ -3,12 +3,20 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 DOTENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Collections absent from DEFAULT_CONFIG; keep independent of models to avoid imports cycles.
+TOP_LEVEL_COLLECTIONS = {"egress", "sources", "sets"}
 SECRET_ENV_SEGMENT_RE = re.compile(r"(password|passphrase|secret|token)$", re.IGNORECASE)
+_CONFIG_ENVIRONMENT: ContextVar[tuple[Path, Path | None, dict[str, str]] | None] = ContextVar(
+    "config_environment",
+    default=None,
+)
 
 
 def parse_dotenv_file(path: Path | None) -> dict[str, str]:
@@ -89,11 +97,50 @@ def discover_env_file(config_path: Path | None, explicit_env_file: Path | None) 
     return None
 
 
+@contextmanager
+def config_environment(config_path: Path, env_file: Path | None = None) -> Iterator[None]:
+    """Freeze one supplied path's environment across guards, callbacks and commit.
+
+    Do not resolve config_path: a symlink's parent .env is part of the loader's
+    public configuration context, even when publication uses the target inode.
+    """
+    current = _CONFIG_ENVIRONMENT.get()
+    if current is not None and current[0] == config_path.absolute():
+        if env_file is not None and env_file.absolute() != current[1]:
+            raise ValueError("conflicting configuration environment context")
+        yield
+        return
+    selected = discover_env_file(config_path, env_file)
+    environment = combined_environment(config_path, selected)
+    token = _CONFIG_ENVIRONMENT.set(
+        (
+            config_path.absolute(),
+            selected.absolute() if selected is not None else None,
+            environment,
+        )
+    )
+    try:
+        yield
+    finally:
+        _CONFIG_ENVIRONMENT.reset(token)
+
+
 def combined_environment(
     config_path: Path | None = None,
     env_file: Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
+    current = _CONFIG_ENVIRONMENT.get()
+    if current is not None and config_path is not None:
+        bound_path, bound_env_file, environment = current
+        if config_path.absolute() == bound_path:
+            if environ is not None or (
+                env_file is not None and env_file.absolute() != bound_env_file
+            ):
+                raise ValueError("conflicting configuration environment context")
+            return dict(environment)
+        if config_path.resolve() == bound_path.resolve():
+            raise ValueError("alternate configuration alias inside an environment context")
     selected_env_file = discover_env_file(config_path, env_file)
     file_values = parse_dotenv_file(selected_env_file)
     process_values = dict(os.environ if environ is None else environ)
@@ -134,7 +181,10 @@ def env_overrides_from_mapping(
     for key, raw_value in values.items():
         if not key.startswith(prefix) or key in {"KORNODE_CONFIG", "KORNODE_ENV_FILE"}:
             continue
-        if "__" not in key[len(prefix) :]:
+        if (
+            "__" not in key[len(prefix) :]
+            and key[len(prefix) :].lower() not in TOP_LEVEL_COLLECTIONS
+        ):
             continue
         path = [segment.lower() for segment in key[len(prefix) :].split("__") if segment]
         if not path:

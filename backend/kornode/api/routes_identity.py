@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
-from kornode.api.routes_config import apply_config_patch
+from kornode.api.routes_config import (
+    apply_config_mutation,
+    apply_config_patch,
+    runtime_config_path,
+)
 from kornode.api.routes_server import ocserv_apply_result, running_ocserv_conf
-from kornode.config.models import AppConfig, GroupPolicyConfig, OidcProviderConfig
+from kornode.config.models import AppConfig, OidcProviderConfig
+from kornode.services.config_collections import raw_collection, replace_named
 from kornode.services.secrets import is_secret_key
 from kornode.services.server import ServerService
 
@@ -86,7 +92,9 @@ def save_oidc_settings(
     loaded_config, written = apply_config_patch(request, {"auth": {"oidc": patch}})
     # Enabling/disabling the PAM/RADIUS connector changes ocserv's `auth =`
     # lines, which only a restart applies.
-    reload_result = ServerService(loaded_config).apply_config_change(previous)
+    reload_result = ServerService(
+        loaded_config, config_path=runtime_config_path(request)
+    ).apply_config_change(previous)
     return {
         "status": "saved",
         "written": written,
@@ -114,27 +122,34 @@ def save_oidc_provider(
     request: Request,
     payload: OidcProviderRequest,
 ) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    provider = OidcProviderConfig.model_validate(payload.model_dump(exclude_none=True))
-    providers = [item for item in config.identity.oidc_providers if item.name != provider.name]
-    providers.append(provider)
-    patch = {
-        "identity": {
-            "oidc_providers": [item.model_dump(mode="json") for item in providers],
-        }
-    }
-    loaded_config, written = apply_config_patch(request, patch)
+    def mutate(raw: dict[str, Any]) -> dict[str, Any]:
+        providers = raw_collection(
+            raw, Path(request.app.state.config_path), "identity", "oidc_providers"
+        )
+        existing = next((item for item in providers if item.get("name") == payload.name), {})
+        data = payload.model_dump()
+        # Omitted means preserve; explicit null/empty means remove the secret.
+        if "client_secret" not in payload.model_fields_set and "client_secret" in existing:
+            data["client_secret"] = existing["client_secret"]
+        raw.setdefault("identity", {})["oidc_providers"] = replace_named(
+            providers, payload.name, data
+        )
+        return raw
+
+    loaded_config, written = apply_config_mutation(request, mutate)
     return {"status": "saved", "written": written, "identity": _identity_dump(loaded_config)}
 
 
 @router.delete("/oidc/providers/{name}")
 def delete_oidc_provider(request: Request, name: str) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    providers = [item for item in config.identity.oidc_providers if item.name != name]
-    loaded_config, written = apply_config_patch(
-        request,
-        {"identity": {"oidc_providers": [item.model_dump(mode="json") for item in providers]}},
-    )
+    def mutate(raw: dict[str, Any]) -> dict[str, Any]:
+        providers = raw_collection(
+            raw, Path(request.app.state.config_path), "identity", "oidc_providers"
+        )
+        raw.setdefault("identity", {})["oidc_providers"] = replace_named(providers, name, None)
+        return raw
+
+    loaded_config, written = apply_config_mutation(request, mutate)
     return {"status": "deleted", "written": written, "identity": _identity_dump(loaded_config)}
 
 
@@ -143,27 +158,29 @@ def save_group_policy(
     request: Request,
     payload: GroupPolicyRequest,
 ) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    group = GroupPolicyConfig.model_validate(payload.model_dump(exclude_none=True))
-    groups = [item for item in config.identity.group_policies if item.name != group.name]
-    groups.append(group)
-    patch = {
-        "identity": {
-            "group_policies": [item.model_dump(mode="json") for item in groups],
-        }
-    }
-    loaded_config, written = apply_config_patch(request, patch)
+    def mutate(raw: dict[str, Any]) -> dict[str, Any]:
+        groups = raw_collection(
+            raw, Path(request.app.state.config_path), "identity", "group_policies"
+        )
+        raw.setdefault("identity", {})["group_policies"] = replace_named(
+            groups, payload.name, payload.model_dump()
+        )
+        return raw
+
+    loaded_config, written = apply_config_mutation(request, mutate)
     return {"status": "saved", "written": written, "identity": _identity_dump(loaded_config)}
 
 
 @router.delete("/groups/{name}")
 def delete_group_policy(request: Request, name: str) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    groups = [item for item in config.identity.group_policies if item.name != name]
-    loaded_config, written = apply_config_patch(
-        request,
-        {"identity": {"group_policies": [item.model_dump(mode="json") for item in groups]}},
-    )
+    def mutate(raw: dict[str, Any]) -> dict[str, Any]:
+        groups = raw_collection(
+            raw, Path(request.app.state.config_path), "identity", "group_policies"
+        )
+        raw.setdefault("identity", {})["group_policies"] = replace_named(groups, name, None)
+        return raw
+
+    loaded_config, written = apply_config_mutation(request, mutate)
     return {"status": "deleted", "written": written, "identity": _identity_dump(loaded_config)}
 
 

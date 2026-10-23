@@ -26,6 +26,32 @@ jobs:
       - run: make render PYTHON=python
       - run: make parity PYTHON=python
 
+  container-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      # Only test stages: no runtime image or ocserv compilation in ordinary CI.
+      - name: Validate frontend test stage
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: frontend-test
+          push: false
+          cache-from: type=gha,scope=frontend-test
+          cache-to: type=gha,scope=frontend-test,mode=max
+      - name: Validate backend test stage and repository fixtures
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: backend-test
+          push: false
+          cache-from: type=gha,scope=backend-test
+          cache-to: type=gha,scope=backend-test,mode=max
+
   netlab:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, NoReturn, cast
 
@@ -8,13 +9,18 @@ import yaml
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
-from kornode.api.auth import require_admin
-from kornode.config.loader import load_config
+from kornode.api.auth import invalidate_auth_sessions, require_admin
+from kornode.config.loader import deep_merge, load_config
 from kornode.config.models import AppConfig, IntervalUnit, LetsEncryptConfig
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandError, CommandResult
 from kornode.services.config import ConfigService
-from kornode.services.files import FileManager
+from kornode.services.config_store import (
+    ConfigApplyError,
+    ConfigPreflightError,
+    config_lock,
+    mutate_config,
+)
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificatePaths, ServerCertificateService
 
@@ -92,7 +98,15 @@ def raise_command_http_error(exc: CommandError) -> NoReturn:
 @router.get("/server-pin")
 def server_certificate_pin(request: Request) -> dict[str, str]:
     config: AppConfig = request.app.state.config
-    return ServerCertificateService(config).server_pin()
+    service = ServerCertificateService(config)
+    if not service.active_paths().server_cert.exists():
+        raise HTTPException(status_code=400, detail="server certificate not found")
+    try:
+        return service.server_pin()
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Server certificate could not be read; check its PEM encoding."
+        ) from None
 
 
 @router.get("")
@@ -227,8 +241,13 @@ async def upload_external(
             status_code=400,
             detail="certificate files must be UTF-8 PEM files",
         ) from exc
-    loaded_config = _activate_external_config(request, paths, letsencrypt=False)
-    reload_result = _write_and_reload(loaded_config, reload=reload)
+    reload_result: CommandResult | None = None
+
+    def apply(config: AppConfig) -> None:
+        nonlocal reload_result
+        reload_result = _write_and_reload(config, reload=reload, write_rendered=False)
+
+    loaded_config = _activate_external_config(request, paths, letsencrypt=False, after_apply=apply)
     return {
         "status": "external certificates installed",
         "config": loaded_config.model_dump_safe(),
@@ -268,8 +287,28 @@ def issue_letsencrypt(
     reload_result: CommandResult | None = None
     if not payload.dry_run:
         paths = service.letsencrypt_paths(domains[0])
-        if not config.cert_path("ca.key").exists() or not config.cert_path("ca.crt").exists():
+        try:
+            # init_ca is idempotent: it also validates an existing complete pair,
+            # refusing partial/invalid state rather than replacing user material.
             CertificateService(config).init_ca()
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Local certificate authority is incomplete or invalid. Restore the CA "
+                    "certificate and matching private key, or explicitly regenerate the CA, "
+                    "then retry. Existing CA material was not replaced."
+                ),
+            ) from None
+        except CommandError as exc:
+            raise_command_http_error(exc)
+
+        def apply(candidate: AppConfig) -> None:
+            nonlocal reload_result
+            reload_result = _write_and_reload(
+                candidate, reload=payload.reload, write_rendered=False
+            )
+
         loaded_config = _activate_letsencrypt_config(
             request,
             paths,
@@ -282,8 +321,8 @@ def issue_letsencrypt(
             auto_renew_interval_unit=payload.auto_renew_interval_unit,
             http01_address=config.certificates.letsencrypt.http01_address,
             http01_port=config.certificates.letsencrypt.http01_port,
+            after_apply=apply,
         )
-        reload_result = _write_and_reload(loaded_config, reload=payload.reload)
     return {
         "result": command_result(
             result,
@@ -336,8 +375,6 @@ def save_letsencrypt_settings(
             },
         },
     )
-    ConfigService().write_rendered_files(loaded_config)
-    request.app.state.config = loaded_config
     return {"status": "letsencrypt settings saved", "config": loaded_config.model_dump_safe()}
 
 
@@ -350,8 +387,6 @@ def save_certificate_settings(
         request,
         {"mode": payload.mode, "ca_name": payload.ca_name},
     )
-    ConfigService().write_rendered_files(loaded_config)
-    request.app.state.config = loaded_config
     return {"status": "certificate settings saved", "config": loaded_config.model_dump_safe()}
 
 
@@ -366,8 +401,14 @@ def renew_letsencrypt(
     except CommandError as exc:
         raise_command_http_error(exc)
     reload_result: CommandResult | None = None
-    if not payload.dry_run and config.certificates.letsencrypt.renew_reload:
-        reload_result = _write_and_reload(config, reload=payload.reload)
+    if not payload.dry_run:
+        # ACME runs outside the config transaction. Never render its old snapshot:
+        # another settings save may have committed while renewal was running.
+        with config_lock(Path(request.app.state.config_path)):
+            current = load_config(Path(request.app.state.config_path))
+            _install_config(request, current)
+            if current.certificates.letsencrypt.renew_reload:
+                reload_result = _write_and_reload(current, reload=payload.reload)
     return {
         "result": command_result(result, ("korctl", "certificates", "letsencrypt-renew")),
         "reload": command_result(reload_result, ("korctl", "server", "reload"))
@@ -381,6 +422,7 @@ def _activate_external_config(
     paths: ServerCertificatePaths,
     *,
     letsencrypt: bool,
+    after_apply: Callable[[AppConfig], None] | None = None,
 ) -> AppConfig:
     patch: dict[str, Any] = {
         "mode": "external",
@@ -390,7 +432,7 @@ def _activate_external_config(
     }
     if not letsencrypt:
         patch["letsencrypt"] = {"enabled": False}
-    return _update_certificate_config(request, patch)
+    return _update_certificate_config(request, patch, after_apply=after_apply)
 
 
 def _activate_letsencrypt_config(
@@ -406,6 +448,7 @@ def _activate_letsencrypt_config(
     auto_renew_interval_unit: IntervalUnit,
     http01_address: str | None,
     http01_port: int,
+    after_apply: Callable[[AppConfig], None] | None = None,
 ) -> AppConfig:
     return _update_certificate_config(
         request,
@@ -429,24 +472,65 @@ def _activate_letsencrypt_config(
                 "http01_port": http01_port,
             },
         },
+        after_apply=after_apply,
     )
 
 
-def _update_certificate_config(request: Request, patch: dict[str, Any]) -> AppConfig:
-    path = Path(request.app.state.config_path)
-    data = _load_yaml_mapping(path)
-    certificates = data.setdefault("certificates", {})
-    if not isinstance(certificates, dict):
-        raise ValueError("certificates config must be a mapping")
-    certificates.update(patch)
-    FileManager().atomic_write_text(path, _dump_yaml(data), mode=0o600)
-    loaded_config = load_config(path)
-    request.app.state.config = loaded_config
-    return loaded_config
+def _install_config(request: Request, config: AppConfig) -> None:
+    previous = request.app.state.config
+    request.app.state.config = config
+    invalidate_auth_sessions(request, previous, config)
 
 
-def _write_and_reload(config: AppConfig, *, reload: bool) -> CommandResult | None:
-    ConfigService().write_rendered_files(config)
+def _update_certificate_config(
+    request: Request,
+    patch: dict[str, Any],
+    *,
+    after_apply: Callable[[AppConfig], None] | None = None,
+) -> AppConfig:
+    try:
+        config, _written = mutate_config(
+            Path(request.app.state.config_path),
+            lambda raw: deep_merge(raw, {"certificates": patch}),
+            on_commit=lambda candidate: _install_config(request, candidate),
+            after_apply=after_apply,
+        )
+    except ConfigPreflightError:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "status": "not_saved",
+                "saved": False,
+                "applied": False,
+                "message": "Certificate render preflight failed; configuration was not saved.",
+            },
+        ) from None
+    except ConfigApplyError:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "status": "saved_but_not_applied",
+                "saved": True,
+                "applied": False,
+                "message": (
+                    "Certificate configuration saved; runtime application failed. "
+                    "Retry rendering before reloading services."
+                ),
+            },
+        ) from None
+    return config
+
+
+def _write_and_reload(
+    config: AppConfig, *, reload: bool, write_rendered: bool = True
+) -> CommandResult | None:
+    """Caller holds config_lock, or runs in mutate_config.after_apply.
+
+    Transactions already rendered their authoritative candidate. Renewal still
+    renders here, after rereading current YAML under the shared lock.
+    """
+    if write_rendered:
+        ConfigService().write_rendered_files(config)
     if not reload:
         return None
     return ServerService(config).reload(dry_run=False)

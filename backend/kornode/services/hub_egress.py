@@ -4,15 +4,13 @@ never touched here."""
 
 from __future__ import annotations
 
-import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import ValidationError
 
-from kornode.config.loader import load_config, load_yaml_file
+from kornode.config.loader import load_yaml_file, validate_config_data
 from kornode.config.models import AppConfig, profile_slug
 from kornode.net.compile import dead_rules
 from kornode.net.model import EgressPolicy, InlineDest, SetRef, Source
@@ -20,9 +18,9 @@ from kornode.registry.db import migrate, open_registry
 from kornode.registry.models import Node
 from kornode.registry.repository import Registry
 from kornode.services.agent_models import ManagementError
-from kornode.services.config import ConfigService
-from kornode.services.files import FileManager
+from kornode.services.config_store import ConfigApplyError, ConfigPreflightError, mutate_config
 from kornode.services.net import NetService
+from kornode.services.secrets import sanitized_validation_errors
 
 
 class HubEgressError(ValueError):
@@ -35,7 +33,7 @@ def validate_hub_policy(
     policy: EgressPolicy, nodes: Iterable[Node], upstreams: Iterable[str]
 ) -> None:
     by_id = {node.id: node for node in nodes}
-    known_upstreams = set(upstreams)
+    known_upstreams = {*upstreams, "active"}
     for index, rule in enumerate(policy.egress):
         via = rule.parsed_via
         if via.kind == "upstream" and via.target not in known_upstreams:
@@ -120,73 +118,80 @@ class HubEgressService:
         return {"valid": True, **_warning_fields(candidate.egress_policy())}
 
     def set_policy(self, data: dict[str, Any]) -> dict[str, Any]:
-        candidate = self._candidate(data)
-        self._commit(data)
+        candidate = self._commit(data)
         policy = candidate.egress_policy()
         return {"policy": _dump(policy), **_warning_fields(policy)}
 
     def set_source(self, name: str, data: dict[str, Any] | None) -> dict[str, Any]:
-        current = _dump(self.config.egress_policy())
-        old = current["sources"]
-        if data is None and not any(item["name"] == name for item in old):
-            raise ManagementError(404, "not_found", "source not found")
-        current["sources"] = [item for item in old if item["name"] != name]
-        if data is not None:
-            try:
-                source = Source.model_validate({**data, "name": name})
-            except ValidationError as exc:
-                raise _invalid(exc) from None
-            current["sources"].append(source.model_dump(mode="json", exclude_defaults=True))
-        return self.set_policy(current) | {"sources": current["sources"]}
+        def mutation(raw: dict[str, Any]) -> dict[str, Any]:
+            current = _dump(self._validate_candidate(raw).egress_policy())
+            old = current["sources"]
+            if data is None and not any(item["name"] == name for item in old):
+                raise ManagementError(404, "not_found", "source not found")
+            current["sources"] = [item for item in old if item["name"] != name]
+            if data is not None:
+                try:
+                    source = Source.model_validate({**data, "name": name})
+                except ValidationError as exc:
+                    raise _invalid(exc) from None
+                current["sources"].append(source.model_dump(mode="json", exclude_defaults=True))
+            return self._raw(current, raw)
 
-    def _raw(self, data: dict[str, Any]) -> dict[str, Any]:
+        self._mutate(mutation)
+        return self.policy() | self.sources()
+
+    def _raw(self, data: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
             policy = EgressPolicy.model_validate(data)
         except ValidationError as exc:
             raise _invalid(exc) from None
-        raw = load_yaml_file(self.path)
+        raw = dict(load_yaml_file(self.path) if base is None else base)
         dumped = _dump(policy)
-        raw["sources"] = dumped["sources"]
-        raw["egress"] = dumped["egress"]  # `egress: []` must stay explicit: absent means default
-        if dumped["sets"]:
-            raw["sets"] = dumped["sets"]
-        else:
-            raw.pop("sets", None)
-        if not dumped["sources"]:
-            raw.pop("sources", None)
+        # Empty values are explicit overrides, not permission to revive env policy.
+        raw.update({key: dumped[key] for key in ("sources", "sets", "egress")})
         return raw
 
     def _candidate(self, data: dict[str, Any]) -> AppConfig:
-        raw = self._raw(data)
-        # The loader validates the whole file (env overrides, secret refs, address checks)
-        # exactly as a restart would, so it reads a sibling copy and never the live file.
-        with tempfile.NamedTemporaryFile(
-            "w", dir=self.path.parent, prefix=".egress-check-", suffix=".yaml", delete=False
-        ) as handle:
-            temp = Path(handle.name)
-            handle.write(yaml.safe_dump(raw, sort_keys=False))
+        return self._validate_candidate(self._raw(data))
+
+    def _validate_candidate(self, raw: dict[str, Any]) -> AppConfig:
         try:
-            candidate = load_config(temp)
+            candidate = validate_config_data(raw, self.path)
         except ValidationError as exc:
             raise _invalid(exc) from None
-        except ValueError as exc:
-            raise ManagementError(422, "invalid", str(exc)) from None
-        finally:
-            temp.unlink(missing_ok=True)
+        except ValueError:
+            raise ManagementError(422, "invalid", "Invalid configuration") from None
         try:
             check_hub_policy(candidate, self._nodes(candidate))
         except HubEgressError as exc:
             raise ManagementError(409, exc.code, str(exc)) from None
         return candidate
 
-    def _commit(self, data: dict[str, Any]) -> None:
-        raw = self._raw(data)
-        FileManager().atomic_write_text(self.path, yaml.safe_dump(raw, sort_keys=False), mode=0o600)
-        loaded = load_config(self.path)
-        self.config = loaded
-        if self.saved is not None:
-            self.saved(loaded)
-        self.sync(loaded)
+    def _commit(self, data: dict[str, Any]) -> AppConfig:
+        return self._mutate(lambda raw: self._raw(data, raw))
+
+    def _mutate(self, mutation: Callable[[dict[str, Any]], dict[str, Any]]) -> AppConfig:
+        def checked(current: dict[str, Any]) -> dict[str, Any]:
+            raw = mutation(current)
+            self._validate_candidate(raw)
+            return raw
+
+        def install(config: AppConfig) -> None:
+            self.config = config
+            if self.saved is not None:
+                self.saved(config)
+
+        try:
+            loaded, _ = mutate_config(self.path, checked, on_commit=install, after_apply=self.sync)
+        except ConfigPreflightError:
+            raise ManagementError(
+                500, "not_saved", "Render preflight failed; config not saved"
+            ) from None
+        except ConfigApplyError:
+            raise ManagementError(
+                500, "saved_but_not_applied", "Config saved; runtime application failed"
+            ) from None
+        return loaded
 
     @staticmethod
     def _nodes(config: AppConfig) -> list[Node]:
@@ -202,11 +207,10 @@ class HubEgressService:
 
     @staticmethod
     def _sync(config: AppConfig) -> None:
-        ConfigService().write_rendered_files(config)
         NetService(config).wake()
 
 
 def _invalid(exc: ValidationError) -> ManagementError:
     fields = [".".join(str(part) for part in error["loc"]) for error in exc.errors()]
-    messages = [str(error["msg"]) for error in exc.errors()]
+    messages = [str(error["msg"]) for error in sanitized_validation_errors(exc.errors())]
     return ManagementError(422, "invalid", "; ".join(messages), fields)

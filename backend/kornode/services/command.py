@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import errno
+import io
+import json
+import os
+import socket
 import subprocess
+import sys
+import threading
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from kornode.services.secrets import mask_text
+
+_LOG_SINK_TIMEOUT = 10.0
 
 
 @dataclass(frozen=True)
@@ -178,79 +189,139 @@ class CommandRunner:
         masked_argv: tuple[str, ...],
         output_file: Path,
     ) -> CommandResult:
-        """Like _run_graceful, but for a command that daemonizes (forks to
-        the background) after startup, e.g. `openconnect --background`.
+        """A detached sink masks every byte before persistence, even after return.
 
-        A backgrounded child inherits its parent's stdout/stderr file
-        descriptors; if those are pipes, reading them via communicate()
-        blocks until *every* process holding the write end closes it --
-        for a VPN client that's still running to hold the tunnel open,
-        that's "until disconnected", i.e. it never returns for the
-        duration of this call, and the timeout/graceful-kill below would
-        end up firing on every successful connection, tearing the tunnel
-        back down right after it came up. Redirecting output to a real
-        file instead sidesteps that: only the immediate (parent) process
-        needs to exit for wait() to return, regardless of what its
-        background child keeps writing to the inherited fd afterwards.
-
-        The just-written slice of the file is also read back (masked) into
-        the returned CommandResult, so an immediate failure (e.g. a bad
-        passphrase, rejected before the process ever gets to backgrounding)
-        still shows up right away in the caller's response instead of only
-        being visible by going to look at the log file separately.
+        RUNTIME: launch only after READY; after the immediate child exits, wait
+        for a FLUSH acknowledgement, not for descendants to close their output.
+        Secrets and control traffic use private pipes, never argv/environment.
         """
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        start_offset = output_file.stat().st_size if output_file.exists() else 0
-        with output_file.open("a", encoding="utf-8") as log:
-            log.write(f"--- {' '.join(masked_argv)} ---\n")
-            log.flush()
-            try:
-                process = subprocess.Popen(  # noqa: S603 - argv validated above, shell=False
-                    list(argv),
-                    stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    cwd=cwd,
-                    env=dict(env) if env is not None else None,
-                )
-            except OSError as exc:
-                return self._spawn_error_result(
-                    exc, masked_argv=masked_argv, secrets=secrets, check=check
-                )
-            if process.stdin is not None:
-                process.stdin.write(input_text or "")
-                process.stdin.close()
-            try:
-                process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                process.terminate()
+        fd = os.open(output_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "ab", buffering=0) as log:
+            os.fchmod(log.fileno(), 0o600)
+            start_offset = os.fstat(log.fileno()).st_size
+            worker = (
+                "import sys; sys.path.insert(0, "
+                + repr(str(Path(__file__).resolve().parents[2]))
+                + "); from kornode.services.command import _log_sink_main; _log_sink_main()"
+            )
+            control, sink_control = socket.socketpair()
+            with control, sink_control:
+                control.settimeout(_LOG_SINK_TIMEOUT)
                 try:
-                    process.wait(timeout=graceful_timeout)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                timeout_note = f"command timed out after {timeout} seconds"
-                log.write(f"{timeout_note}\n")
-                log.flush()
-                output = self._read_since(output_file, start_offset)
-                stderr = f"{output}\n{timeout_note}" if output else timeout_note
-                result = CommandResult(
-                    argv=masked_argv,
-                    returncode=124,
-                    stdout="",
-                    stderr=mask_text(stderr, secrets),
-                )
-                if check:
-                    raise CommandError(result) from None
-                return result
+                    sink = subprocess.Popen(  # noqa: S603 - fixed helper, no shell
+                        [sys.executable, "-c", worker],
+                        stdin=subprocess.PIPE,
+                        stdout=log,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                        pass_fds=(sink_control.fileno(),),
+                    )
+                except OSError as exc:
+                    return self._spawn_error_result(
+                        exc,
+                        masked_argv=masked_argv,
+                        secrets=secrets,
+                        check=check,
+                    )
+                control_fd = sink_control.fileno()
+                sink_control.close()
+                assert sink.stdin is not None
+                try:
+                    sink.stdin.write(
+                        json.dumps(
+                            {
+                                "secrets": list(secrets),
+                                "control_fd": control_fd,
+                            }
+                        ).encode()
+                        + b"\n"
+                    )
+                    sink.stdin.flush()
+                    if control.recv(1) != b"R":
+                        raise OSError(errno.EIO, "command log sink did not become ready")
+                except OSError:
+                    with suppress(BrokenPipeError):
+                        sink.stdin.close()
+                    threading.Thread(target=sink.wait, daemon=True).start()
+                    return self._spawn_error_result(
+                        OSError(errno.EIO, "command log sink did not become ready"),
+                        masked_argv=masked_argv,
+                        secrets=secrets,
+                        check=check,
+                    )
+                # Do not persist argv: it can contain unregistered credentials.
+                log.write(mask_text("--- command output ---\n", secrets).encode())
+                try:
+                    process = subprocess.Popen(  # noqa: S603 - validated argv, shell=False
+                        list(argv),
+                        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+                        stdout=sink.stdin,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        cwd=cwd,
+                        env=dict(env) if env is not None else None,
+                    )
+                except OSError as exc:
+                    sink.stdin.close()
+                    threading.Thread(target=sink.wait, daemon=True).start()
+                    return self._spawn_error_result(
+                        exc,
+                        masked_argv=masked_argv,
+                        secrets=secrets,
+                        check=check,
+                    )
+                timed_out = False
+                sink_failed = False
+                try:
+                    if process.stdin is not None:
+                        try:
+                            process.stdin.write(input_text or "")
+                        except BrokenPipeError:
+                            pass
+                        finally:
+                            with suppress(BrokenPipeError):
+                                process.stdin.close()
+                    try:
+                        process.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        timed_out = True
+                        process.terminate()
+                        try:
+                            process.wait(timeout=graceful_timeout)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                finally:
+                    sink.stdin.close()
+                    try:
+                        control.sendall(b"B")
+                        # F = drained through EOF; B = drained the measured
+                        # boundary while descendants still hold the pipe open.
+                        if control.recv(1) not in (b"F", b"B"):
+                            raise OSError(errno.EIO, "command log sink failed to flush output")
+                    except OSError:
+                        sink_failed = True
+                    finally:
+                        threading.Thread(target=sink.wait, daemon=True).start()
+                if timed_out:
+                    log.write(
+                        mask_text(f"command timed out after {timeout} seconds\n", secrets).encode()
+                    )
         output = self._read_since(output_file, start_offset)
         result = CommandResult(
             argv=masked_argv,
-            returncode=process.returncode,
-            stdout=mask_text(output, secrets),
-            stderr="",
+            returncode=124 if timed_out else (process.returncode or (125 if sink_failed else 0)),
+            stdout="" if timed_out else mask_text(output, secrets),
+            stderr=mask_text(output, secrets) if timed_out else "",
         )
+        if sink_failed:
+            result = CommandResult(
+                result.argv,
+                result.returncode,
+                result.stdout,
+                result.stderr + mask_text("\ncommand log sink failed to flush output", secrets),
+            )
         if check and not result.ok:
             raise CommandError(result)
         return result
@@ -327,6 +398,209 @@ class CommandRunner:
         if check and not result.ok:
             raise CommandError(result)
         return result
+
+
+class _PrivateKeyFilter:
+    """Suppress raw PEM blocks before anything can rewrite their delimiters.
+
+    Retained state is at most 256 characters, independent of key/body length.
+    An oversized or unterminated BEGIN header fails closed rather than risking
+    disclosure of a body whose boundary we could not fully classify.
+    """
+
+    _BEGIN = "-----BEGIN "
+    _MAX_HEADER = 256
+
+    def __init__(self) -> None:
+        self._pending = ""
+        self._header = False
+        self._end: str | None = None
+        self._discarding = False
+
+    @staticmethod
+    def _suffix_length(text: str, marker: str) -> int:
+        for size in range(min(len(text), len(marker) - 1), 0, -1):
+            if text.endswith(marker[:size]):
+                return size
+        return 0
+
+    def feed(self, text: str, *, final: bool = False) -> str:
+        self._pending += text
+        safe: list[str] = []
+        while self._pending:
+            if self._discarding:
+                self._pending = ""
+                break
+            if self._end is not None:
+                position = self._pending.find(self._end)
+                if position >= 0:
+                    self._pending = self._pending[position + len(self._end) :]
+                    self._end = None
+                    continue
+                keep = self._suffix_length(self._pending, self._end) if not final else 0
+                self._pending = self._pending[-keep:] if keep else ""
+                break
+            if self._header:
+                end = self._pending.find("-----", len(self._BEGIN))
+                newline = self._pending.find("\n", len(self._BEGIN))
+                if 0 <= end <= self._MAX_HEADER - 5 and (newline < 0 or end < newline):
+                    header = self._pending[: end + 5]
+                    self._pending = self._pending[end + 5 :]
+                    self._header = False
+                    label = header[len(self._BEGIN) : -5]
+                    if label.endswith("PRIVATE KEY"):
+                        self._end = f"-----END {label}-----"
+                        safe.append("[private key omitted]\n")
+                    else:
+                        safe.append(header)
+                    continue
+                if 0 <= newline < self._MAX_HEADER:
+                    safe.append(self._pending[: newline + 1])
+                    self._pending = self._pending[newline + 1 :]
+                    self._header = False
+                    continue
+                if len(self._pending) > self._MAX_HEADER or final:
+                    self._discarding = True
+                    self._pending = ""
+                    safe.append("[incomplete PEM header omitted]\n")
+                break
+            position = self._pending.find(self._BEGIN)
+            if position >= 0:
+                safe.append(self._pending[:position])
+                self._pending = self._pending[position:]
+                self._header = True
+                continue
+            keep = self._suffix_length(self._pending, self._BEGIN) if not final else 0
+            safe.append(self._pending[:-keep] if keep else self._pending)
+            self._pending = self._pending[-keep:] if keep else ""
+            break
+        return "".join(safe)
+
+
+def _log_sink_main() -> None:
+    """Detached, bounded-memory reader. Only sanitized text reaches stdout (the log).
+
+    First suppress PEM keys on the original stream, then recognize known
+    secrets split across arbitrary reads and mask assignments on complete
+    lines. Both raw delimiter state and ambiguous secret suffixes survive
+    background barriers. Oversized lines are discarded, never partially flushed.
+    """
+    import array
+    import codecs
+    import fcntl
+    import selectors
+    import termios
+
+    source = cast(io.BufferedReader, sys.stdin.buffer)
+    settings = json.loads(source.readline())
+    secrets = sorted({value for value in settings["secrets"] if value}, key=len, reverse=True)
+    lookahead = max(map(len, secrets), default=1)
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    pem_filter = _PrivateKeyFilter()
+    pending = ""
+    line = ""
+    dropping = False
+
+    def persist(text: str) -> None:
+        nonlocal line, dropping
+        for part in text.splitlines(keepends=True):
+            # Only LF delimits persisted records; known multiline secrets have
+            # already been removed by the streaming matcher below.
+            line += part
+            if len(line) > 65536:
+                dropping = True
+                line = ""
+            if part.endswith("\n"):
+                if dropping:
+                    sys.stdout.write("[oversized output omitted]\n")
+                else:
+                    sys.stdout.write(mask_text(line))
+                line = ""
+                dropping = False
+        sys.stdout.flush()
+
+    def consume(chunk: bytes, *, final: bool = False) -> None:
+        nonlocal pending
+        # Delimiters must be recognized on the original stream: a registered
+        # secret may itself be PRIVATE, BEGIN, a newline, or the whole marker.
+        pending += pem_filter.feed(decoder.decode(chunk, final=final), final=final)
+        pos = 0
+        sanitized: list[str] = []
+        while pos < len(pending):
+            # Retain only an ambiguous suffix, not a fixed lookahead window.
+            # In particular a safe newline must flush before a background
+            # barrier, without exposing a secret that straddles the barrier.
+            if not final and len(pending) - pos < lookahead:
+                suffix = pending[pos:]
+                if any(value.startswith(suffix) and value != suffix for value in secrets):
+                    break
+            match = next((value for value in secrets if pending.startswith(value, pos)), None)
+            if match is not None:
+                sanitized.append("***")
+                pos += len(match)
+            else:
+                sanitized.append(pending[pos])
+                pos += 1
+        pending = pending[pos:]
+        persist("".join(sanitized))
+        if final and (line or dropping):
+            persist("\n")
+
+    # Configuration is consumed before READY, so the buffered config reader
+    # cannot prefetch any child output. All subsequent reads are unbuffered.
+    data_fd = source.fileno()
+    os.set_blocking(data_fd, False)
+    with (
+        socket.socket(fileno=settings["control_fd"]) as control,
+        selectors.DefaultSelector() as events,
+    ):
+        events.register(data_fd, selectors.EVENT_READ, "data")
+        events.register(control, selectors.EVENT_READ, "control")
+        eof = False
+        control_open = True
+
+        def read_data(size: int) -> int:
+            nonlocal eof
+            chunk = os.read(data_fd, size)
+            consume(chunk, final=not chunk)
+            if not chunk:
+                eof = True
+                events.unregister(data_fd)
+            return len(chunk)
+
+        control.sendall(b"R")
+        while True:
+            for key, _ in events.select():
+                if key.data == "data":
+                    if not eof:
+                        read_data(8192)
+                    continue
+                request = control.recv(1)
+                if not request:
+                    events.unregister(control)
+                    control_open = False
+                    continue
+                if request != b"B":
+                    raise ValueError("invalid log sink control message")
+                if not eof:
+                    # A snapshot bounds the drain even if descendants write
+                    # continuously. Everything the exited parent wrote is
+                    # already in this pipe or has been consumed above.
+                    queued = array.array("i", [0])
+                    fcntl.ioctl(data_fd, termios.FIONREAD, queued, True)
+                    remaining = queued[0]
+                    while remaining:
+                        remaining -= read_data(min(8192, remaining))
+                    # EOF distinguishes a finished foreground stream from a
+                    # daemon's open stream without waiting for descendants.
+                    with suppress(BlockingIOError):
+                        read_data(1)
+                sys.stdout.flush()
+                control.sendall(b"F" if eof else b"B")
+                if eof:
+                    return
+            if eof and not control_open:
+                return
 
 
 def _decode_timeout_output(value: bytes | str | None) -> str:

@@ -30,7 +30,7 @@ def test_client_to_corp_matches_the_spec_example() -> None:
         "to": {"set": "corp"},
         "via": "upstream:office",
     }
-    assert decision["mark"] == "0x0c000200"
+    assert decision["mark"] == "0x0cc63d00"
     assert decision["table"] == 12002
     assert decision["route"] == "default dev oc-office0"
     assert decision["nat"] == "masquerade to oc-office0"
@@ -123,8 +123,8 @@ def test_kernel_check_agreement_and_drift() -> None:
         return "oc-office0"
 
     ok = explain(compiled, policy, facts, "10.100.1.15", "10.60.1.5", route_get=agree)
-    assert calls == [("10.60.1.5", 0x0C000200, None)]
-    assert ok.kernel_check == "ip route get 10.60.1.5 mark 0x0c000200 -> dev oc-office0"
+    assert calls == [("10.60.1.5", 0x0CC63D00, None)]
+    assert ok.kernel_check == "ip route get 10.60.1.5 mark 0x0cc63d00 -> dev oc-office0"
     assert ok.warnings == []
 
     leak = explain(compiled, policy, facts, "10.100.1.15", "10.60.1.5", route_get=lambda *_: "eth0")

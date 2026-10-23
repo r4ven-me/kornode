@@ -50,12 +50,19 @@ table inet kornode {
     flags interval;
     auto-merge;
   }
-  chain prerouting {
-    type filter hook prerouting priority mangle; policy accept;
-    iifname @transit_ifaces ct state established,related return
+  chain validate_connection {
+    ct mark & 0xffffff00 == 0x0cc21400 ct label == (0 | 2 | 4 | 6 | 8 | 10 | 14 | 16 | 17 | 24 | 25 | 27 | 29 | 30 | 33 | 34 | 35 | 37 | 38 | 40 | 45 | 50 | 51 | 52 | 54 | 57 | 58 | 61 | 71 | 72 | 73 | 74 | 76 | 77 | 80 | 81 | 84 | 85 | 86 | 87 | 89 | 90 | 94 | 97 | 98 | 101 | 102 | 103 | 104 | 105 | 107 | 108 | 109 | 110 | 111 | 115 | 119 | 120 | 124 | 127) return
+    drop
+  }
+  chain session_rpf {
+    iifname @transit_ifaces ct direction reply ct state established,related return
     # strict reverse path for ocserv sessions: a session may only use a source address routed back through its own device (D-47)
     iifname "vpns*" meta nfproto ipv4 fib saddr . iif oif missing drop
-    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark return
+  }
+  chain prerouting {
+    type filter hook prerouting priority mangle; policy accept;
+    jump session_rpf
+    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark goto validate_connection
     jump egress_classify
   }
   chain egress_classify {
@@ -66,14 +73,14 @@ table inet kornode {
     ip6 daddr @carrier_v6 return
     iifname @fabric_ifaces ip daddr @fabric_v4 return comment "agents: fabric destinations are routed"
     iifname @fabric_ifaces ip6 daddr @fabric_v6 return comment "agents: fabric destinations are routed"
-    iifname @fabric_ifaces ip saddr @transit3_v4 ip daddr @transit3_0_d4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
-    iifname @fabric_ifaces ip saddr @transit3_1_v4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
+    iifname @fabric_ifaces ip saddr @transit3_v4 ip daddr @transit3_0_d4 meta mark set 0x0cc21400 ct mark set meta mark ct label set (0 | 2 | 4 | 6 | 8 | 10 | 14 | 16 | 17 | 24 | 25 | 27 | 29 | 30 | 33 | 34 | 35 | 37 | 38 | 40 | 45 | 50 | 51 | 52 | 54 | 57 | 58 | 61 | 71 | 72 | 73 | 74 | 76 | 77 | 80 | 81 | 84 | 85 | 86 | 87 | 89 | 90 | 94 | 97 | 98 | 101 | 102 | 103 | 104 | 105 | 107 | 108 | 109 | 110 | 111 | 115 | 119 | 120 | 124 | 127) goto validate_connection comment "transit node:3"
+    iifname @fabric_ifaces ip saddr @transit3_1_v4 meta mark set 0x0cc21400 ct mark set meta mark ct label set (0 | 2 | 4 | 6 | 8 | 10 | 14 | 16 | 17 | 24 | 25 | 27 | 29 | 30 | 33 | 34 | 35 | 37 | 38 | 40 | 45 | 50 | 51 | 52 | 54 | 57 | 58 | 61 | 71 | 72 | 73 | 74 | 76 | 77 | 80 | 81 | 84 | 85 | 86 | 87 | 89 | 90 | 94 | 97 | 98 | 101 | 102 | 103 | 104 | 105 | 107 | 108 | 109 | 110 | 111 | 115 | 119 | 120 | 124 | 127) goto validate_connection comment "transit node:3"
     ip saddr 10.100.1.0/24 reject with icmpx admin-prohibited comment "egress rule 0"
     iifname @fabric_ifaces reject with icmpx admin-prohibited comment "agents: no exit declared"
   }
   chain output {
     type route hook output priority mangle; policy accept;
-    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark return
+    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark goto validate_connection
     jump egress_classify_host
   }
   chain egress_classify_host {
@@ -94,15 +101,15 @@ table inet kornode {
     ip saddr 10.99.255.240/28 drop
     ip daddr 10.99.255.240/28 drop
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-    meta mark & 0xffffff00 { 0x0c000100 } oifname "eth0" reject with icmpx admin-prohibited
-    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c000100 } oifname "eth0" reject with icmpx admin-prohibited
+    meta mark & 0xffffff00 { 0x0cc21400 } oifname "eth0" reject with icmpx admin-prohibited
+    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0cc21400 } reject with icmpx admin-prohibited
   }
   chain postrouting {
     type filter hook postrouting priority filter; policy accept;
     oifname "lo" accept
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-    meta mark & 0xffffff00 { 0x0c000100 } oifname "eth0" drop
-    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c000100 } oifname "eth0" drop
+    meta mark & 0xffffff00 { 0x0cc21400 } oifname "eth0" drop
+    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0cc21400 } drop
   }
 }
 table ip kornode_nat {

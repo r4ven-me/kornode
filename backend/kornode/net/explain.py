@@ -155,7 +155,13 @@ def explain(
         if via.kind == "drop":
             decision.route = "reject (admin-prohibited)"
             return decision
-        exit_ = next(item for item in compiled.exits if item.name == via.name)
+        # Classification already resolved upstream:active to its concrete
+        # identity; explain must report the same dataplane, not look up the alias.
+        entries = compiled.classify_host if from_class == "host" else compiled.classify
+        exit_ = next(
+            item.exit for item in entries if item.index == index and item.from_ == from_class
+        )
+        assert exit_ is not None
         decision.mark = f"0x{exit_.mark:08x}"
         decision.table = exit_.table if exit_.has_table else None
         decision.route = _route_for(exit_, compiled, destination)

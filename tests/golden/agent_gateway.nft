@@ -32,9 +32,14 @@ table inet kornode {
     flags interval;
     auto-merge;
   }
+  chain validate_connection {
+    ct mark & 0xffffff00 == 0x0c800100 ct label == (0 | 1 | 2 | 5 | 6 | 8 | 10 | 11 | 13 | 16 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27 | 29 | 30 | 32 | 33 | 34 | 35 | 37 | 40 | 43 | 46 | 47 | 49 | 50 | 51 | 53 | 56 | 57 | 58 | 59 | 60 | 64 | 65 | 66 | 67 | 73 | 74 | 80 | 81 | 82 | 86 | 87 | 90 | 95 | 98 | 99 | 101 | 106 | 108 | 110 | 113 | 115 | 117 | 120 | 122 | 123 | 125 | 127) return
+    ct mark & 0xffffff00 == 0x0cc21400 ct label == (0 | 2 | 4 | 6 | 8 | 10 | 14 | 16 | 17 | 24 | 25 | 27 | 29 | 30 | 33 | 34 | 35 | 37 | 38 | 40 | 45 | 50 | 51 | 52 | 54 | 57 | 58 | 61 | 71 | 72 | 73 | 74 | 76 | 77 | 80 | 81 | 84 | 85 | 86 | 87 | 89 | 90 | 94 | 97 | 98 | 101 | 102 | 103 | 104 | 105 | 107 | 108 | 109 | 110 | 111 | 115 | 119 | 120 | 124 | 127) return
+    drop
+  }
   chain prerouting {
     type filter hook prerouting priority mangle; policy accept;
-    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark return
+    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark goto validate_connection
     jump egress_classify
   }
   chain egress_classify {
@@ -43,13 +48,13 @@ table inet kornode {
     ip6 daddr @local_v6 return
     ip daddr @carrier_v4 return
     ip6 daddr @carrier_v6 return
-    ip saddr 10.100.2.0/24 ip daddr @fabric_v4 meta mark set 0x0c000100 ct mark set meta mark accept comment "egress rule 0"
-    ip saddr 10.100.2.0/24 meta mark set 0x0c000200 ct mark set meta mark accept comment "egress rule 1"
+    ip saddr 10.100.2.0/24 ip daddr @fabric_v4 meta mark set 0x0c800100 ct mark set meta mark ct label set (0 | 1 | 2 | 5 | 6 | 8 | 10 | 11 | 13 | 16 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27 | 29 | 30 | 32 | 33 | 34 | 35 | 37 | 40 | 43 | 46 | 47 | 49 | 50 | 51 | 53 | 56 | 57 | 58 | 59 | 60 | 64 | 65 | 66 | 67 | 73 | 74 | 80 | 81 | 82 | 86 | 87 | 90 | 95 | 98 | 99 | 101 | 106 | 108 | 110 | 113 | 115 | 117 | 120 | 122 | 123 | 125 | 127) goto validate_connection comment "egress rule 0"
+    ip saddr 10.100.2.0/24 meta mark set 0x0cc21400 ct mark set meta mark ct label set (0 | 2 | 4 | 6 | 8 | 10 | 14 | 16 | 17 | 24 | 25 | 27 | 29 | 30 | 33 | 34 | 35 | 37 | 38 | 40 | 45 | 50 | 51 | 52 | 54 | 57 | 58 | 61 | 71 | 72 | 73 | 74 | 76 | 77 | 80 | 81 | 84 | 85 | 86 | 87 | 89 | 90 | 94 | 97 | 98 | 101 | 102 | 103 | 104 | 105 | 107 | 108 | 109 | 110 | 111 | 115 | 119 | 120 | 124 | 127) goto validate_connection comment "egress rule 1"
     ip saddr 10.100.2.0/24 reject with icmpx admin-prohibited comment "egress rule 2"
   }
   chain output {
     type route hook output priority mangle; policy accept;
-    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark return
+    ct mark & 0xff000000 == 0x0c000000 meta mark set ct mark goto validate_connection
     jump egress_classify_host
   }
   chain egress_classify_host {
@@ -59,25 +64,25 @@ table inet kornode {
     ip6 daddr @local_v6 return
     ip daddr @carrier_v4 return
     ip6 daddr @carrier_v6 return
-    ip daddr @fabric_v4 meta mark set 0x0c000100 ct mark set meta mark accept comment "egress rule 0"
-    ip6 daddr @fabric_v6 meta mark set 0x0c000100 ct mark set meta mark accept comment "egress rule 0"
+    ip daddr @fabric_v4 meta mark set 0x0c800100 ct mark set meta mark ct label set (0 | 1 | 2 | 5 | 6 | 8 | 10 | 11 | 13 | 16 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27 | 29 | 30 | 32 | 33 | 34 | 35 | 37 | 40 | 43 | 46 | 47 | 49 | 50 | 51 | 53 | 56 | 57 | 58 | 59 | 60 | 64 | 65 | 66 | 67 | 73 | 74 | 80 | 81 | 82 | 86 | 87 | 90 | 95 | 98 | 99 | 101 | 106 | 108 | 110 | 113 | 115 | 117 | 120 | 122 | 123 | 125 | 127) goto validate_connection comment "egress rule 0"
+    ip6 daddr @fabric_v6 meta mark set 0x0c800100 ct mark set meta mark ct label set (0 | 1 | 2 | 5 | 6 | 8 | 10 | 11 | 13 | 16 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27 | 29 | 30 | 32 | 33 | 34 | 35 | 37 | 40 | 43 | 46 | 47 | 49 | 50 | 51 | 53 | 56 | 57 | 58 | 59 | 60 | 64 | 65 | 66 | 67 | 73 | 74 | 80 | 81 | 82 | 86 | 87 | 90 | 95 | 98 | 99 | 101 | 106 | 108 | 110 | 113 | 115 | 117 | 120 | 122 | 123 | 125 | 127) goto validate_connection comment "egress rule 0"
   }
   chain input {
     type filter hook input priority mangle; policy accept;
-    ct state new iifname "oc-hub0" ct mark set 0x0c000100
+    ct state new iifname "oc-hub0" ct mark set 0x0c800100 ct label set (0 | 1 | 2 | 5 | 6 | 8 | 10 | 11 | 13 | 16 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27 | 29 | 30 | 32 | 33 | 34 | 35 | 37 | 40 | 43 | 46 | 47 | 49 | 50 | 51 | 53 | 56 | 57 | 58 | 59 | 60 | 64 | 65 | 66 | 67 | 73 | 74 | 80 | 81 | 82 | 86 | 87 | 90 | 95 | 98 | 99 | 101 | 106 | 108 | 110 | 113 | 115 | 117 | 120 | 122 | 123 | 125 | 127)
   }
   chain forward {
     type filter hook forward priority filter; policy accept;
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-    meta mark & 0xffffff00 { 0x0c000100, 0x0c000200 } oifname "eth0" reject with icmpx admin-prohibited
-    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c000100, 0x0c000200 } oifname "eth0" reject with icmpx admin-prohibited
+    meta mark & 0xffffff00 { 0x0c800100, 0x0cc21400 } oifname "eth0" reject with icmpx admin-prohibited
+    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c800100, 0x0cc21400 } reject with icmpx admin-prohibited
   }
   chain postrouting {
     type filter hook postrouting priority filter; policy accept;
     oifname "lo" accept
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-    meta mark & 0xffffff00 { 0x0c000100, 0x0c000200 } oifname "eth0" drop
-    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c000100, 0x0c000200 } oifname "eth0" drop
+    meta mark & 0xffffff00 { 0x0c800100, 0x0cc21400 } oifname "eth0" drop
+    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c800100, 0x0cc21400 } drop
   }
 }
 table ip kornode_nat {

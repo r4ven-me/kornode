@@ -13,8 +13,8 @@ a bind mount:
 
 - resolv_conf: /etc/resolv.conf -> /host/etc/resolv.conf. Rewritten in
   place (a bind-mounted file can't be replaced by rename), the original is
-  kept in data_dir and restored when routing.host_dns is turned off, dnsmasq
-  stops being needed, or the `host-dns-guard` supervisor program stops
+  kept in data_dir and restored when routing.host_dns is turned off, an
+  explicit restore is requested, or the `host-dns-guard` supervisor program stops
   (container shutdown) -- the host must never be left pointing at a
   resolver that no longer runs. The guard also re-asserts the file when
   NetworkManager/DHCP rewrites it.
@@ -30,11 +30,18 @@ a bind mount:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import dns.exception
+import dns.message
+import dns.query
+import dns.rcode
+
 from kornode.config.models import AppConfig
 from kornode.services.files import FileManager
+from kornode.services.supervisor_rpc import SupervisorRpcClient, SupervisorRpcError
 
 HOST_RESOLV_CONF = Path("/host/etc/resolv.conf")
 HOST_RESOLVED_DIR = Path("/host/resolved.conf.d")
@@ -61,11 +68,13 @@ class HostDnsService:
         *,
         resolv_conf: Path = HOST_RESOLV_CONF,
         resolved_dir: Path = HOST_RESOLVED_DIR,
+        readiness_probe: Callable[[], bool] | None = None,
     ) -> None:
         self.config = config
         self.files = files or FileManager()
         self.resolv_conf = resolv_conf
         self.resolved_dir = resolved_dir
+        self._readiness_probe = readiness_probe or self._probe_resolver
 
     @property
     def mode(self) -> str:
@@ -88,16 +97,36 @@ class HostDnsService:
         Also undoes the other mode's leftovers, so switching modes or
         turning the feature off never leaves a stale redirect behind.
         """
-        if not self.wanted():
+        if self.mode == "off":
             changed = self._restore_resolv_conf() | self._remove_dropin()
-            reason = "off" if self.mode == "off" else "dnsmasq is not running"
-            return HostDnsResult(self.mode, changed, f"host resolver untouched ({reason})")
+            return HostDnsResult(self.mode, changed, "host DNS off; managed redirects restored")
+        if not self.config.dns_tunnel_active():
+            return HostDnsResult(
+                self.mode,
+                False,
+                "host DNS deferred: dnsmasq is not configured to run; "
+                "existing host DNS retained (no fallback); "
+                "disable host DNS or explicitly restore to opt out",
+            )
+        ready, detail = self.readiness()
+        if not ready:
+            # A transient resolver failure is NOT permission to bypass its DNS
+            # policy. Keep existing redirects/backups intact and retry later.
+            return HostDnsResult(
+                self.mode,
+                False,
+                f"host DNS deferred: {detail}; existing host DNS retained (no fallback)",
+            )
         if self.mode == "resolv_conf":
-            changed = self._remove_dropin()
+            if self.config.internal_dns.port != 53 or not self.resolv_conf.exists():
+                return self._point_resolv_conf()
             result = self._point_resolv_conf()
+            changed = self._remove_dropin()
             return HostDnsResult(self.mode, changed or result.changed, result.detail)
-        changed = self._restore_resolv_conf()
+        if not self.resolved_dir.is_dir():
+            return self._write_dropin()
         result = self._write_dropin()
+        changed = self._restore_resolv_conf()
         return HostDnsResult(self.mode, changed or result.changed, result.detail)
 
     def restore(self) -> HostDnsResult:
@@ -129,15 +158,57 @@ class HostDnsService:
     def status(self) -> dict[str, object]:
         resolv_mounted = self.resolv_conf.exists()
         resolved_mounted = self.resolved_dir.is_dir()
+        ready, detail = self.readiness() if self.wanted() else (False, "host DNS not requested")
+        state = "ready" if ready else "waiting"
+        if self.mode == "off":
+            state = "disabled"
+        elif not self.config.dns_tunnel_active():
+            state, detail = (
+                "not_configured",
+                "host DNS requested but dnsmasq is not configured to run",
+            )
         return {
             "mode": self.mode,
             "wanted": self.wanted(),
+            "requested": self.mode != "off",
+            "resolver_ready": ready,
+            "observed_state": state,
+            "readiness_detail": detail,
+            "failure_policy": "retain existing host DNS; no automatic fallback",
             "nameserver": self.config.internal_dns.listen,
             "resolv_conf_mounted": resolv_mounted,
             "resolv_conf_managed": resolv_mounted and self._ours(self._read(self.resolv_conf)),
             "resolved_dir_mounted": resolved_mounted,
             "resolved_dropin_present": self.dropin_path.exists(),
         }
+
+    def readiness(self) -> tuple[bool, str]:
+        """RUNTIME: observe both project-owned dnsmasq and its local DNS listener.
+
+        This is local readiness, not upstream reachability. An outage retains
+        managed DNS even if lookups fail; only explicit off/restore opts out.
+        No public lookup or fallback resolver is used for the readiness check.
+        """
+        try:
+            ready = self._readiness_probe()
+        except (OSError, SupervisorRpcError, dns.exception.DNSException, ValueError):
+            return False, "resolver readiness could not be verified"
+        return ready, "dnsmasq is ready" if ready else "dnsmasq process/listener is not ready"
+
+    def _probe_resolver(self) -> bool:
+        rpc = SupervisorRpcClient(self.config.generated_path("supervisor.sock"))
+        if rpc.get_process_info("dnsmasq").get("statename") != "RUNNING":
+            return False
+        # dnsmasq answers this locally (CHAOS class); unlike a public A query,
+        # the probe neither requires upstream availability nor discloses names.
+        query = dns.message.make_query("version.bind.", "TXT", "CH")
+        response = dns.query.udp(
+            query,
+            self.config.internal_dns.listen,
+            port=self.config.internal_dns.port,
+            timeout=1,
+        )
+        return query.is_response(response) and response.rcode() == dns.rcode.NOERROR
 
     # --- resolv.conf ------------------------------------------------------
 

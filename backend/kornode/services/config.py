@@ -19,7 +19,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ConfigService:
-    def __init__(self, file_manager: FileManager | None = None) -> None:
+    def __init__(
+        self, file_manager: FileManager | None = None, *, strict_apply: bool = False
+    ) -> None:
+        self.strict_apply = strict_apply
         self.file_manager = file_manager or FileManager()
         self.ocserv_renderer = OcservConfigRenderer()
         self.dnsmasq_renderer = DnsmasqConfigRenderer()
@@ -68,7 +71,31 @@ class ConfigService:
         from kornode.services.fabric_groups import FabricGroupsService
 
         fabric_groups = FabricGroupsService(config, self.file_manager)
-        files.extend(fabric_groups.render_files(fabric_groups.nodes(), fabric_groups.prefixes()))
+        registry_path = config.system.data_dir / "registry.db"
+        if not registry_path.exists():
+            files.extend(fabric_groups.render_files([], []))
+        else:
+            # Rendering must not initialize/migrate the live registry. Validate
+            # older schemas on a private snapshot, including uncheckpointed WAL.
+            from kornode.registry.db import migrate
+            from kornode.registry.repository import Registry
+
+            source = sqlite3.connect(registry_path.resolve().as_uri() + "?mode=ro", uri=True)
+            snapshot = sqlite3.connect(":memory:", isolation_level=None)
+            try:
+                source.backup(snapshot)
+                snapshot.row_factory = sqlite3.Row
+                migrate(snapshot)
+                registry = Registry(snapshot)
+                files.extend(
+                    fabric_groups.render_files(
+                        registry.list_nodes(),
+                        registry.list_prefixes(),
+                    )
+                )
+            finally:
+                snapshot.close()
+                source.close()
         return files
 
     def write_rendered_files(self, config: AppConfig) -> list[Path]:
@@ -104,7 +131,8 @@ class ConfigService:
     def _recompile_bundles(self, config: AppConfig) -> None:
         """Hub host/port/pin and fabric settings live in the bundles: every
         saved configuration recompiles them. The control API repeats this at
-        start, so a failure here is logged, not fatal to the save."""
+        start. Standalone renders retain best-effort behavior; config transactions
+        use strict_apply so a bundle failure is reported as saved_but_not_applied."""
         if not config.control.enabled:
             return
         from kornode.bundle.errors import BundleError
@@ -121,6 +149,8 @@ class ConfigService:
             finally:
                 conn.close()
         except (BundleError, RegistryError, OSError, sqlite3.Error) as exc:
+            if self.strict_apply:
+                raise
             LOGGER.warning("bundle recompilation after config save failed: %s", exc)
 
     def _ensure_fabric_crl(self, config: AppConfig) -> None:

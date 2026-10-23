@@ -411,25 +411,39 @@ class UpstreamService:
         return cert_path, key_path
 
     def openconnect_argv(
-        self, profile: UpstreamProfileConfig, *, accepted_pin: str | None = None
+        self,
+        profile: UpstreamProfileConfig,
+        *,
+        accepted_pin: str | None = None,
+        dry_run: bool = False,
     ) -> list[str]:
         """argv for dialing `profile`.
 
         `accepted_pin` is the pin of whatever certificate the server just
         presented, used for trusted_cert profiles without an explicit
-        server_cert_pin (see _accepted_server_pin()).
+        server_cert_pin (see _accepted_server_pin()). With `dry_run`, paths
+        are planned only: no certificate, config or script is materialized.
         """
         cert_path: Path | None = None
         key_path: Path | None = None
         if profile.auth_type in {"cert", "p12"}:
-            cert_path, key_path = self._materialize_cert(profile)
+            if dry_run:
+                directory = self._profile_secrets_dir(profile)
+                cert_path = directory / "cert" if profile.cert_file_base64 else profile.cert_file
+                key_path = directory / "key" if profile.key_file_base64 else profile.key_file
+            else:
+                cert_path, key_path = self._materialize_cert(profile)
         assert profile.server is not None  # validator-required for kind="openconnect"
         spec = DialSpec(
             server=profile.server,
             port=profile.port,
             interface=self.profile_interface(profile),
             pid_file=self._pid_file(profile),
-            script=self._ensure_vpnc_script(),
+            script=(
+                self.config.system.generated_dir / "vpnc-script-kornode"
+                if dry_run
+                else self._ensure_vpnc_script()
+            ),
             auth_type=profile.auth_type,
             username=profile.username,
             password=profile.password,
@@ -440,7 +454,13 @@ class UpstreamService:
             camouflage_secret=profile.camouflage_secret,
         )
         lines = tunnel_config_lines(spec)
-        config_path = self._materialize_openconnect_conf(profile, lines) if lines else None
+        config_path = None
+        if lines:
+            config_path = (
+                self._profile_secrets_dir(profile) / "openconnect.conf"
+                if dry_run
+                else self._materialize_openconnect_conf(profile, lines)
+            )
         return build_openconnect_argv(spec, accepted_pin=accepted_pin, config_path=config_path)
 
     def _materialize_openconnect_conf(
@@ -575,7 +595,7 @@ class UpstreamService:
             raise ValueError("no upstream profile configured")
         if profile.kind == "external_interface":
             return self._activate_external_interface(profile, dry_run=dry_run)
-        with self._locked():
+        with contextlib.nullcontext() if dry_run else self._locked():
             if not dry_run and self._profile_connected(profile):
                 # Idempotent, mirroring disconnect's "not connected" no-op:
                 # the watchdog auto-connects in the background, so a manual
@@ -592,8 +612,8 @@ class UpstreamService:
             # cert-pin probe below -- and before the reconciler pass right
             # after, which reads the recorded carrier addresses to exempt
             # them from marking (D-20: the carrier is never marked).
-            self.install_carrier_exclusion(profile, dry_run=dry_run)
             if not dry_run:
+                self.install_carrier_exclusion(profile)
                 self._repair_stale_resolv_conf()
                 # Converge before dialing, so the kill-switch is in place and
                 # marked traffic is blocked from the very first moment rather
@@ -602,7 +622,7 @@ class UpstreamService:
                 self.net.converge()
             accepted_pin = self._accepted_server_pin(profile, dry_run=dry_run)
             result = self.runner.run(
-                self.openconnect_argv(profile, accepted_pin=accepted_pin),
+                self.openconnect_argv(profile, accepted_pin=accepted_pin, dry_run=dry_run),
                 input_text=f"{profile.password}\n" if profile.password else None,
                 timeout=60,
                 graceful_timeout=5,
@@ -695,9 +715,10 @@ class UpstreamService:
     def _deactivate_external_interface(
         self, profile: UpstreamProfileConfig, *, dry_run: bool
     ) -> CommandResult:
-        """'Disconnect' for an externally-managed interface: converge the
-        routing (the profile is disabled or being dropped), without any
-        process signaling -- kornode never owns this interface's lifecycle.
+        """Reconcile policy without changing an externally-owned link.
+
+        Disconnect is not a policy mutation: an enabled external profile
+        remains usable. Disabling it explicitly blocks its egress.
         """
         interface = self.profile_interface(profile)
         argv = ("ip", "link", "show", "dev", interface)
@@ -708,7 +729,10 @@ class UpstreamService:
             return CommandResult(
                 argv=argv,
                 returncode=0,
-                stdout="routing deactivated (interface untouched)",
+                stdout=(
+                    "routing reconciled (interface and egress policy untouched); "
+                    "disable the profile to block its egress"
+                ),
                 stderr="",
             )
 

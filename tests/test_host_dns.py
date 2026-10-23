@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from kornode.config.models import AppConfig
 from kornode.services.host_dns import MARK, HostDnsService
 
@@ -30,6 +32,7 @@ def _service(tmp_path: Path, config: AppConfig) -> HostDnsService:
         config,
         resolv_conf=tmp_path / "host" / "resolv.conf",
         resolved_dir=tmp_path / "host" / "resolved.conf.d",
+        readiness_probe=lambda: True,
     )
 
 
@@ -83,13 +86,19 @@ def test_turning_host_dns_off_restores_resolv_conf(tmp_path: Path) -> None:
     assert resolv.read_text() == ORIGINAL
 
 
-def test_host_is_never_pointed_at_a_dnsmasq_that_does_not_run(tmp_path: Path) -> None:
+def test_missing_dnsmasq_configuration_does_not_enable_fallback_dns(tmp_path: Path) -> None:
     resolv = _mount_resolv(tmp_path)
     _service(tmp_path, _config(tmp_path, "resolv_conf")).apply()
+    managed = resolv.read_bytes()
+    service = _service(tmp_path, _config(tmp_path, "resolv_conf", dnsmasq=False))
 
-    result = _service(tmp_path, _config(tmp_path, "resolv_conf", dnsmasq=False)).apply()
+    result = service.apply()
 
-    assert "not running" in result.detail
+    assert not result.changed
+    assert "not configured to run" in result.detail
+    assert resolv.read_bytes() == managed
+    assert service.status()["observed_state"] == "not_configured"
+    service.restore()
     assert resolv.read_text() == ORIGINAL
 
 
@@ -190,3 +199,135 @@ def test_status_reports_mounts(tmp_path: Path) -> None:
     assert status["resolv_conf_mounted"] is True
     assert status["resolv_conf_managed"] is True
     assert status["resolved_dir_mounted"] is False
+
+
+@pytest.mark.parametrize("mode", ["resolv_conf", "resolved"])
+def test_readiness_guard_defers_new_redirect_and_preserves_managed_state(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    resolv = _mount_resolv(tmp_path)
+    resolved = tmp_path / "host" / "resolved.conf.d"
+    resolved.mkdir()
+    ready = False
+    service = HostDnsService(
+        _config(tmp_path, mode),
+        resolv_conf=resolv,
+        resolved_dir=resolved,
+        readiness_probe=lambda: ready,
+    )
+    result = service.apply()
+    assert not result.changed
+    assert "deferred" in result.detail
+    assert resolv.read_text() == ORIGINAL
+    assert not service.dropin_path.exists()
+    assert not service.backup_path.exists()
+    assert service.status()["observed_state"] == "waiting"
+    ready = True
+    assert service.apply().changed
+    saved_resolv = resolv.read_bytes()
+    saved_dropin = service.dropin_path.read_bytes() if service.dropin_path.exists() else None
+    ready = False
+    result = service.apply()
+    assert not result.changed
+    assert "no fallback" in result.detail
+    assert resolv.read_bytes() == saved_resolv
+    assert (
+        service.dropin_path.read_bytes() if service.dropin_path.exists() else None
+    ) == saved_dropin
+    assert service.status()["resolver_ready"] is False
+    # Explicit off remains the administrator's opt-out, even during an outage.
+    service.config = _config(tmp_path, "off")
+    service.apply()
+    assert resolv.read_text() == ORIGINAL
+    assert not service.dropin_path.exists()
+
+
+def test_probe_failure_does_not_restore_fallback_dns(tmp_path: Path) -> None:
+    resolv = _mount_resolv(tmp_path)
+    service = _service(tmp_path, _config(tmp_path, "resolv_conf"))
+    service.apply()
+    before = resolv.read_bytes()
+
+    def unavailable() -> bool:
+        raise OSError("resolver unavailable")
+
+    service._readiness_probe = unavailable
+    assert not service.apply().changed
+    assert resolv.read_bytes() == before
+    assert "could not be verified" in str(service.status()["readiness_detail"])
+
+
+def test_default_probe_requires_running_process_and_a_valid_local_dns_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dns.message
+
+    from kornode.services import host_dns
+
+    state = "STOPPED"
+    calls = []
+
+    class Rpc:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def get_process_info(self, name: str) -> dict[str, str]:
+            assert name == "dnsmasq"
+            return {"statename": state}
+
+    def query(request: dns.message.Message, address: str, **kwargs: object) -> dns.message.Message:
+        calls.append((address, kwargs))
+        assert request.question[0].name.to_text() == "version.bind."
+        assert request.question[0].rdclass == 3  # CHAOS, never forwarded to public DNS
+        return dns.message.make_response(request)
+
+    monkeypatch.setattr(host_dns, "SupervisorRpcClient", Rpc)
+    monkeypatch.setattr(dns.query, "udp", query)
+    service = HostDnsService(_config(tmp_path, "resolv_conf"))
+    assert not service.readiness()[0]
+    assert not calls
+    state = "RUNNING"
+    assert service.readiness()[0]
+    assert calls == [("10.100.1.1", {"port": 53, "timeout": 1})]
+
+    def timeout(*_args: object, **_kwargs: object) -> dns.message.Message:
+        raise OSError("timeout")
+
+    monkeypatch.setattr(dns.query, "udp", timeout)
+    assert not service.readiness()[0]
+
+
+def test_failed_mode_switch_does_not_restore_fallback_dns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolv = _mount_resolv(tmp_path)
+    service = _service(tmp_path, _config(tmp_path, "resolv_conf"))
+    service.apply()
+    original = resolv.read_bytes()
+    service.resolved_dir.mkdir()
+    service.config = _config(tmp_path, "resolved")
+
+    def failed() -> object:
+        raise OSError("drop-in write failed")
+
+    monkeypatch.setattr(service, "_write_dropin", failed)
+    with pytest.raises(OSError):
+        service.apply()
+    assert resolv.read_bytes() == original
+
+
+@pytest.mark.parametrize("mode", ["resolv_conf", "resolved"])
+def test_unconfigured_resolver_leaves_unmanaged_host_dns_untouched(
+    tmp_path: Path, mode: str
+) -> None:
+    resolv = _mount_resolv(tmp_path)
+    service = _service(tmp_path, _config(tmp_path, mode, dnsmasq=False))
+    result = service.apply()
+    assert not result.changed
+    assert "no fallback" in result.detail
+    assert resolv.read_text() == ORIGINAL
+    assert not service.backup_path.exists()
+    assert not service.dropin_path.exists()

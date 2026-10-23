@@ -59,20 +59,42 @@ def load_config(
     cli_overrides: Mapping[str, Any] | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> AppConfig:
-    resolved_config_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
-    resolved_env_file = Path(env_file) if env_file is not None else None
+    path = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
+    return validate_config_data(
+        load_yaml_file(path),
+        path,
+        env_file=env_file,
+        cli_overrides=cli_overrides,
+        environ=environ,
+    )
 
-    yaml_config = load_yaml_file(resolved_config_path)
-    environment = combined_environment(resolved_config_path, resolved_env_file, environ)
+
+def validate_config_data(
+    yaml_config: Mapping[str, Any],
+    config_path: Path,
+    *,
+    env_file: Path | str | None = None,
+    cli_overrides: Mapping[str, Any] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> AppConfig:
+    """Validate an unsaved candidate with exactly the loader's precedence/context.
+
+    ``sets`` is a whole collection: an explicit value in a higher-priority
+    layer replaces all lower-priority entries, including fields of named sets.
+    In particular, ``sets: {}`` clears inherited sets. Ordinary config sections
+    still merge recursively, so an empty section retains omitted-field fallback.
+    """
+    resolved_env_file = Path(env_file) if env_file is not None else None
+    environment = combined_environment(config_path, resolved_env_file, environ)
     env_overrides = env_overrides_from_mapping(environment)
     explicit_paths = _leaf_paths(env_overrides) | _leaf_paths(yaml_config)
     if cli_overrides:
         explicit_paths |= _leaf_paths(cli_overrides)
-
-    merged = deep_merge(DEFAULT_CONFIG, env_overrides)
-    merged = deep_merge(merged, yaml_config)
-    if cli_overrides:
-        merged = deep_merge(merged, cli_overrides)
+    merged: dict[str, Any] = {}
+    for layer in (DEFAULT_CONFIG, env_overrides, yaml_config, cli_overrides or {}):
+        merged = deep_merge(merged, layer)
+        if "sets" in layer:
+            merged["sets"] = copy.deepcopy(layer["sets"])
     merged = resolve_secret_refs(merged, environment)
     return AppConfig.model_validate(merged, context={"explicit_paths": explicit_paths})
 
