@@ -64,7 +64,7 @@ egress:
 - `from`: `clients` (this node's ocserv pool), `host` (locally originated traffic), `fabric` (transit from the
   fabric), or a named source.
 - `to`: `any`, `fabric`, `{set: <name>}`, inline `{routes, domains}`, or `{node: <id>}`.
-- `via`: `local` (main table, masquerade to the uplink), `fabric`, `exit:<node>`, `upstream:<profile>`, `drop`.
+- `via`: `local` (main table, masquerade to the uplink), `fabric`, `node:<n>`, `upstream:<profile>`, `drop`.
 - `kill_switch` defaults to `true` for every `via` except `local`: when the exit is down, traffic is rejected
   instead of falling through to the next rule.
 
@@ -76,7 +76,7 @@ Domain sets are filled by `DomainResolverService` into nft sets with element tim
 should use the node's dnsmasq (service address) so they connect to the addresses that were put in the set.
 
 Inspect and edit with `korctl egress` (`show`, `check`, `set`, `edit`), `korctl source`, `/api/egress`, `/api/sources`
-or the panel's Network → Egress and sources. `korctl net explain SRC DST` answers "where does this packet go and why".
+or the panel's Network → Egress rules and Network → Sources. `korctl net explain SRC DST` answers "where does this packet go and why".
 
 ## Kernel layout
 
@@ -104,8 +104,8 @@ runs one reconciler pass.
   into `main` with `proto 77` by the hub reconciler. Agent ↔ agent traffic is forwarded by the hub.
 - **Agent**: openconnect to the hub (the fabric exit) and to external upstreams; the reconciler converges the
   signed bundle. With a cached bundle it keeps forwarding when the hub is down and boots from cache.
-- **Exit nodes**: an agent with role `exit` accepts `from: fabric` traffic and masquerades it; another node
-  sends traffic there with `via: exit:<node>`.
+- **Gateway nodes**: an agent with role `gateway` accepts `from: fabric` traffic and masquerades it; another node
+  sends traffic there with `via: node:<n>`.
 - **Sources** (wg-easy, Amnezia, any access server): run it in `network_mode: host`, disable its own NAT hooks;
   kornode owns routing and NAT for the source subnet. `korctl doctor` reports foreign NAT rules on a source
   subnet as an error. See `docs/sources.md`.

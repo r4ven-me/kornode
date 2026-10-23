@@ -9,10 +9,10 @@ export type DeadRule = { rule: number; shadowed_by: number };
 export type ExplainState = { result: NetExplainResult; src: string; dst: string } | null;
 
 type ToKind = "any" | "fabric" | "set" | "node" | "inline";
-type ViaKind = "local" | "fabric" | "drop" | "exit" | "upstream";
+type ViaKind = "local" | "fabric" | "drop" | "node" | "upstream";
 
 const TO_KINDS: ToKind[] = ["any", "fabric", "set", "node", "inline"];
-const VIA_KINDS: ViaKind[] = ["local", "fabric", "drop", "exit", "upstream"];
+const VIA_KINDS: ViaKind[] = ["local", "fabric", "drop", "node", "upstream"];
 const ROUTE = /^[0-9a-fA-F:.]+(\/\d+)?$/;
 
 export const NEW_RULE: Rule = { from: ["clients"], to: "any", via: "local" };
@@ -36,11 +36,13 @@ function toValue(kind: ToKind, value: string): unknown {
 }
 
 function viaParts(via: string): { kind: ViaKind; target: string } {
-  const [kind, ...rest] = via.split(":");
+  const [raw, ...rest] = via.split(":");
+  // `exit:<n>` is the spelling before D-84.
+  const kind = raw === "exit" ? "node" : raw;
   return { kind: (VIA_KINDS as string[]).includes(kind) ? (kind as ViaKind) : "local", target: rest.join(":") };
 }
 
-const viaValue = (kind: ViaKind, target: string) => (kind === "exit" || kind === "upstream" ? `${kind}:${target}` : kind);
+const viaValue = (kind: ViaKind, target: string) => (kind === "node" || kind === "upstream" ? `${kind}:${target}` : kind);
 
 export function moveRule(rules: Rule[], from: number, to: number): Rule[] {
   if (from === to || from < 0 || to < 0 || from >= rules.length || to >= rules.length) return rules;
@@ -99,8 +101,8 @@ export function EgressRules({ rules, disabled, classes, deadRules, explain, onCh
           <label>Via
             <span className="egress-pair">
               <select aria-label={label("via kind")} value={via.kind} onChange={e => update(index, { via: viaValue(e.target.value as ViaKind, via.target) })}>{VIA_KINDS.map(k => <option key={k}>{k}</option>)}</select>
-              {(via.kind === "exit" || via.kind === "upstream") &&
-                <input aria-label={label("via target")} placeholder={via.kind === "exit" ? "node id" : "profile"} value={via.target} onChange={e => update(index, { via: viaValue(via.kind, e.target.value) })} />}
+              {(via.kind === "node" || via.kind === "upstream") &&
+                <input aria-label={label("via target")} placeholder={via.kind === "node" ? "gateway node id" : "profile"} value={via.target} onChange={e => update(index, { via: viaValue(via.kind, e.target.value) })} />}
             </span>
           </label>
           <label>Kill switch

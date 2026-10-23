@@ -1140,7 +1140,7 @@ class AppConfig(StrictModel):
             seen[f"source {source.name}"] = net
         for index, rule in enumerate(policy.egress):
             via = rule.parsed_via
-            if via.kind != "exit":
+            if via.kind != "node":
                 continue
             if "host" in rule.from_:
                 raise ValueError(f"egress[{index}]: host traffic cannot use {rule.via}")

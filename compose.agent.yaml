@@ -1,6 +1,10 @@
 # kornode agent. Enroll once, then run:
 #   docker compose -f compose.agent.yaml run --rm agent kornode-agent enroll <token>
 #   docker compose -f compose.agent.yaml up -d
+# Without the source tree, use the published image instead of building:
+#   export KORNODE_AGENT_IMAGE=ghcr.io/r4ven-me/kornode-agent:latest
+#   docker compose -f compose.agent.yaml pull
+# then run the two commands above: an image that is present is used, not rebuilt.
 name: kornode-agent
 
 services:
@@ -8,7 +12,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.agent
-    image: kornode-agent:latest
+    image: ${KORNODE_AGENT_IMAGE:-kornode-agent:latest}
     restart: unless-stopped
     cap_add:
       - NET_ADMIN

@@ -34,7 +34,7 @@ table inet kornode {
   }
   chain validate_connection {
     ct mark & 0xffffff00 == 0x0c800100 ct label == (0 | 1 | 2 | 5 | 6 | 8 | 10 | 11 | 13 | 16 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27 | 29 | 30 | 32 | 33 | 34 | 35 | 37 | 40 | 43 | 46 | 47 | 49 | 50 | 51 | 53 | 56 | 57 | 58 | 59 | 60 | 64 | 65 | 66 | 67 | 73 | 74 | 80 | 81 | 82 | 86 | 87 | 90 | 95 | 98 | 99 | 101 | 106 | 108 | 110 | 113 | 115 | 117 | 120 | 122 | 123 | 125 | 127) return
-    ct mark & 0xffffff00 == 0x0c9bf300 ct label == (1 | 2 | 3 | 4 | 6 | 8 | 11 | 13 | 15 | 17 | 18 | 20 | 21 | 22 | 24 | 26 | 27 | 28 | 29 | 30 | 32 | 33 | 35 | 40 | 41 | 42 | 44 | 45 | 47 | 52 | 54 | 56 | 57 | 59 | 61 | 63 | 64 | 65 | 66 | 67 | 74 | 78 | 84 | 86 | 87 | 88 | 90 | 92 | 93 | 94 | 96 | 97 | 98 | 99 | 100 | 101 | 102 | 103 | 105 | 106 | 108 | 110 | 112 | 113 | 115 | 116 | 117 | 120 | 124 | 126) return
+    ct mark & 0xffffff00 == 0x0cc21400 ct label == (0 | 2 | 4 | 6 | 8 | 10 | 14 | 16 | 17 | 24 | 25 | 27 | 29 | 30 | 33 | 34 | 35 | 37 | 38 | 40 | 45 | 50 | 51 | 52 | 54 | 57 | 58 | 61 | 71 | 72 | 73 | 74 | 76 | 77 | 80 | 81 | 84 | 85 | 86 | 87 | 89 | 90 | 94 | 97 | 98 | 101 | 102 | 103 | 104 | 105 | 107 | 108 | 109 | 110 | 111 | 115 | 119 | 120 | 124 | 127) return
     drop
   }
   chain prerouting {
@@ -49,7 +49,7 @@ table inet kornode {
     ip daddr @carrier_v4 return
     ip6 daddr @carrier_v6 return
     ip saddr 10.100.2.0/24 ip daddr @fabric_v4 meta mark set 0x0c800100 ct mark set meta mark ct label set (0 | 1 | 2 | 5 | 6 | 8 | 10 | 11 | 13 | 16 | 18 | 19 | 20 | 21 | 22 | 24 | 25 | 26 | 27 | 29 | 30 | 32 | 33 | 34 | 35 | 37 | 40 | 43 | 46 | 47 | 49 | 50 | 51 | 53 | 56 | 57 | 58 | 59 | 60 | 64 | 65 | 66 | 67 | 73 | 74 | 80 | 81 | 82 | 86 | 87 | 90 | 95 | 98 | 99 | 101 | 106 | 108 | 110 | 113 | 115 | 117 | 120 | 122 | 123 | 125 | 127) goto validate_connection comment "egress rule 0"
-    ip saddr 10.100.2.0/24 meta mark set 0x0c9bf300 ct mark set meta mark ct label set (1 | 2 | 3 | 4 | 6 | 8 | 11 | 13 | 15 | 17 | 18 | 20 | 21 | 22 | 24 | 26 | 27 | 28 | 29 | 30 | 32 | 33 | 35 | 40 | 41 | 42 | 44 | 45 | 47 | 52 | 54 | 56 | 57 | 59 | 61 | 63 | 64 | 65 | 66 | 67 | 74 | 78 | 84 | 86 | 87 | 88 | 90 | 92 | 93 | 94 | 96 | 97 | 98 | 99 | 100 | 101 | 102 | 103 | 105 | 106 | 108 | 110 | 112 | 113 | 115 | 116 | 117 | 120 | 124 | 126) goto validate_connection comment "egress rule 1"
+    ip saddr 10.100.2.0/24 meta mark set 0x0cc21400 ct mark set meta mark ct label set (0 | 2 | 4 | 6 | 8 | 10 | 14 | 16 | 17 | 24 | 25 | 27 | 29 | 30 | 33 | 34 | 35 | 37 | 38 | 40 | 45 | 50 | 51 | 52 | 54 | 57 | 58 | 61 | 71 | 72 | 73 | 74 | 76 | 77 | 80 | 81 | 84 | 85 | 86 | 87 | 89 | 90 | 94 | 97 | 98 | 101 | 102 | 103 | 104 | 105 | 107 | 108 | 109 | 110 | 111 | 115 | 119 | 120 | 124 | 127) goto validate_connection comment "egress rule 1"
     ip saddr 10.100.2.0/24 reject with icmpx admin-prohibited comment "egress rule 2"
   }
   chain output {
@@ -74,15 +74,15 @@ table inet kornode {
   chain forward {
     type filter hook forward priority filter; policy accept;
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-    meta mark & 0xffffff00 { 0x0c800100, 0x0c9bf300 } oifname "eth0" reject with icmpx admin-prohibited
-    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c800100, 0x0c9bf300 } reject with icmpx admin-prohibited
+    meta mark & 0xffffff00 { 0x0c800100, 0x0cc21400 } oifname "eth0" reject with icmpx admin-prohibited
+    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c800100, 0x0cc21400 } reject with icmpx admin-prohibited
   }
   chain postrouting {
     type filter hook postrouting priority filter; policy accept;
     oifname "lo" accept
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
-    meta mark & 0xffffff00 { 0x0c800100, 0x0c9bf300 } oifname "eth0" drop
-    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c800100, 0x0c9bf300 } drop
+    meta mark & 0xffffff00 { 0x0c800100, 0x0cc21400 } oifname "eth0" drop
+    meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c800100, 0x0cc21400 } drop
   }
 }
 table ip kornode_nat {

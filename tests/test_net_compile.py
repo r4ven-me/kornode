@@ -27,9 +27,9 @@ EXAMPLES = ROOT / "docs" / "spec" / "examples"
 GOLDEN = Path(__file__).resolve().parent / "golden"
 
 from tests.test_net_transit import (  # noqa: E402
-    agent_exit_case,
-    exit_node_case,
-    hub_egress_exit_case,
+    agent_gateway_case,
+    gateway_node_case,
+    hub_egress_gateway_case,
     hub_transit_case,
     hub_transit_set_case,
 )
@@ -113,10 +113,10 @@ def _render(compiled: Compiled) -> dict[str, str]:
         ("hub", hub_case),
         ("node3", node3_case),
         ("hub_transit", hub_transit_case),
-        ("hub_egress_exit", hub_egress_exit_case),
+        ("hub_egress_gateway", hub_egress_gateway_case),
         ("hub_transit_set", hub_transit_set_case),
-        ("agent_exit", agent_exit_case),
-        ("exit_node", exit_node_case),
+        ("agent_gateway", agent_gateway_case),
+        ("gateway_node", gateway_node_case),
     ],
 )
 def test_examples_match_golden(name: str, case: Any, update_golden: bool) -> None:
@@ -314,8 +314,8 @@ def test_missing_source_interface_is_a_warning_not_an_error() -> None:
     ("egress", "message"),
     [
         ([{"from": ["clients"], "to": "any", "via": "upstream:nope"}], "unknown upstream"),
-        ([{"from": ["clients"], "to": "any", "via": "exit:1"}], "is this node"),
-        ([{"from": ["clients"], "to": "any", "via": "exit:9"}], "unknown node 9"),
+        ([{"from": ["clients"], "to": "any", "via": "node:1"}], "is this node"),
+        ([{"from": ["clients"], "to": "any", "via": "node:9"}], "unknown node 9"),
         ([{"from": ["clients"], "to": {"node": 9}, "via": "local"}], "unknown node 9"),
     ],
 )
@@ -375,10 +375,10 @@ def test_policy_model_rejects_invalid_input(bad: dict[str, Any]) -> None:
 
 
 def test_via_parsing() -> None:
-    assert Via.parse("exit:12") == Via("exit", "12")
+    assert Via.parse("node:12") == Via("node", "12")
     assert Via.parse("upstream:office").name == "upstream:office"
     with pytest.raises(ValueError):
-        Via.parse("exit:0")
+        Via.parse("node:0")
 
 
 def test_no_per_interface_sysctl_for_a_down_tunnel() -> None:

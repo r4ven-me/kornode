@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed (role `gateway`, `via: node:<n>`, D-84, branch `redesign/rename-gateway-role`)
+
+- The agent role `exit` is now **`gateway`**, and a rule sends traffic through it with **`via: node:<n>`** instead of `via: exit:<n>`. CLI (`korctl agent create|set --role gateway`), API, panel (role checkboxes with a hint, rule editor `via` = `node`), docs, specs and examples use the new names. Error codes: `gateway_node`, `gateway_in_use`.
+- Old data keeps working: `exit:<n>` in the hub `egress` or a stored agent policy is read as `node:<n>` and saved back as such; registry migration 0004 renames the role; an agent boots from a bundle cached with the role `exit`; the hub accepts the agent report field `exit_sets` next to the new `gateway_sets`. Tests: `tests/test_gateway_rename.py`, `AgentPolicy.test.tsx`.
+- Golden cases renamed to `agent_gateway`, `gateway_node`, `hub_egress_gateway`; the generated rules are unchanged except the nft comment `transit node:<n>`. `tests/test_agent_exit.py` is now `tests/test_agent_gateway.py`.
+
+### Added (agent image in GHCR, branch `fix/agent-image-release`)
+
+- `Release image` publishes `ghcr.io/<owner>/kornode-agent` (`Dockerfile.agent`) next to the hub image, as `v<version>` and `latest`. Each image checks its own tag, so the agent image is published for the current version even though the hub image already exists; build caches are scoped per image.
+- `compose.agent.yaml` takes the image from `KORNODE_AGENT_IMAGE` (default: the locally built `kornode-agent:latest`), so a node can be deployed from that one file and the published image. README "Adding an agent" and `docs/panel.md` ("Deploying an agent") describe the hub prerequisites (`control.enabled`, a reachable `server.cn`, the open port) and both ways. Tests: `test_agent_compose_runs_the_published_image_without_a_source_tree`, `test_release_workflow_publishes_the_hub_and_the_agent_image`.
+
+### Changed (panel look and navigation, branch `fix/panel-design-nav`)
+
+- The sidebar is grouped by task: Dashboard; Access (Users, Groups, Sessions); Routing (Network, Agents, Fabric); System (Config, Diagnostics, Logs, Terminal). Every section has its own icon, and the line under the page title describes the open section instead of repeating the version (it stays in the sidebar footer).
+- Network opens with what you edit: **Egress rules** and **Sources** are now two panels at the top, followed by Reconciler, Plan and Explain. Save source sits in the panel footer instead of inside the field grid.
+- The v2 forms (Agents, Fabric, Network) share the panel styles: the `agent-*` form rules moved from `agents.css`, scoped to `.agents-view`, to `styles.css`, so Fabric and Network no longer show browser-default fieldset frames, list bullets and native checkboxes. Checkboxes are switches, as elsewhere in the panel. Fabric panels got their spacing (`view-stack`) and short descriptions.
+- On narrow screens an egress rule and the Rules/JSON tabs no longer stick out of the panel.
+- New `docs/panel.md`: what each section does and a first-setup order. New Playwright spec `e2e/v2-views.spec.ts` (look, overflow and sidebar order at 1440/390 px, light/dark).
+
 ### Fixed (Quick Start)
 
 - `.env.example` still set `KORNODE_FABRIC__ENABLED=false`, a key removed by D-71, so the Quick Start (`cp .env.example .env && docker compose up`) failed at startup with `fabric.enabled: Extra inputs are not permitted`. The line is removed; `test_config_example_loads_with_env_example` loads `config.example.yaml` with `.env.example`.

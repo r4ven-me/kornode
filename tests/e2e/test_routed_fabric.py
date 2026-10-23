@@ -229,8 +229,8 @@ def test_e2e_07_client_of_agent_a_leaves_through_agent_b_and_fails_closed_when_i
     cluster: Cluster,
 ) -> None:
     """Exit via another node (D-69). A VPN client of agent-a (role access) has the policy
-    `clients -> any via exit:3`: its internet traffic crosses the fabric, the hub steers it
-    into agent-b's session and agent-b (role exit) masquerades it. With agent-b gone the
+    `clients -> any via node:3`: its internet traffic crosses the fabric, the hub steers it
+    into agent-b's session and agent-b (role gateway) masquerades it. With agent-b gone the
     traffic is never sent out of agent-a or the hub: it gets nowhere."""
     inventory = cluster.fleet.inventory
     agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
@@ -238,13 +238,13 @@ def test_e2e_07_client_of_agent_a_leaves_through_agent_b_and_fails_closed_when_i
     assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
     password = secrets.token_hex(12)
     before = {role: cluster.status(role)["applied_version"] for role in ("agent-a", "agent-b")}
-    cluster.call("hub", "exit_role")
+    cluster.call("hub", "gateway_role")
     access = cluster.call(
         "hub", "access_setup", name="agent-a", host=agent_a, port=ACCESS_PORT,
         user="alice", password=password,
     )  # fmt: skip
     pin = access["certificate"]["pin"]
-    cluster.call("hub", "access_policy", via="exit:3")
+    cluster.call("hub", "access_policy", via="node:3")
     for role in ("agent-a", "agent-b"):
 
         def applied(role: str = role) -> bool:
@@ -303,21 +303,21 @@ def test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_go
     cluster: Cluster,
 ) -> None:
     """Spec E2E-07, full-tunnel half: a source attached to the hub (a docker network standing
-    in for wg-easy) has the hub rule `source -> any via exit:3`. Its internet traffic crosses
-    the fabric and agent-b (role exit) masquerades it; the hub's own uplink never carries it,
+    in for wg-easy) has the hub rule `source -> any via node:3`. Its internet traffic crosses
+    the fabric and agent-b (role gateway) masquerades it; the hub's own uplink never carries it,
     and with agent-b gone it gets nowhere."""
     inventory = cluster.fleet.inventory
     agent_b, ext = inventory.host("agent-b").address, inventory.host("ext").address
     assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
     before = {role: cluster.status(role)["applied_version"] for role in ("agent-b",)}
-    cluster.call("hub", "exit_role")
+    cluster.call("hub", "gateway_role")
     interface = cluster.call("hub", "source_iface")["interface"]
     cluster.call("hub", "hub_source_add", interface=interface)
     cluster.call("hub", "hub_source_policy", interface=interface)
     wait_for(
         lambda: cluster.status("agent-b")["applied_version"] > before["agent-b"],
         60,
-        "agent-b did not apply the bundle with the exit role and the hub source prefix",
+        "agent-b did not apply the bundle with the gateway role and the hub source prefix",
     )
     cluster.call("hub", "client_route", routes=[f"{ext}/32"])
 
@@ -356,7 +356,7 @@ def test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed(
     cluster: Cluster,
 ) -> None:
     """Spec E2E-07, domain half (D-79). The client of agent-a has `clients -> {domains: [x]}
-    via exit:3`, x being a name in the fabric zone that points at ext, the "internet". Agent-a
+    via node:3`, x being a name in the fabric zone that points at ext, the "internet". Agent-a
     resolves x itself and reports the address; the hub marks the transit traffic by source
     and destination, agent-b masquerades it. With agent-b gone nothing leaves."""
     inventory = cluster.fleet.inventory
@@ -366,13 +366,13 @@ def test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed(
     password = secrets.token_hex(12)
     cluster.call("hub", "dns_record", name="webdest", type="A", value=ext)
     before = {role: cluster.status(role)["applied_version"] for role in ("agent-a", "agent-b")}
-    cluster.call("hub", "exit_role")
+    cluster.call("hub", "gateway_role")
     access = cluster.call(
         "hub", "access_setup", name="agent-a", host=agent_a, port=ACCESS_PORT,
         user="alice", password=password,
     )  # fmt: skip
     pin = access["certificate"]["pin"]
-    cluster.call("hub", "access_policy", via="exit:3", domain="webdest.kornode.internal")
+    cluster.call("hub", "access_policy", via="node:3", domain="webdest.kornode.internal")
     for role in ("agent-a", "agent-b"):
 
         def applied(role: str = role) -> bool:

@@ -32,7 +32,7 @@
       "required": ["name", "roles", "fabric_address", "service_address", "client_pool"],
       "properties": {
         "name": { "type": "string" },
-        "roles": { "type": "array", "items": { "enum": ["access", "exit"] }, "uniqueItems": true },
+        "roles": { "type": "array", "items": { "enum": ["access", "gateway"] }, "uniqueItems": true },
         "fabric_address": { "type": "string" },
         "service_address": { "type": "string" },
         "client_pool": { "type": "string" },

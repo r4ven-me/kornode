@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./agents.css";
 import { agentGet, agentPath, agentWrite, downloadAgentArtifact, loadAgent, type Agent, type ControlStatus, type Detail, type JsonObject, type Mutate } from "../../agentsApi";
+import { AGENT_ROLES, ROLE_HINTS } from "./roles";
 import { AgentActivity } from "./AgentActivity";
 import { AgentPolicy } from "./AgentPolicy";
 import { AccessListenerEditor, AccessUserEditor, PrefixEditor, SourceEditor, UpstreamEditor } from "./AgentResources";
@@ -138,7 +139,7 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
       <label>Agent name<input value={name} onChange={e => setName(e.target.value)} required /></label>
       <label>Node ID (blank = automatic)<input type="number" value={id} onChange={e => setId(e.target.value)} /></label>
       <label>New agent description<input value={description} onChange={e => setDescription(e.target.value)} /></label>
-      <div className="agent-checks">{["access", "exit"].map(role => <label key={role}><input type="checkbox" checked={roles.includes(role)} onChange={e => setRoles(e.target.checked ? [...roles, role] : roles.filter(r => r !== role))} /> {role} role</label>)}</div>
+      <div className="agent-checks">{AGENT_ROLES.map(role => <label key={role} title={ROLE_HINTS[role]}><input type="checkbox" checked={roles.includes(role)} onChange={e => setRoles(e.target.checked ? [...roles, role] : roles.filter(r => r !== role))} /> {role} role</label>)}<p className="field-help agent-roles-help">access: serves its own VPN clients. gateway: other nodes may leave to the internet through it (<code>via node:&lt;id&gt;</code>).</p></div>
       <label className="agent-check"><input type="checkbox" checked={forceReuse} onChange={e => setForceReuse(e.target.checked)} /> Force ID reuse (bypass 30-day quarantine)</label>
     </fieldset><div className="panel-footer"><button className="action-button primary" disabled={busy} data-capability="agent.create">{dryRun ? "Preview creation" : "Create agent and token"}</button></div></form></details>
     {selected && !detail && <p role="status">Loading agent details…</p>}

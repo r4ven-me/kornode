@@ -1,4 +1,4 @@
-import { Activity, FileSliders, type LucideIcon, Network, ScrollText, Server, ShieldCheck, Terminal, Users } from "lucide-react";
+import { Activity, FileSliders, type LucideIcon, Network, PlugZap, Route, ScrollText, Server, ShieldCheck, Stethoscope, Terminal, Users } from "lucide-react";
 import type { UpstreamProfile, UpstreamProfileDraft, UserConfig } from "../api";
 import type { AppState, Tab } from "./types";
 
@@ -105,16 +105,26 @@ export function upstreamProfileToDraft(profile: UpstreamProfile): UpstreamProfil
   };
 }
 
-export const tabs: Array<{ id: Tab; label: string; icon: LucideIcon }> = [
-  { id: "dashboard", label: "Dashboard", icon: Activity },
-  { id: "config", label: "Config", icon: FileSliders },
-  { id: "users", label: "Users", icon: Users },
-  { id: "agents", label: "Agents", icon: Server },
-  { id: "fabric", label: "Fabric", icon: Network },
-  { id: "groups", label: "Groups", icon: ShieldCheck },
-  { id: "sessions", label: "Sessions", icon: Server },
-  { id: "network", label: "Network", icon: Network },
-  { id: "diagnostics", label: "Diagnostics", icon: Network },
-  { id: "logs", label: "Logs", icon: ScrollText },
-  { id: "terminal", label: "Terminal", icon: Terminal }
+/** Sidebar groups, in the order an operator meets them: who connects, where traffic goes, then upkeep. */
+export type TabGroup = "overview" | "access" | "routing" | "system";
+
+export const tabGroups: Array<{ id: TabGroup; label: string | null }> = [
+  { id: "overview", label: null },
+  { id: "access", label: "Access" },
+  { id: "routing", label: "Routing" },
+  { id: "system", label: "System" }
+];
+
+export const tabs: Array<{ id: Tab; label: string; icon: LucideIcon; group: TabGroup; description: string }> = [
+  { id: "dashboard", label: "Dashboard", icon: Activity, group: "overview", description: "Server state, software versions and interface load" },
+  { id: "users", label: "Users", icon: Users, group: "access", description: "VPN accounts: passwords, certificates, one-time codes" },
+  { id: "groups", label: "Groups", icon: ShieldCheck, group: "access", description: "Shared ocserv settings for a set of users" },
+  { id: "sessions", label: "Sessions", icon: PlugZap, group: "access", description: "Who is connected right now" },
+  { id: "network", label: "Network", icon: Route, group: "routing", description: "Where client traffic goes: egress rules and attached networks" },
+  { id: "agents", label: "Agents", icon: Server, group: "routing", description: "Other servers joined to this hub" },
+  { id: "fabric", label: "Fabric", icon: Network, group: "routing", description: "Addressing and DNS of the network between the hub and agents" },
+  { id: "config", label: "Config", icon: FileSliders, group: "system", description: "Server, certificates, authentication, upstreams and backups" },
+  { id: "diagnostics", label: "Diagnostics", icon: Stethoscope, group: "system", description: "Probe commands and the doctor's health checks" },
+  { id: "logs", label: "Logs", icon: ScrollText, group: "system", description: "Log files and their rotation" },
+  { id: "terminal", label: "Terminal", icon: Terminal, group: "system", description: "Shell on the server" }
 ];

@@ -51,10 +51,10 @@ def test_valid_policy_parses() -> None:
         {"sources": [{**SRC, "cidr": "10.99.0.0/25", "allow_outside_pool": True}]},
         {"sources": [SRC, {**SRC, "name": "wg2", "cidr": "10.8.1.0/25"}]},
         {"sources": [SRC, {**SRC, "name": "wg2", "cidr": "10.8.1.0/24"}]},
-        {"egress": [{"from": ["host"], "to": "any", "via": "exit:2"}]},
+        {"egress": [{"from": ["host"], "to": "any", "via": "node:2"}]},
         {
             "sources": [{**SRC, "export": False}],
-            "egress": [{"from": ["wg"], "to": "any", "via": "exit:2"}],
+            "egress": [{"from": ["wg"], "to": "any", "via": "node:2"}],
         },
     ],
 )  # fmt: skip
@@ -72,14 +72,14 @@ def test_old_policy_keys_are_unknown_at_top_level() -> None:
         cfg(client_policy="full")
 
 
-EXIT = {"egress": [{"from": ["clients"], "to": "any", "via": "exit:2"}]}
+EXIT = {"egress": [{"from": ["clients"], "to": "any", "via": "node:2"}]}
 
 
 def test_exit_target_must_be_active_exit_agent() -> None:
-    check_hub_policy(cfg(**EXIT), [node(2, ["exit"])])
+    check_hub_policy(cfg(**EXIT), [node(2, ["gateway"])])
     for nodes, code in (
-        ([], "exit_node"),
-        ([node(2, ["exit"], "revoked")], "exit_node"),
+        ([], "gateway_node"),
+        ([node(2, ["gateway"], "revoked")], "gateway_node"),
         ([node(2, ["access"])], "role_required"),
     ):
         with pytest.raises(HubEgressError) as err:
@@ -89,10 +89,10 @@ def test_exit_target_must_be_active_exit_agent() -> None:
 
 def test_exit_to_the_hub_or_to_fabric_is_rejected() -> None:
     with pytest.raises(HubEgressError):
-        check_hub_policy(cfg(egress=[{"from": ["clients"], "to": "any", "via": "exit:1"}]), [])
-    fabric = {"egress": [{"from": ["clients"], "to": "fabric", "via": "exit:2"}]}
+        check_hub_policy(cfg(egress=[{"from": ["clients"], "to": "any", "via": "node:1"}]), [])
+    fabric = {"egress": [{"from": ["clients"], "to": "fabric", "via": "node:2"}]}
     with pytest.raises(HubEgressError) as err:
-        check_hub_policy(cfg(**fabric), [node(2, ["exit"])])
+        check_hub_policy(cfg(**fabric), [node(2, ["gateway"])])
     assert err.value.code == "runtime_unsupported"
 
 
@@ -100,11 +100,11 @@ def test_exit_to_a_set_or_inline_destination_is_accepted_since_d79() -> None:
     sets = {
         "sets": {"s": {"routes": ["10.1.0.0/16"]}},
         "egress": [
-            {"from": ["clients"], "to": {"set": "s"}, "via": "exit:2"},
-            {"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "exit:2"},
+            {"from": ["clients"], "to": {"set": "s"}, "via": "node:2"},
+            {"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "node:2"},
         ],
     }
-    check_hub_policy(cfg(**sets), [node(2, ["exit"])])
+    check_hub_policy(cfg(**sets), [node(2, ["gateway"])])
 
 
 @pytest.mark.parametrize("name", ["active", "Active", "ACTIVE"])

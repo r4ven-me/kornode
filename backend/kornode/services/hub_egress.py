@@ -1,5 +1,5 @@
 """Checks of the hub egress policy that need more than the config file: the registry
-(`exit:<n>` targets, D-69) and the configured upstream profiles. Pure; kernel state is
+(`node:<n>` targets, D-69, D-84) and the configured upstream profiles. Pure; kernel state is
 never touched here."""
 
 from __future__ import annotations
@@ -40,20 +40,23 @@ def validate_hub_policy(
             raise HubEgressError(
                 "unknown_upstream", f"egress[{index}]: upstream {via.target!r} is not configured"
             )
-        if via.kind != "exit":
+        if via.kind != "node":
             continue
         target = int(via.target or 0)
         node = by_id.get(target)
         if target == 1 or node is None or node.state != "active":
             raise HubEgressError(
-                "exit_node", f"egress[{index}]: exit:{target} needs an active agent with role exit"
+                "gateway_node",
+                f"egress[{index}]: node:{target} needs an active agent with role gateway",
             )
-        if "exit" not in node.roles:
-            raise HubEgressError("role_required", f"egress[{index}]: agent {node.name} lacks exit")
+        if "gateway" not in node.roles:
+            raise HubEgressError(
+                "role_required", f"egress[{index}]: agent {node.name} lacks role gateway"
+            )
         if not (rule.to == "any" or isinstance(rule.to, SetRef | InlineDest)):
             raise HubEgressError(
                 "runtime_unsupported",
-                f"egress[{index}]: exit via another node supports `to: any`, a set or an "
+                f"egress[{index}]: leaving through another node supports `to: any`, a set or an "
                 "inline destination, not `fabric` or a node",
             )
 

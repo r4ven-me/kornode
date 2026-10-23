@@ -9,7 +9,7 @@ type Mode = "rules" | "json";
 
 const EMPTY_SOURCE: Source = { name: "", interface: "", cidr: "", export: true, allow_outside_pool: false, description: "" };
 
-/** Hub egress rules and attached access-server sources (spec 02): one editor, the same service as `korctl egress`. */
+/** Hub egress rules and attached access-server sources (spec 02): two panels over one policy, the same service as `korctl egress`. */
 export function HubEgress({ token }: { token: string | null }) {
   const [shown, setShown] = useState<Shown | null>(null);
   const [policy, setPolicy] = useState<Policy>({});
@@ -20,11 +20,12 @@ export function HubEgress({ token }: { token: string | null }) {
   const [probe, setProbe] = useState({ src: "host", dst: "" });
   const [draft, setDraft] = useState<Source>(EMPTY_SOURCE);
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [note, setNote] = useState("");
+  const [noticeScope, setNoticeScope] = useState<"rules" | "sources">("rules");
   const fail = (reason: unknown) => setError(String(reason instanceof Error ? reason.message : reason));
   const load = (next: Shown) => { setShown(next); setPolicy(next.policy); setText(JSON.stringify(next.policy, null, 2)); setLive(null); setExplain(null); };
   useEffect(() => { void agentGet<Shown>("/api/egress", token).then(load).catch(fail); }, [token]);
-  async function run(action: () => Promise<unknown>, done: (result: never) => void) {
-    setBusy(true); setError(""); setNote("");
+  async function run(scope: "rules" | "sources", action: () => Promise<unknown>, done: (result: never) => void) {
+    setBusy(true); setError(""); setNote(""); setNoticeScope(scope);
     try { done((await action()) as never); } catch (reason) { fail(reason); } finally { setBusy(false); }
   }
   const parse = (): Policy => (mode === "json" ? JSON.parse(text) : policy) as Policy;
@@ -52,57 +53,65 @@ export function HubEgress({ token }: { token: string | null }) {
   const warnings = dirty ? (live?.warnings ?? []) : (shown?.warnings ?? []);
   const deadRules = dirty ? (live?.dead ?? []) : (shown?.dead_rules ?? []);
   const classes = ["clients", "host", "fabric", ...sources.map(s => s.name)];
-  return <section className="panel" data-capability="egress.hub.show">
-    <div className="panel-header"><h2>Egress and sources</h2></div>
-    <p className="field-help">First match wins; traffic of clients and sources that matches no rule is dropped. <code>exit:&lt;n&gt;</code> sends it through another node with the exit role.</p>
-    {error && <p role="alert">{error}</p>}{note && <p role="status">{note}</p>}
-    {live?.problem && dirty && <p role="status" className="muted-line">Draft is not valid yet: {live.problem}</p>}
-    {warnings.map(w => <p key={w} className="muted-line">{w}</p>)}
-    <ul className="agent-items" data-capability="sources.hub.list">{sources.map(s => <li key={s.name}>
-      <span>{s.name} · {s.interface} · {s.cidr}{s.export === false ? " · not exported" : ""}</span>
-      <div className="row-actions">
-        <button className="action-button" type="button" onClick={() => setDraft({ ...EMPTY_SOURCE, ...s })}>Edit</button>
-        <button className="action-button" type="button" disabled={busy || dirty} data-capability="sources.hub.delete" onClick={() => {
-          if (!window.confirm(`Remove source ${s.name}? Rules that reference it must be removed first.`)) return;
-          void run(() => agentWrite(`/api/sources/${encodeURIComponent(s.name)}`, "DELETE", undefined, token), (r: Shown) => load(r));
-        }}>Remove</button>
-      </div></li>)}</ul>
-    <form data-capability="sources.hub.set" onSubmit={e => { e.preventDefault(); void run(() => agentWrite(`/api/sources/${encodeURIComponent(draft.name)}`, "PUT", { interface: draft.interface, cidr: draft.cidr, export: draft.export, allow_outside_pool: draft.allow_outside_pool ?? false, description: draft.description ?? "" }, token), (r: Shown) => { load(r); setDraft(EMPTY_SOURCE); }); }}>
-      <fieldset className="agent-fields" disabled={busy || dirty}>
-        <label>Source name<input data-config-field="sources[].name" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} required /></label>
-        <label>Source interface<input data-config-field="sources[].interface" value={draft.interface} onChange={e => setDraft({ ...draft, interface: e.target.value })} required /></label>
-        <label>Source CIDR<input data-config-field="sources[].cidr" value={draft.cidr} onChange={e => setDraft({ ...draft, cidr: e.target.value })} required /></label>
-        <label>Source description<input data-config-field="sources[].description" maxLength={200} value={draft.description ?? ""} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
-        <label className="agent-check"><input data-config-field="sources[].allow_outside_pool" type="checkbox" checked={draft.allow_outside_pool ?? false} onChange={e => setDraft({ ...draft, allow_outside_pool: e.target.checked })} /> Allow outside derived source pool</label>
-        <label className="agent-check"><input data-config-field="sources[].export" type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export to the fabric</label>
-        <button className="action-button" data-capability="sources.hub.set">Save source</button>
-      </fieldset>
-    </form>
-    {dirty && <p className="field-help">Unsaved rule changes: save or discard them before editing sources.</p>}
-    <div className="egress-tabs" role="tablist">
-      <button type="button" role="tab" aria-selected={mode === "rules"} className={`action-button${mode === "rules" ? " primary" : ""}`} onClick={() => switchMode("rules")}>Rules</button>
-      <button type="button" role="tab" aria-selected={mode === "json"} className={`action-button${mode === "json" ? " primary" : ""}`} onClick={() => switchMode("json")}>JSON (advanced)</button>
-    </div>
-    <form data-capability="egress.hub.set" onSubmit={e => { e.preventDefault(); void run(async () => agentWrite("/api/egress", "PUT", parse(), token), (r: Shown) => { load(r); setNote("Policy saved."); }); }}>
-      {mode === "json"
-        ? <label>Policy (JSON: sources, sets, egress)<textarea className="agent-code" rows={14} value={text} onChange={e => setText(e.target.value)} /></label>
-        : <>
-          <DestinationSets sets={policy.sets ?? {}} disabled={busy} onChange={sets => { setPolicy({ ...policy, sets }); setExplain(null); }} />
-          <EgressRules rules={rules} disabled={busy} classes={classes} deadRules={deadRules} explain={explain} onChange={setRules} />
-          <button type="button" className="action-button" disabled={busy} onClick={() => setRules([...rules, NEW_RULE])}>Add rule</button>
-          <div className="egress-explain-bar">
-            <label>Explain from<input aria-label="Explain source" value={probe.src} onChange={e => setProbe({ ...probe, src: e.target.value })} placeholder="host or client IP" /></label>
-            <label>to<input aria-label="Explain destination" value={probe.dst} onChange={e => setProbe({ ...probe, dst: e.target.value })} placeholder="destination IP" /></label>
-            <button type="button" className="action-button" disabled={busy || dirty || !probe.dst} title={dirty ? "Save the rules first: explain uses the saved policy" : undefined}
-              onClick={() => void run(async () => agentWrite("/api/net/explain", "POST", probe, token), (r: NetExplainResult) => setExplain({ result: r, ...probe }))}>Explain</button>
-          </div>
-          {explain && explain.result.matched_rule === null && <p role="status" className="egress-explain">{explain.result.implicit ?? "No rule matched."}</p>}
-        </>}
-      <div className="panel-footer">
-        {dirty && <button type="button" className="action-button" disabled={busy} onClick={() => setPolicy(shown?.policy ?? {})}>Discard changes</button>}
-        <button className="action-button" type="button" disabled={busy} data-capability="egress.hub.check" onClick={() => void run(async () => agentWrite("/api/egress/check", "POST", parse(), token), () => setNote("Policy is valid."))}>Check</button>
-        <button className="action-button primary" disabled={busy} data-capability="egress.hub.set">Save policy</button>
+  const notices = (scope: "rules" | "sources") => scope === noticeScope && <>{error && <p role="alert">{error}</p>}{note && <p role="status">{note}</p>}</>;
+  return <>
+    <section className="panel" data-capability="egress.hub.show">
+      <div className="panel-header"><div><h2>Egress rules</h2><p className="muted-line">Where traffic of VPN clients and sources goes. First match wins; traffic that matches no rule is dropped. <code>local</code> leaves through this server, <code>upstream:&lt;profile&gt;</code> through an external VPN, <code>node:&lt;n&gt;</code> through agent node n with the gateway role.</p></div></div>
+      {notices("rules")}
+      {live?.problem && dirty && <p role="status" className="muted-line">Draft is not valid yet: {live.problem}</p>}
+      {warnings.map(w => <p key={w} className="muted-line">{w}</p>)}
+      <div className="egress-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={mode === "rules"} className={`action-button${mode === "rules" ? " primary" : ""}`} onClick={() => switchMode("rules")}>Rules</button>
+        <button type="button" role="tab" aria-selected={mode === "json"} className={`action-button${mode === "json" ? " primary" : ""}`} onClick={() => switchMode("json")}>JSON (advanced)</button>
       </div>
-    </form>
-  </section>;
+      <form data-capability="egress.hub.set" onSubmit={e => { e.preventDefault(); void run("rules", async () => agentWrite("/api/egress", "PUT", parse(), token), (r: Shown) => { load(r); setNote("Policy saved."); }); }}>
+        {mode === "json"
+          ? <label className="egress-json">Policy (JSON: sources, sets, egress)<textarea className="agent-code" rows={14} value={text} onChange={e => setText(e.target.value)} /></label>
+          : <>
+            <DestinationSets sets={policy.sets ?? {}} disabled={busy} onChange={sets => { setPolicy({ ...policy, sets }); setExplain(null); }} />
+            <EgressRules rules={rules} disabled={busy} classes={classes} deadRules={deadRules} explain={explain} onChange={setRules} />
+            <button type="button" className="action-button" disabled={busy} onClick={() => setRules([...rules, NEW_RULE])}>Add rule</button>
+            <div className="egress-explain-bar">
+              <label>Explain from<input aria-label="Explain source" value={probe.src} onChange={e => setProbe({ ...probe, src: e.target.value })} placeholder="host or client IP" /></label>
+              <label>to<input aria-label="Explain destination" value={probe.dst} onChange={e => setProbe({ ...probe, dst: e.target.value })} placeholder="destination IP" /></label>
+              <button type="button" className="action-button" disabled={busy || dirty || !probe.dst} title={dirty ? "Save the rules first: explain uses the saved policy" : undefined}
+                onClick={() => void run("rules", async () => agentWrite("/api/net/explain", "POST", probe, token), (r: NetExplainResult) => setExplain({ result: r, ...probe }))}>Explain</button>
+            </div>
+            {explain && explain.result.matched_rule === null && <p role="status" className="egress-explain">{explain.result.implicit ?? "No rule matched."}</p>}
+          </>}
+        <div className="panel-footer">
+          {dirty && <button type="button" className="action-button" disabled={busy} onClick={() => setPolicy(shown?.policy ?? {})}>Discard changes</button>}
+          <button className="action-button" type="button" disabled={busy} data-capability="egress.hub.check" onClick={() => void run("rules", async () => agentWrite("/api/egress/check", "POST", parse(), token), () => setNote("Policy is valid."))}>Check</button>
+          <button className="action-button primary" disabled={busy} data-capability="egress.hub.set">Save policy</button>
+        </div>
+      </form>
+    </section>
+    <section className="panel">
+      <div className="panel-header"><div><h2>Sources</h2><p className="muted-line">A network behind a third-party access server on this host, such as wg-easy or Amnezia. kornode routes and masquerades it; rules above refer to it by name. Export makes it reachable from the other nodes.</p></div><span className="pill muted">{sources.length || "none"}</span></div>
+      {notices("sources")}
+      <ul className="agent-items" data-capability="sources.hub.list">{sources.map(s => <li key={s.name}>
+        <span>{s.name} · {s.interface} · {s.cidr}{s.export === false ? " · not exported" : ""}</span>
+        <div className="row-actions">
+          <button className="action-button" type="button" onClick={() => setDraft({ ...EMPTY_SOURCE, ...s })}>Edit</button>
+          <button className="action-button" type="button" disabled={busy || dirty} data-capability="sources.hub.delete" onClick={() => {
+            if (!window.confirm(`Remove source ${s.name}? Rules that reference it must be removed first.`)) return;
+            void run("sources", () => agentWrite(`/api/sources/${encodeURIComponent(s.name)}`, "DELETE", undefined, token), (r: Shown) => load(r));
+          }}>Remove</button>
+        </div></li>)}</ul>
+      <form data-capability="sources.hub.set" onSubmit={e => { e.preventDefault(); void run("sources", () => agentWrite(`/api/sources/${encodeURIComponent(draft.name)}`, "PUT", { interface: draft.interface, cidr: draft.cidr, export: draft.export, allow_outside_pool: draft.allow_outside_pool ?? false, description: draft.description ?? "" }, token), (r: Shown) => { load(r); setDraft(EMPTY_SOURCE); }); }}>
+        <fieldset className="agent-resource-stack" disabled={busy || dirty}>
+          <div className="agent-fields">
+            <label>Source name<input data-config-field="sources[].name" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} required /></label>
+            <label>Source interface<input data-config-field="sources[].interface" value={draft.interface} onChange={e => setDraft({ ...draft, interface: e.target.value })} required /></label>
+            <label>Source CIDR<input data-config-field="sources[].cidr" value={draft.cidr} onChange={e => setDraft({ ...draft, cidr: e.target.value })} required /></label>
+            <label>Source description<input data-config-field="sources[].description" maxLength={200} value={draft.description ?? ""} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
+            <label className="agent-check"><input data-config-field="sources[].allow_outside_pool" type="checkbox" checked={draft.allow_outside_pool ?? false} onChange={e => setDraft({ ...draft, allow_outside_pool: e.target.checked })} /> Allow outside derived source pool</label>
+            <label className="agent-check"><input data-config-field="sources[].export" type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export to the fabric</label>
+          </div>
+          {dirty && <p className="field-help">Unsaved rule changes: save or discard them before editing sources.</p>}
+          <div className="panel-footer"><button className="action-button primary" data-capability="sources.hub.set">Save source</button></div>
+        </fieldset>
+      </form>
+    </section>
+  </>;
 }

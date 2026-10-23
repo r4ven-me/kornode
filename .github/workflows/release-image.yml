@@ -1,6 +1,8 @@
 name: Release image
 
-# Main-branch version bumps still publish GHCR :v<version> and :latest after CI.
+# Publishes ghcr.io/<owner>/kornode (hub) and ghcr.io/<owner>/kornode-agent
+# as :v<version> and :latest after CI. Each image is checked independently, so
+# a missing image is published even if the other version already exists.
 # Migration: main must be protected/reviewed. Manual dispatch no longer bypasses
 # CI: it requires a successful push CI run for exactly the selected main SHA.
 # No optional checksum repository variable: Dockerfile owns the reviewed pin.
@@ -22,6 +24,16 @@ concurrency:
 
 jobs:
   publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: kornode
+            dockerfile: Dockerfile
+            target: runtime
+          - name: kornode-agent
+            dockerfile: Dockerfile.agent
+            target: ""
     if: >-
       github.ref_protected &&
       ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
@@ -59,6 +71,8 @@ jobs:
 
       - name: Read and validate version
         id: version
+        env:
+          IMAGE_NAME: ${{ matrix.name }}
         run: |
           python3 - <<'PY'
           import os
@@ -68,7 +82,7 @@ jobs:
           version = tomllib.loads(Path('pyproject.toml').read_text())['project']['version']
           if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[a-zA-Z0-9.-]*)', version):
               raise SystemExit('Invalid project version')
-          image = f"ghcr.io/{os.environ['GITHUB_REPOSITORY_OWNER'].lower()}/kornode"
+          image = f"ghcr.io/{os.environ['GITHUB_REPOSITORY_OWNER'].lower()}/{os.environ['IMAGE_NAME']}"
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'version={version}\nimage={image}\n')
           PY
@@ -118,13 +132,14 @@ jobs:
         if: steps.exists.outputs.published != 'true'
         with:
           context: .
-          target: runtime
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Minimal provenance avoids disclosing arbitrary build arguments;
-          # SBOM/provenance are registry attestations on the published image.
+          # SBOM/provenance are registry attestations on each published image.
           provenance: mode=min
           sbom: true
-          cache-from: type=gha,scope=release-runtime
-          cache-to: type=gha,scope=release-runtime,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

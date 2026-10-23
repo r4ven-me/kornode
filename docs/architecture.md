@@ -95,7 +95,7 @@ their data flow (`views/network/HubEgress.tsx`, `views/fabric/FabricView.tsx`, `
 ## Egress and the reconciler
 
 What leaves where is declarative: one ordered `egress` list per node (first match wins) over `clients`, `host`,
-`fabric` and named `sources`, with `via` one of `local`, `fabric`, `exit:<node>`, `upstream:<profile>`, `drop`
+`fabric` and named `sources`, with `via` one of `local`, `fabric`, `node:<n>`, `upstream:<profile>`, `drop`
 (`docs/spec/02-egress-and-sources.md`). On the hub it comes from `config.yaml` (`egress`, `sources`, `sets`;
 `HubEgressService`); for agents it is stored per node in the registry and delivered in the bundle.
 
@@ -127,7 +127,7 @@ fail-closed rules still land (`docs/spec/04-netcore-reconciler.md`). Only `korno
   apply-with-confirm (verify health within a window, else roll back) and reports status.
 - A cached bundle is enough to boot and forward without the hub.
 - Roles: `access` runs a local ocserv listener for users of that node (password and certificate, hashes delivered
-  in the bundle); `exit` accepts `from: fabric` traffic and masquerades it for other nodes' `via: exit:<node>`.
+  in the bundle); `gateway` accepts `from: fabric` traffic and masquerades it for other nodes' `via: node:<n>`.
 - Sources (wg-easy, Amnezia) attach to a node as named sources; kornode owns their routing and NAT.
 
 ### External upstreams
@@ -213,7 +213,7 @@ panel (a labeled input, checkbox or select bound to that specific field), groupe
 `config.yaml`'s own section layout: VPN server behavior and accepted auth methods live under
 the "Server (VPN)" / "Authentication methods" panels (Config tab), the admin web panel's own
 settings live under "Web / API panel", `system`/`cli` under "General", `identity`/`certificates`
-live in their own dedicated tabs, `egress`/`sources`/`sets` live in Network → Egress and sources,
+live in their own dedicated tabs, `egress`/`sources`/`sets` live in Network → Egress rules and Network → Sources,
 and `fabric` settings live in the Fabric tab.
 
 When a new field is added to `AppConfig`, add its GUI control in the same change:

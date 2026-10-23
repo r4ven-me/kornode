@@ -244,14 +244,14 @@ def render_script(
         "    type filter hook input priority mangle; policy accept;",
     ]
     # Connections arriving through a tunnel are answered through it too. One mark per
-    # interface (the first exit wins: on an agent `fabric` precedes `exit:<n>`, which
+    # interface (the first exit wins: on an agent `fabric` precedes `node:<n>`, which
     # shares the hub tunnel); a hub transit exit's session device changes with every
     # connect and its main-table routes already answer the node.
     answered: set[str] = set()
     for exit_ in exits:
         if exit_.kind == "local" or not exit_.interface or exit_.interface in answered:
             continue
-        if exit_.kind == "exit" and facts.fabric_guard:
+        if exit_.kind == "node" and facts.fabric_guard:
             continue
         answered.add(exit_.interface)
         lines.append(

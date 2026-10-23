@@ -49,7 +49,7 @@ class Hub(_Model):
 
 class NodeInfo(_Model):
     name: StrictStr
-    roles: tuple[Literal["access", "exit"], ...]
+    roles: tuple[Literal["access", "gateway"], ...]
     fabric_address: StrictStr
     service_address: StrictStr
     client_pool: StrictStr
@@ -61,6 +61,14 @@ class NodeInfo(_Model):
     @classmethod
     def _ipv4(cls, value: str) -> str:
         return str(ipaddress.IPv4Address(value))
+
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _legacy_roles(cls, value: object) -> object:
+        # A bundle cached before D-84 names the gateway role `exit`.
+        if isinstance(value, list | tuple):
+            return tuple("gateway" if item == "exit" else item for item in value)
+        return value
 
     @field_validator("roles")
     @classmethod

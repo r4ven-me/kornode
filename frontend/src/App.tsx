@@ -15,7 +15,7 @@ import { useSettings } from "./app/hooks/useSettings";
 import { useTheme } from "./app/hooks/useTheme";
 import { useUpstream } from "./app/hooks/useUpstream";
 import { useUsers } from "./app/hooks/useUsers";
-import { tabs } from "./app/state";
+import { tabGroups, tabs } from "./app/state";
 import type { ConfigSection, Tab } from "./app/types";
 import { NoticeToast } from "./components/NoticeToast";
 import { IconButton, RavenMark } from "./components/ui";
@@ -137,19 +137,28 @@ export function App() {
           <strong>Korvus Node</strong>
         </div>
         <nav aria-label="Primary">
-          {availableTabs.map((item) => {
-            const Icon = item.icon;
+          {tabGroups.map((group) => {
+            const items = availableTabs.filter((item) => item.group === group.id);
+            if (items.length === 0) return null;
             return (
-              <button
-                className={tab === item.id ? "active" : ""}
-                key={item.id}
-                onClick={() => selectTab(item.id)}
-                title={item.label}
-                type="button"
-              >
-                <Icon size={18} aria-hidden="true" />
-                <span>{item.label}</span>
-              </button>
+              <div className="nav-group" key={group.id}>
+                {group.label && <p className="nav-group-label">{group.label}</p>}
+                {items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      className={tab === item.id ? "active" : ""}
+                      key={item.id}
+                      onClick={() => selectTab(item.id)}
+                      title={item.description}
+                      type="button"
+                    >
+                      <Icon size={18} aria-hidden="true" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -191,7 +200,7 @@ export function App() {
             />
             <div>
             <h1>{activeTab.label}</h1>
-            <p>{state.health ? `API ${state.health.version}` : "API"}</p>
+            <p>{activeTab.description}</p>
             </div>
           </div>
           <div className="topbar-actions">

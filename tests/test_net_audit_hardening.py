@@ -88,6 +88,25 @@ def test_reorder_edit_delete_and_restart_never_adopt_another_exits_flows() -> No
     assert not accepts_established(restarted, old_mark, "0x0")  # unlabeled cannot be adopted
 
 
+def test_node_gateway_identities_stay_pinned_across_reorder_and_fail_closed_after_removal() -> None:
+    from tests.test_net_transit import hub_facts
+
+    node_facts = dataclasses.replace(
+        hub_facts(guard=False),
+        transit_exits=(),
+        tunnels={"node:2": TunnelFact("vpns2", True), "node:3": TunnelFact("vpns3", True)},
+    )
+    before = compile_policy(policy("node:3", "local"), node_facts)
+    reordered = compile_policy(policy("local", "node:2", "node:3"), node_facts)
+    identity = identities(before)["node:3"]
+    assert identities(reordered)["node:3"] == identity
+    gateway = next(exit_ for exit_ in reordered.exits if exit_.name == "node:3")
+    assert gateway.kind == "node" and gateway.interface == "vpns3" and not gateway.nat
+    assert gateway.mark == compiler.exit_mark("node:3")
+    assert accepts_established(reordered, *identity)
+    assert not accepts_established(compile_policy(policy("local"), node_facts), *identity)
+
+
 def test_active_mark_collision_is_an_error_and_deleted_collision_is_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

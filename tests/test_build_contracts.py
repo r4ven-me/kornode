@@ -285,6 +285,9 @@ def test_release_requires_exact_main_ci_and_emits_attestations() -> None:
     assert "head_repository.full_name == github.repository" in job["if"]
     assert 1 <= job["timeout-minutes"] <= 60
     assert spec["concurrency"]["cancel-in-progress"] is False
+    assert job["env"]["RELEASE_COMMIT"] == (
+        "${{ github.event.workflow_run.head_sha || github.sha }}"
+    )
     steps = job["steps"]
     gate = next(s for s in steps if "Require successful full CI" in s.get("name", ""))
     assert (
@@ -299,13 +302,82 @@ def test_release_requires_exact_main_ci_and_emits_attestations() -> None:
     assert build["with"]["sbom"] is True
     assert build["with"]["provenance"] == "mode=min"
     assert "build-args" not in build["with"]  # no empty variable overriding the reviewed pin
-    assert steps.index(gate) < steps.index(build)
+    login = next(s for s in steps if s.get("uses", "").startswith("docker/login"))
+    builder = next(s for s in steps if s.get("uses", "").startswith("docker/setup-buildx"))
+    exists = next(s for s in steps if s.get("id") == "exists")
+    metadata = next(s for s in steps if s.get("id") == "meta")
+    assert steps.index(gate) < steps.index(login) < steps.index(build)
+    assert steps.index(builder) < steps.index(exists)
+    assert metadata["with"]["labels"].splitlines()[-1] == (
+        "org.opencontainers.image.revision=${{ env.RELEASE_COMMIT }}"
+    )
     for step in steps:
         script = step.get("run", "")
         if "<<'PY'\n" in script:
             compile(script.split("<<'PY'\n")[1].rsplit("\nPY", 1)[0], "<workflow>", "exec")
 
 
+def test_release_matrix_publishes_hub_and_agent_independently() -> None:
+    job = workflow("release-image")["jobs"]["publish"]
+    assert job["strategy"]["fail-fast"] is False
+    assert job["strategy"]["matrix"]["include"] == [
+        {"name": "kornode", "dockerfile": "Dockerfile", "target": "runtime"},
+        {"name": "kornode-agent", "dockerfile": "Dockerfile.agent", "target": ""},
+    ]
+    steps = job["steps"]
+    version = next(s for s in steps if s.get("id") == "version")
+    exists = next(s for s in steps if s.get("id") == "exists")
+    metadata = next(s for s in steps if s.get("id") == "meta")
+    build = next(s for s in steps if s.get("uses", "").startswith("docker/build-push"))
+    assert version["env"]["IMAGE_NAME"] == "${{ matrix.name }}"
+    assert exists["env"]["IMAGE"] == "${{ steps.version.outputs.image }}"
+    assert 'imagetools inspect "$IMAGE:v$VERSION"' in exists["run"]
+    assert metadata["with"]["images"] == "${{ steps.version.outputs.image }}"
+    assert metadata["if"] == build["if"] == "steps.exists.outputs.published != 'true'"
+    assert metadata["with"]["tags"].splitlines() == [
+        "type=raw,value=v${{ steps.version.outputs.version }}",
+        "type=raw,value=latest",
+    ]
+    assert build["with"]["file"] == "${{ matrix.dockerfile }}"
+    assert build["with"]["target"] == "${{ matrix.target }}"
+    assert build["with"]["tags"] == "${{ steps.meta.outputs.tags }}"
+    assert build["with"]["push"] is True
+    assert build["with"]["cache-from"] == "type=gha,scope=${{ matrix.name }}"
+    assert build["with"]["cache-to"] == "type=gha,mode=max,scope=${{ matrix.name }}"
+
+
+@pytest.mark.parametrize("image_name", ["kornode", "kornode-agent"])
+@pytest.mark.parametrize("version", ["1.2.3", "1.2.3+invalid-docker-tag"])
+def test_release_version_step_selects_and_validates_each_image(
+    tmp_path: Path, image_name: str, version: str
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n')
+    output = tmp_path / "output"
+    step = next(
+        s for s in workflow("release-image")["jobs"]["publish"]["steps"] if s.get("id") == "version"
+    )
+    result = subprocess.run(
+        ["bash", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "IMAGE_NAME": image_name,
+            "GITHUB_REPOSITORY_OWNER": "Mixed-Owner",
+            "GITHUB_OUTPUT": str(output),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if version == "1.2.3":
+        assert result.returncode == 0, result.stderr
+        assert output.read_text() == f"version=1.2.3\nimage=ghcr.io/mixed-owner/{image_name}\n"
+    else:
+        assert result.returncode != 0
+        assert not output.exists()
+
+
+@pytest.mark.parametrize("image_name", ["kornode", "kornode-agent"])
 @pytest.mark.parametrize(
     ("message", "code", "published"),
     [
@@ -316,7 +388,7 @@ def test_release_requires_exact_main_ci_and_emits_attestations() -> None:
     ],
 )
 def test_release_workflow_registry_guard(
-    fake_tools: Path, message: str, code: str, published: str | None
+    fake_tools: Path, image_name: str, message: str, code: str, published: str | None
 ) -> None:
     fake_tools.with_name("docker").symlink_to(fake_tools)
     output = fake_tools.parent / "output"
@@ -330,7 +402,7 @@ def test_release_workflow_registry_guard(
             **os.environ,
             "PATH": f"{fake_tools.parent}:{os.environ['PATH']}",
             "GITHUB_OUTPUT": str(output),
-            "IMAGE": "example/hub",
+            "IMAGE": f"ghcr.io/example/{image_name}",
             "VERSION": "1.1.5",
             "FAKE_MANIFEST": message,
             "FAKE_MANIFEST_CODE": code,

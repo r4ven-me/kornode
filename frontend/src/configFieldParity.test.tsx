@@ -13,7 +13,7 @@ type Field = { binding: string; label?: string; labels?: Record<string, string>;
 type Surface = { component: string; marker: string; label_prefix?: string };
 const models = inventory.models as unknown as Array<{ name: string; surfaces: Surface[]; fields: Record<string, Field> }>;
 const destination = { routes: ["10.1.0.0/16"], domains: ["corp.example.com"], route_urls: ["https://example.com/old-routes"], domain_urls: ["https://example.com/old-domains"] };
-const policy = { sources: [{ name: "wg", interface: "wg0", cidr: "10.8.1.0/24", export: true }], sets: { corp: destination }, egress: [{ from: ["host"], to: destination, via: "local" }] };
+const policy = { sources: [{ name: "wg", interface: "wg0", cidr: "10.8.1.0/24", export: true }], sets: { corp: destination }, egress: [{ from: ["host"], to: destination, via: "node:3" }] };
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.get.mockResolvedValue({ policy, warnings: [] }); mocks.write.mockResolvedValue({ policy, warnings: [] });

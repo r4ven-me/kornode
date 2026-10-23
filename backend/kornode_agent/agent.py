@@ -595,11 +595,11 @@ class Agent:
         """Re-resolved sets: converge, and tell the hub when an exit rule's destination
         changed, because it marks the transit traffic by the same addresses (D-79)."""
         self.reconciler.wake()
-        if self._exit_sets():
+        if self._gateway_sets():
             self.loop.call_soon_threadsafe(self._report_now.set)
 
-    def _exit_sets(self) -> dict[str, list[str]]:
-        """Addresses behind the set/domain destinations of this node's `exit:<n>` rules,
+    def _gateway_sets(self) -> dict[str, list[str]]:
+        """Addresses behind the set/domain destinations of this node's `node:<n>` rules,
         keyed like `NodeFacts.resolved`; static routes stay with the policy."""
         active = self.inputs.active
         if active is None:
@@ -607,7 +607,7 @@ class Agent:
         resolved = self.set_resolver.read()
         found: dict[str, list[str]] = {}
         for index, rule in enumerate(active.bundle.policy.egress):
-            if rule.parsed_via.kind != "exit":
+            if rule.parsed_via.kind != "node":
                 continue
             if isinstance(rule.to, SetRef):
                 key = rule.to.set
@@ -655,7 +655,7 @@ class Agent:
                     "failed_versions": dict(state.failed),
                     "tunnels": tunnels,
                     "sources": sources,
-                    "exit_sets": self._exit_sets(),
+                    "gateway_sets": self._gateway_sets(),
                     "local_networks": [str(n) for n in self.probes.local_networks(set(links))],
                     "reconciler": {
                         "last_apply": status["last_apply_at"],
