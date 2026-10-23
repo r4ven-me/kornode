@@ -489,6 +489,8 @@ class UpstreamProfileConfig(StrictModel):
         # reject a name like "4laddin".
         if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$", value):
             raise ValueError("upstream.profiles[].name must be a short identifier")
+        if profile_slug(value) == "active":
+            raise ValueError("upstream profile name is reserved for the active alias")
         return value
 
     @field_validator("check_host")

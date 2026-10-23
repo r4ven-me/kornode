@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
-import type { Rule } from "../../agentsApi";
+import type { JsonObject, Rule } from "../../agentsApi";
+import { DestinationFields } from "./DestinationSets";
 import type { NetExplainResult } from "../../api";
 import "./egress.css";
 
@@ -90,10 +91,11 @@ export function EgressRules({ rules, disabled, classes, deadRules, explain, onCh
           <label>To
             <span className="egress-pair">
               <select aria-label={label("to kind")} value={to.kind} onChange={e => update(index, { to: toValue(e.target.value as ToKind, "") })}>{TO_KINDS.map(k => <option key={k}>{k}</option>)}</select>
-              {(to.kind === "set" || to.kind === "node" || to.kind === "inline") &&
-                <input aria-label={label("to value")} placeholder={to.kind === "inline" ? "10.0.0.0/8, example.com" : to.kind === "node" ? "node id" : "set name"} value={to.value} onChange={e => update(index, { to: toValue(to.kind, e.target.value) })} />}
+              {(to.kind === "set" || to.kind === "node") &&
+                <input aria-label={label("to value")} placeholder={to.kind === "node" ? "node id" : "set name"} value={to.value} onChange={e => update(index, { to: toValue(to.kind, e.target.value) })} />}
             </span>
           </label>
+          {to.kind === "inline" && <div className="egress-wide"><DestinationFields value={rule.to as JsonObject} label={`Rule ${index + 1} destination`} disabled={disabled} onChange={value => update(index, { to: value })} /></div>}
           <label>Via
             <span className="egress-pair">
               <select aria-label={label("via kind")} value={via.kind} onChange={e => update(index, { via: viaValue(e.target.value as ViaKind, via.target) })}>{VIA_KINDS.map(k => <option key={k}>{k}</option>)}</select>

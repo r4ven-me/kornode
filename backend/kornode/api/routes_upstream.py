@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
-from kornode.api.routes_config import apply_config_patch
+from kornode.api.routes_config import apply_config_mutation, apply_config_patch
 from kornode.config.models import AppConfig, UpstreamProfileConfig
+from kornode.services.config_collections import raw_collection, raw_config_value, replace_named
 from kornode.services.secrets import is_secret_key
 from kornode.services.upstream import UpstreamService
 from kornode.tunnels.pin import fetch_server_pin
@@ -151,9 +153,14 @@ def fetch_pin(payload: FetchPinRequest) -> dict[str, str]:
     try:
         pin = fetch_server_pin(payload.server.strip(), payload.port)
     except OSError as exc:
-        raise ValueError(
-            f"could not read the certificate of {payload.server}:{payload.port}: {exc}"
-        ) from exc
+        reason = "connection failed"
+        if isinstance(exc, ConnectionRefusedError):
+            reason = "connection refused"
+        elif isinstance(exc, TimeoutError):
+            reason = "connection timed out"
+        raise HTTPException(
+            status_code=400, detail=f"Could not fetch server certificate: {reason}"
+        ) from None
     return pin.as_dict()
 
 
@@ -162,34 +169,31 @@ def save_profile(
     request: Request,
     payload: UpstreamProfileRequest,
 ) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    existing = next((item for item in config.upstream.profiles if item.name == payload.name), None)
-    data = payload.model_dump(exclude_none=True)
-    if existing:
-        _preserve_unset_secret(data, existing, "password")
-        _preserve_unset_secret(data, existing, "cert_pass")
-        _preserve_unset_secret(data, existing, "camouflage_secret")
-        _preserve_unset_file_field(data, existing, "cert_file", "cert_file_base64")
-        _preserve_unset_file_field(data, existing, "key_file", "key_file_base64")
-        if "interface" not in payload.model_fields_set and existing.interface is not None:
-            data["interface"] = existing.interface
-    profile = UpstreamProfileConfig.model_validate(data)
-    # Edit in place: a profile's tunnel interface is derived from its position in
-    # upstream.profiles (see UpstreamConfig.profile_interface()), so moving an
-    # edited profile to the end would silently renumber live tunnels.
-    profiles = [profile if item.name == profile.name else item for item in config.upstream.profiles]
-    if existing is None:
-        profiles.append(profile)
-    patch: dict[str, object] = {
-        "profiles": [item.model_dump(mode="json") for item in profiles],
-    }
-    # Only pick a default profile automatically when there isn't one yet
-    # (the very first profile ever saved). Once one is active, saving --
-    # whether creating another profile or editing an existing one -- must never
-    # silently switch it; that's what POST /switch is for.
-    if config.upstream.active_profile is None:
-        patch["active_profile"] = profile.name
-    loaded_config, written = apply_config_patch(request, {"upstream": patch})
+    def mutate(raw: dict[str, Any]) -> dict[str, Any]:
+        profiles = raw_collection(raw, Path(request.app.state.config_path), "upstream", "profiles")
+        existing = next((item for item in profiles if item.get("name") == payload.name), {})
+        data = payload.model_dump(exclude_none=True)
+        for field in ("password", "cert_pass", "camouflage_secret", "interface"):
+            if field not in data and field in existing:
+                data[field] = existing[field]
+        for path_field, base64_field in (
+            ("cert_file", "cert_file_base64"),
+            ("key_file", "key_file_base64"),
+        ):
+            if path_field not in data and base64_field not in data:
+                for field in (path_field, base64_field):
+                    if field in existing:
+                        data[field] = existing[field]
+        upstream = raw.setdefault("upstream", {})
+        upstream["profiles"] = replace_named(profiles, payload.name, data)
+        if (
+            raw_config_value(raw, Path(request.app.state.config_path), "upstream", "active_profile")
+            is None
+        ):
+            upstream["active_profile"] = payload.name
+        return raw
+
+    loaded_config, written = apply_config_mutation(request, mutate)
     return {
         "status": "saved",
         "written": written,
@@ -207,16 +211,17 @@ def set_profile_enabled(
     (UpstreamService.enforce_profile_enablement), without resending the
     whole profile (and its secrets) the way saving from the edit form
     would."""
-    config: AppConfig = request.app.state.config
-    if not any(item.name == name for item in config.upstream.profiles):
-        raise HTTPException(status_code=404, detail=f"unknown upstream profile: {name}")
-    profiles = [
-        {**item.model_dump(mode="json"), "enabled": payload.enabled}
-        if item.name == name
-        else item.model_dump(mode="json")
-        for item in config.upstream.profiles
-    ]
-    loaded_config, written = apply_config_patch(request, {"upstream": {"profiles": profiles}})
+
+    def mutate(raw: dict[str, Any]) -> dict[str, Any]:
+        profiles = raw_collection(raw, Path(request.app.state.config_path), "upstream", "profiles")
+        existing = next((item for item in profiles if item.get("name") == name), None)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"unknown upstream profile: {name}")
+        existing["enabled"] = payload.enabled
+        raw.setdefault("upstream", {})["profiles"] = profiles
+        return raw
+
+    loaded_config, written = apply_config_mutation(request, mutate)
     return {
         "status": "saved",
         "written": written,
@@ -226,54 +231,26 @@ def set_profile_enabled(
 
 @router.delete("/profiles/{name}")
 def delete_profile(request: Request, name: str) -> dict[str, object]:
-    config: AppConfig = request.app.state.config
-    profiles = [item for item in config.upstream.profiles if item.name != name]
-    patch: dict[str, object] = {"profiles": [item.model_dump(mode="json") for item in profiles]}
-    if not profiles:
-        patch["active_profile"] = None
-        patch["enabled"] = False
-    elif config.upstream.active_profile == name:
-        patch["active_profile"] = profiles[0].name
-    loaded_config, written = apply_config_patch(request, {"upstream": patch})
+    def mutate(raw: dict[str, Any]) -> dict[str, Any]:
+        profiles = raw_collection(raw, Path(request.app.state.config_path), "upstream", "profiles")
+        profiles = replace_named(profiles, name, None)
+        upstream = raw.setdefault("upstream", {})
+        upstream["profiles"] = profiles
+        if not profiles:
+            upstream.update(active_profile=None, enabled=False)
+        elif (
+            raw_config_value(raw, Path(request.app.state.config_path), "upstream", "active_profile")
+            == name
+        ):
+            upstream["active_profile"] = profiles[0]["name"]
+        return raw
+
+    loaded_config, written = apply_config_mutation(request, mutate)
     return {
         "status": "deleted",
         "written": written,
         "profiles": [_safe_profile_dump(item) for item in loaded_config.upstream.profiles],
     }
-
-
-def _preserve_unset_secret(
-    data: dict[str, object],
-    existing: UpstreamProfileConfig,
-    field: str,
-) -> None:
-    """Keep a write-only secret when the request omits it (editing a profile
-    without retyping a value the API never sends back)."""
-    if field not in data:
-        value = getattr(existing, field)
-        if value:
-            data[field] = value
-
-
-def _preserve_unset_file_field(
-    data: dict[str, object],
-    existing: UpstreamProfileConfig,
-    path_field: str,
-    base64_field: str,
-) -> None:
-    """Keep an existing cert/key source when the request sets neither its
-    path nor its base64 variant -- both are write-only from the API's point
-    of view (the path is visible, but distinguishing "cleared" from "left
-    alone because it was never shown" is only possible when both are
-    absent)."""
-    if path_field in data or base64_field in data:
-        return
-    existing_path = getattr(existing, path_field)
-    existing_base64 = getattr(existing, base64_field)
-    if existing_path:
-        data[path_field] = str(existing_path)
-    elif existing_base64:
-        data[base64_field] = existing_base64
 
 
 def _safe_profile_dump(profile: UpstreamProfileConfig) -> dict[str, object]:

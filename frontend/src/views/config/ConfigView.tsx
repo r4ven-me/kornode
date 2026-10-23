@@ -5,6 +5,8 @@ import { SettingsTabs } from "../../components/SettingsTabs";
 import { ActionButton, EmptyState, Pill } from "../../components/ui";
 import type { AuthMethodsDraft, FabricSettingsDraft, GeneralSettingsDraft, ServerSettingsDraft, WebSettingsDraft } from "../../lib/drafts";
 import { AdminTotpPanel } from "./AdminTotpPanel";
+import { AdminPasswordPanel } from "./AdminPasswordPanel";
+import { ControlSettingsPanel } from "./ControlSettingsPanel";
 import { type ConfigSource } from "../../api";
 
 export function ConfigView({
@@ -16,6 +18,7 @@ export function ConfigView({
   rendered,
   diff,
   validation,
+  sourceConflict = "",
   serverSettingsDraft,
   authMethodsDraft,
   webSettingsDraft,
@@ -51,6 +54,7 @@ export function ConfigView({
   rendered: Record<string, string>;
   diff: string;
   validation: string;
+  sourceConflict?: string;
   serverSettingsDraft: ServerSettingsDraft;
   authMethodsDraft: AuthMethodsDraft;
   webSettingsDraft: WebSettingsDraft;
@@ -356,10 +360,12 @@ export function ConfigView({
           <ActionButton label="Save" icon={Save} primary busy={busy === "web-config-settings"} onClick={onSaveWebSettings} data-capability="web.settings" />
         </div>
       </section>
+      <AdminPasswordPanel onNotice={onNotice} />
       <AdminTotpPanel onNotice={onNotice} />
       </>
       )}
 
+      {section === "system" && <ControlSettingsPanel config={config} onNotice={onNotice} />}
       {section === "system" && (
       <section className="panel" data-capability="config.general_settings">
         <div className="panel-header">
@@ -484,6 +490,8 @@ export function ConfigView({
         </div>
         <textarea
           className="config-editor"
+          aria-label="Persistent YAML source"
+          disabled={busy === "config-save" || busy === "config-source-reload"}
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           placeholder="# No persistent YAML yet. Add settings here to create the file."
@@ -495,6 +503,7 @@ export function ConfigView({
             defaults. Saving this editor creates the YAML file without copying inherited values.
           </p>
         )}
+        {sourceConflict && <p role="alert">{sourceConflict}</p>}
         {validation && (
           <details className="rendered-file" open>
             <summary>Validation</summary>
@@ -502,7 +511,7 @@ export function ConfigView({
           </details>
         )}
         <div className="panel-footer">
-          <ActionButton label="Reload" icon={RefreshCw} onClick={onReloadSource} data-capability="config.source.show" />
+          <ActionButton label="Reload" icon={RefreshCw} busy={busy === "config-source-reload"} disabled={busy !== null} onClick={onReloadSource} data-capability="config.source.show" />
           <span data-capability="config.validate">
           <ActionButton
             label="Validate"
@@ -517,6 +526,7 @@ export function ConfigView({
             icon={Save}
             primary
             busy={busy === "config-save"}
+            disabled={busy !== null || !source?.etag || Boolean(sourceConflict)}
             onClick={onSave}
             data-capability="config.source.save"
           />

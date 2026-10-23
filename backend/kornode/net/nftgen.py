@@ -32,6 +32,21 @@ def _hex(mark: int) -> str:
     return f"0x{mark:08x}"
 
 
+def label_bits(label: str) -> str:
+    """nft ct_label literals are bit *indices*, not integer bitmaps (ct.c).
+
+    A parenthesized OR expression represents the complete 128-bit identity.
+    Commas are accepted for comparisons but NOT in ct-label assignment grammar.
+    Validation uses explicit ==, never implicit flag membership. The kernel's
+    label setter ORs bits rather than clearing them, so validate after setting
+    too: preexisting foreign/failed labels must fail closed on the first packet.
+    """
+    value = int(label, 16)
+    if not 0 < value < 1 << 128:
+        raise PolicyError("conntrack identity must be a nonzero 128-bit label")
+    return "(" + " | ".join(str(bit) for bit in range(128) if value & (1 << bit)) + ")"
+
+
 def _set_decl(name: str, kind: str) -> list[str]:
     if kind == "ifname":
         return [f"  set {name} {{", "    type ifname;", "  }"]
@@ -49,7 +64,10 @@ def _classify_lines(rule: ClassifyRule) -> list[str]:
     if rule.exit is None:
         action = rule.verdict or REJECT
     else:
-        action = f"meta mark set {_hex(rule.exit.mark)} ct mark set meta mark accept"
+        action = (
+            f"meta mark set {_hex(rule.exit.mark)} ct mark set meta mark "
+            f"ct label set {label_bits(rule.exit.identity_label)} goto validate_connection"
+        )
     comment = f'comment "{rule.label or f"egress rule {rule.index}"}"'
     match = list(rule.match)
     v4_only = any(part.startswith("ip saddr") for part in match)
@@ -66,16 +84,22 @@ def _classify_lines(rule: ClassifyRule) -> list[str]:
 
 
 def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> list[str]:
-    guarded = [exit_ for exit_ in exits if exit_.kill_switch]
+    down = [
+        exit_ for exit_ in exits if exit_.kill_switch and exit_.kind == "upstream" and not exit_.up
+    ]
+    blocked = [f"    meta mark & {MARK_MASK} == {_hex(exit_.mark)} {action}" for exit_ in down]
+    guarded = [exit_ for exit_ in exits if exit_.kill_switch and exit_ not in down]
     if not guarded:
-        return []
+        return blocked
     if uplink:
         # D-21: marked traffic must never leave via the uplink; traffic that
         # routing sends to a connected LAN/docker/client network is fine.
         marks = ", ".join(_hex(exit_.mark) for exit_ in guarded)
-        return [f'    meta mark & {MARK_MASK} {{ {marks} }} oifname "{_ifname(uplink)}" {action}']
+        return blocked + [
+            f'    meta mark & {MARK_MASK} {{ {marks} }} oifname "{_ifname(uplink)}" {action}'
+        ]
     # Uplink unknown: fall back to the strict per-exit form (fail closed).
-    return [
+    return blocked + [
         f"    meta mark & {MARK_MASK} == {_hex(exit_.mark)} "
         f'oifname != "{_ifname(exit_.interface)}" {action}'
         for exit_ in guarded
@@ -84,16 +108,15 @@ def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> li
 
 
 def _stale_marks(exits: tuple[Exit, ...], uplink: str | None, action: str) -> list[str]:
-    """D-32: established flows keep the ct mark of the exit they started on.
-    Once that exit is gone from the policy its mark has no ip rule and no
-    kill-switch, so the flow would fall through to main and leave via the
-    uplink without NAT. Any own mark that is not a current exit's never
-    leaves via the uplink (anywhere at all when the uplink is unknown)."""
+    """Defense in depth: removed and legacy marks may not leave on any
+    interface, even if a main-table route points somewhere other than the
+    reported uplink. Identity validation in the early hooks also protects
+    against a historical numeric-mark collision.
+    """
     own = "meta mark & 0xff000000 == 0x0c000000"
     marks = ", ".join(_hex(exit_.mark) for exit_ in exits)
     current = f" meta mark & {MARK_MASK} != {{ {marks} }}" if marks else ""
-    oif = f' oifname "{_ifname(uplink)}"' if uplink else ""
-    return [f"    {own}{current}{oif} {action}"]
+    return [f"    {own}{current} {action}"]
 
 
 def _ifname(value: str) -> str:
@@ -122,7 +145,9 @@ def _session_rpf(facts: NodeFacts) -> list[str]:
         # D-69: answers from an exit node carry the internet's addresses, which are
         # not routed through its session; the flow is established by a marked packet
         # that passed the check when it came in from the agent.
-        lines.append("    iifname @transit_ifaces ct state established,related return")
+        lines.append(
+            "    iifname @transit_ifaces ct direction reply ct state established,related return"
+        )
     lines += [
         "    # strict reverse path for ocserv sessions: a session may only use a "
         "source address routed back through its own device (D-47)"
@@ -173,11 +198,26 @@ def render_script(
     for decl in sets:
         lines += _set_decl(decl.name, "ipv4_addr" if decl.family == 4 else "ipv6_addr")
 
+    # A numeric mark alone is not an identity: hashes can collide after an
+    # exit was deleted. Labels travel with conntrack across process restarts;
+    # legacy (unlabeled), removed and colliding flows must never be adopted.
+    lines += ["  chain validate_connection {"]
+    for exit_ in exits:
+        lines.append(
+            f"    ct mark & {MARK_MASK} == {_hex(exit_.mark)} "
+            f"ct label == {label_bits(exit_.identity_label)} return"
+        )
+    lines += ["    drop", "  }"]
+    rpf = _session_rpf(facts)
+    if rpf:
+        # A reply exemption must return only from RPF, not from prerouting:
+        # the latter would also bypass conntrack identity validation/barriers.
+        lines += ["  chain session_rpf {", *rpf, "  }"]
     lines += [
         "  chain prerouting {",
         "    type filter hook prerouting priority mangle; policy accept;",
-        *_session_rpf(facts),
-        f"    {OWN_MARKS} meta mark set ct mark return",
+        *(["    jump session_rpf"] if rpf else []),
+        f"    {OWN_MARKS} meta mark set ct mark goto validate_connection",
         "    jump egress_classify",
         "  }",
         "  chain egress_classify {",
@@ -189,7 +229,7 @@ def render_script(
         "  }",
         "  chain output {",
         "    type route hook output priority mangle; policy accept;",
-        f"    {OWN_MARKS} meta mark set ct mark return",
+        f"    {OWN_MARKS} meta mark set ct mark goto validate_connection",
         "    jump egress_classify_host",
         "  }",
         "  chain egress_classify_host {",
@@ -215,7 +255,8 @@ def render_script(
             continue
         answered.add(exit_.interface)
         lines.append(
-            f'    ct state new iifname "{_ifname(exit_.interface)}" ct mark set {_hex(exit_.mark)}'
+            f'    ct state new iifname "{_ifname(exit_.interface)}" ct mark set {_hex(exit_.mark)} '
+            f"ct label set {label_bits(exit_.identity_label)}"
         )
     lines += _access_input(facts)
     if facts.enroll is not None:

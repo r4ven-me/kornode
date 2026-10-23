@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { agentGet, agentWrite, type Policy, type Rule, type Source } from "../../agentsApi";
 import type { NetExplainResult } from "../../api";
+import { DestinationSets } from "./DestinationSets";
 import { EgressRules, NEW_RULE, type DeadRule, type ExplainState } from "./EgressRules";
 
 type Shown = { policy: Policy; warnings: string[]; dead_rules?: DeadRule[] };
 type Mode = "rules" | "json";
 
-const EMPTY_SOURCE: Source = { name: "", interface: "", cidr: "", export: true };
+const EMPTY_SOURCE: Source = { name: "", interface: "", cidr: "", export: true, allow_outside_pool: false, description: "" };
 
 /** Hub egress rules and attached access-server sources (spec 02): one editor, the same service as `korctl egress`. */
 export function HubEgress({ token }: { token: string | null }) {
@@ -66,12 +67,14 @@ export function HubEgress({ token }: { token: string | null }) {
           void run(() => agentWrite(`/api/sources/${encodeURIComponent(s.name)}`, "DELETE", undefined, token), (r: Shown) => load(r));
         }}>Remove</button>
       </div></li>)}</ul>
-    <form onSubmit={e => { e.preventDefault(); void run(() => agentWrite(`/api/sources/${encodeURIComponent(draft.name)}`, "PUT", { interface: draft.interface, cidr: draft.cidr, export: draft.export, ...(draft.allow_outside_pool ? { allow_outside_pool: true } : {}), ...(draft.description ? { description: draft.description } : {}) }, token), (r: Shown) => { load(r); setDraft(EMPTY_SOURCE); }); }}>
+    <form data-capability="sources.hub.set" onSubmit={e => { e.preventDefault(); void run(() => agentWrite(`/api/sources/${encodeURIComponent(draft.name)}`, "PUT", { interface: draft.interface, cidr: draft.cidr, export: draft.export, allow_outside_pool: draft.allow_outside_pool ?? false, description: draft.description ?? "" }, token), (r: Shown) => { load(r); setDraft(EMPTY_SOURCE); }); }}>
       <fieldset className="agent-fields" disabled={busy || dirty}>
-        <label>Source name<input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} required /></label>
-        <label>Source interface<input value={draft.interface} onChange={e => setDraft({ ...draft, interface: e.target.value })} required /></label>
-        <label>Source CIDR<input value={draft.cidr} onChange={e => setDraft({ ...draft, cidr: e.target.value })} required /></label>
-        <label className="agent-check"><input type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export to the fabric</label>
+        <label>Source name<input data-config-field="sources[].name" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} required /></label>
+        <label>Source interface<input data-config-field="sources[].interface" value={draft.interface} onChange={e => setDraft({ ...draft, interface: e.target.value })} required /></label>
+        <label>Source CIDR<input data-config-field="sources[].cidr" value={draft.cidr} onChange={e => setDraft({ ...draft, cidr: e.target.value })} required /></label>
+        <label>Source description<input data-config-field="sources[].description" maxLength={200} value={draft.description ?? ""} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
+        <label className="agent-check"><input data-config-field="sources[].allow_outside_pool" type="checkbox" checked={draft.allow_outside_pool ?? false} onChange={e => setDraft({ ...draft, allow_outside_pool: e.target.checked })} /> Allow outside derived source pool</label>
+        <label className="agent-check"><input data-config-field="sources[].export" type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export to the fabric</label>
         <button className="action-button" data-capability="sources.hub.set">Save source</button>
       </fieldset>
     </form>
@@ -80,10 +83,11 @@ export function HubEgress({ token }: { token: string | null }) {
       <button type="button" role="tab" aria-selected={mode === "rules"} className={`action-button${mode === "rules" ? " primary" : ""}`} onClick={() => switchMode("rules")}>Rules</button>
       <button type="button" role="tab" aria-selected={mode === "json"} className={`action-button${mode === "json" ? " primary" : ""}`} onClick={() => switchMode("json")}>JSON (advanced)</button>
     </div>
-    <form onSubmit={e => { e.preventDefault(); void run(async () => agentWrite("/api/egress", "PUT", parse(), token), (r: Shown) => { load(r); setNote("Policy saved."); }); }}>
+    <form data-capability="egress.hub.set" onSubmit={e => { e.preventDefault(); void run(async () => agentWrite("/api/egress", "PUT", parse(), token), (r: Shown) => { load(r); setNote("Policy saved."); }); }}>
       {mode === "json"
         ? <label>Policy (JSON: sources, sets, egress)<textarea className="agent-code" rows={14} value={text} onChange={e => setText(e.target.value)} /></label>
         : <>
+          <DestinationSets sets={policy.sets ?? {}} disabled={busy} onChange={sets => { setPolicy({ ...policy, sets }); setExplain(null); }} />
           <EgressRules rules={rules} disabled={busy} classes={classes} deadRules={deadRules} explain={explain} onChange={setRules} />
           <button type="button" className="action-button" disabled={busy} onClick={() => setRules([...rules, NEW_RULE])}>Add rule</button>
           <div className="egress-explain-bar">

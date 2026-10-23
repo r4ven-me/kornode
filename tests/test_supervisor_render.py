@@ -310,3 +310,17 @@ def test_supervisor_registers_control_api_only_when_enabled(tmp_path: Path) -> N
     assert "[program:control-api]" in rendered
     assert "command=/usr/local/bin/python -m kornode.control" in rendered
     assert "[program:api]" not in rendered
+
+
+def test_supervisor_always_registers_ocserv_with_conditional_autostart(tmp_path: Path) -> None:
+    for enabled in (False, True):
+        config = load_config(
+            tmp_path / "missing.yaml",
+            environ={},
+            cli_overrides={"server": {"enabled": enabled}},
+        )
+        section = (
+            SupervisorConfigRenderer().render(config).split("[program:ocserv]")[1].split("\n[")[0]
+        )
+        assert f"autostart={str(enabled).lower()}" in section
+        assert "autorestart=true" in section

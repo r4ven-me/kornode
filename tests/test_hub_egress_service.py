@@ -170,3 +170,52 @@ def test_cli_show_check_set(world: World, tmp_path: Path) -> None:
     assert shown["policy"]["egress"] == [RULE]
     listed = json.loads(runner.invoke(app, [*base, "source", "list", "--json"]).output)
     assert listed["sources"] == [SOURCE]
+
+
+def test_stale_source_writer_preserves_new_sources_and_unrelated_patch(world: World) -> None:
+    from kornode.config.loader import deep_merge
+    from kornode.services.config_store import mutate_config
+
+    first, stale = world.service(), world.service()
+    first.set_source("wg", {"interface": "wg0", "cidr": "10.8.1.0/25"})
+    mutate_config(
+        world.path,
+        lambda raw: deep_merge(raw, {"system": {"timezone": "Europe/Berlin"}}),
+        write_rendered=False,
+    )
+    stale.set_source("lan", {"interface": "eth1", "cidr": "10.8.1.128/25"})
+
+    loaded = load_config(world.path)
+    assert {source.name for source in loaded.sources} == {"wg", "lan"}
+    assert loaded.system.timezone == "Europe/Berlin"
+
+
+def test_empty_policy_collections_override_environment(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KORNODE_SOURCES", json.dumps([SOURCE]))
+    monkeypatch.setenv("KORNODE_SETS", '{"corp":{"routes":["10.42.0.0/16"]}}')
+    world.service().set_policy({"sources": [], "sets": {}, "egress": []})
+    loaded = load_config(world.path)
+    assert loaded.sources == () and loaded.sets == {} and loaded.egress == ()
+
+
+def test_active_alias_round_trips_via_management_api(world: World) -> None:
+    client = TestClient(
+        create_app(world.config, config_path=world.path), base_url="https://testserver"
+    )
+    policy = {"egress": [{"from": ["clients"], "to": "any", "via": "upstream:active"}]}
+    response = client.put("/api/egress", auth=("admin", "admin-secret"), json=policy)
+    assert response.status_code == 200, response.text
+    assert load_config(world.path).egress[0].via == "upstream:active"
+
+
+def test_sync_failure_reports_saved_but_not_applied(world: World) -> None:
+    def fail(config: AppConfig) -> None:
+        raise OSError("synthetic runtime failure")
+
+    service = HubEgressService(world.config, world.path, sync=fail)
+    with pytest.raises(ManagementError) as exc:
+        service.set_policy({"egress": []})
+    assert exc.value.error == "saved_but_not_applied"
+    assert load_config(world.path).egress == service.config.egress == ()

@@ -11,6 +11,7 @@ from kornode import cli
 from kornode.api import routes_net
 from kornode.api.app import create_app
 from kornode.config.models import AppConfig
+from kornode.net.compile import exit_mark
 from kornode.net.diff import Plan, apply_to_state
 from kornode.net.state import ActualState
 from kornode.services.net import NetService
@@ -60,7 +61,7 @@ def test_plan_lists_exits_and_ops(tmp_path: Path) -> None:
     plan = _service(tmp_path).plan()
 
     assert plan["exits"][0]["name"] == "upstream:main"
-    assert plan["exits"][0]["mark"] == "0x0c000100"
+    assert plan["exits"][0]["mark"] == f"0x{exit_mark('upstream:main'):08x}"
     texts = [op["text"] for op in plan["ops"]]
     assert "add rule ipv4 90: from all lookup main suppress_prefixlength 0" in texts
     assert any(text.startswith("load nft ruleset") for text in texts)
@@ -121,6 +122,93 @@ def test_api_plan_apply_explain(client: TestClient) -> None:
     assert bad.status_code == 422
 
 
+def test_upstream_switch_endpoint_changes_alias_dataplane_but_not_named_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    import yaml
+    from tests.test_netinputs import LINKS
+
+    from kornode.api import routes_upstream
+    from kornode.services.upstream import UpstreamService
+
+    class ReadyRunner(FakeRunner):
+        def run(self, argv: list[str], **kwargs: Any) -> Any:
+            if argv[:3] == ["ip", "-j", "link"]:
+                from kornode.services.command import CommandResult
+
+                links = [*LINKS, {"ifname": "oc-backup", "flags": ["UP"]}]
+                return CommandResult(tuple(argv), 0, json.dumps(links), "")
+            return super().run(argv, **kwargs)
+
+    class RoutingKernel(FakeKernel):
+        def route_get(self, dst: str, mark: int | None, src: str | None = None) -> str | None:
+            tables = {r.table for r in self.state.rules if r.fwmark == mark and r.family == 4}
+            return next(
+                (r.dev for r in self.state.routes if r.table in tables and r.type == "unicast"),
+                None,
+            )
+
+    raw = _config(tmp_path).model_dump(mode="json")
+    raw["upstream"]["active_profile"] = "main"
+    raw["upstream"]["profiles"].append(
+        {"name": "backup", "server": "203.0.113.3", "username": "u", "interface": "oc-backup"}
+    )
+    raw["egress"] = [
+        {"from": ["clients"], "to": {"routes": ["198.18.0.2/32"]}, "via": "upstream:main"},
+        {"from": ["clients"], "to": "any", "via": "upstream:active"},
+    ]
+    path = tmp_path / "alias.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    kernel = RoutingKernel()
+    runner = ReadyRunner()
+    monkeypatch.setattr(
+        routes_net, "NetService", lambda config: NetService(config, runner=runner, kernel=kernel)
+    )
+    monkeypatch.setattr(
+        routes_upstream,
+        "UpstreamService",
+        lambda config: UpstreamService(
+            config, runner=runner, net=NetService(config, runner=runner, kernel=kernel)
+        ),
+    )
+    client = TestClient(create_app(config_path=path))
+    auth = ("admin", "secret")
+    assert client.post("/api/net/apply", auth=auth, json={}).json()["applied"] is True
+
+    def explain_to(dst: str) -> dict[str, Any]:
+        response = client.post(
+            "/api/net/explain", auth=auth, json={"src": "10.100.1.5", "dst": dst}
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    before = explain_to("198.18.0.1")
+    pinned = explain_to("198.18.0.2")
+    assert before["mark"] == f"0x{exit_mark('upstream:main'):08x}"
+    assert before["route"] == "default dev oc-middle0" and not before["warnings"]
+    switched = client.post("/api/upstream/switch", auth=auth, json={"profile": "backup"})
+    assert switched.status_code == 200, switched.text
+    after = explain_to("198.18.0.1")
+    still_pinned = explain_to("198.18.0.2")
+    assert after["mark"] == f"0x{exit_mark('upstream:backup'):08x}" != before["mark"]
+    assert after["route"] == "default dev oc-backup"
+    assert after["kernel_check"].endswith("-> dev oc-backup") and not after["warnings"]
+    assert still_pinned["mark"] == pinned["mark"]
+    assert still_pinned["route"] == pinned["route"] == "default dev oc-middle0"
+    assert not still_pinned["warnings"]
+    assert client.get("/api/net/plan", auth=auth).json()["ops"] == []
+
+    disabled = client.post("/api/upstream/settings", auth=auth, json={"enabled": False})
+    assert disabled.status_code == 200, disabled.text
+    assert client.post("/api/net/apply", auth=auth, json={}).json()["applied"] is True
+    for dst in ("198.18.0.1", "198.18.0.2"):
+        decision = explain_to(dst)
+        assert decision["route"] == "unreachable default (kill-switch)"
+        assert decision["kernel_check"].endswith("-> unreachable") and not decision["warnings"]
+
+
 def test_api_requires_admin(client: TestClient) -> None:
     assert client.get("/api/net/plan").status_code == 401
 
@@ -139,7 +227,8 @@ def test_cli_plan(
     cli.net_plan(as_json=False)
 
     out: Any = capsys.readouterr().out
-    assert "exit upstream:main: mark 0x0c000100 table 12001 (up)" in out
+    mark = exit_mark("upstream:main")
+    assert f"exit upstream:main: mark 0x{mark:08x} table 12001 (up)" in out
     assert "add rule ipv4 90: from all lookup main suppress_prefixlength 0" in out
 
 

@@ -15,6 +15,7 @@ from kornode.net.compile import (
     compile_policy,
 )
 from kornode.net.model import EgressPolicy
+from kornode.net.nftgen import label_bits
 from kornode.net.state import Route
 
 
@@ -70,10 +71,13 @@ def test_hub_marks_agent_traffic_for_the_exit_nodes_table() -> None:
     transit = next(i for i, line in enumerate(lines) if 'comment "transit exit:3"' in line)
     guard = next(i for i, line in enumerate(lines) if 'comment "agents: no exit declared"' in line)
     assert pass_line < transit < guard
-    mark = "0x0c000100"
+    exit_ = compiled.exits[0]
+    mark = f"0x{exit_.mark:08x}"
     assert (
         f"iifname @fabric_ifaces ip saddr @transit3_v4 meta mark set {mark} "
-        f'ct mark set meta mark accept comment "transit exit:3"'
+        f"ct mark set meta mark ct label set {label_bits(exit_.identity_label)} "
+        "goto validate_connection "
+        'comment "transit exit:3"'
     ) in lines
     assert "iifname @fabric_ifaces reject with icmpx admin-prohibited" in lines[guard]
     assert "set transit3_v4 {" in compiled.script and "set transit_ifaces {" in compiled.script
@@ -111,7 +115,9 @@ def test_the_exit_nodes_session_gets_a_table_that_fails_closed() -> None:
 
 def test_answers_of_the_exit_node_skip_the_strict_reverse_path_check() -> None:
     lines = lines_of(compile_policy(EgressPolicy(), hub_facts()).script)
-    skip = lines.index("iifname @transit_ifaces ct state established,related return")
+    skip = lines.index(
+        "iifname @transit_ifaces ct direction reply ct state established,related return"
+    )
     strict = next(i for i, line in enumerate(lines) if "fib saddr . iif oif missing drop" in line)
     assert skip < strict
 
@@ -173,7 +179,11 @@ def test_an_agent_exit_node_sends_through_the_hub_tunnel_without_nat() -> None:
         for line in lines_of(compiled.script)
         if line.startswith('ct state new iifname "oc-hub0"')
     ]
-    assert answered == ['ct state new iifname "oc-hub0" ct mark set 0x0c000100']
+    fabric_exit = next(e for e in compiled.exits if e.name == "fabric")
+    assert answered == [
+        f'ct state new iifname "oc-hub0" ct mark set 0x{fabric_exit.mark:08x} '
+        f"ct label set {label_bits(fabric_exit.identity_label)}"
+    ]
 
 
 def test_an_agent_exit_to_a_node_that_is_offline_is_marked_and_fails_closed() -> None:
@@ -220,7 +230,8 @@ def test_the_exit_node_masquerades_what_the_fabric_sends_it() -> None:
     lines = lines_of(compiled.script)
     assert (
         f"iifname @fabric_ifaces meta mark set 0x{local.mark:08x} "
-        'ct mark set meta mark accept comment "egress rule 1"'
+        f"ct mark set meta mark ct label set {label_bits(local.identity_label)} "
+        'goto validate_connection comment "egress rule 1"'
     ) in lines
     assert (
         f'meta mark & 0xffffff00 == 0x{local.mark:08x} oifname != "lo" masquerade'

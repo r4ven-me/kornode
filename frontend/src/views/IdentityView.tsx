@@ -1,4 +1,4 @@
-import { Power, Save, Trash2 } from "lucide-react";
+import { Pencil, Power, Save, Trash2 } from "lucide-react";
 import type { FormEvent } from "react";
 import type { CommandOutput, OidcDraft } from "../app/types";
 import { LastCommandPanel } from "../components/CommandOutput";
@@ -288,11 +288,19 @@ export function IdentityView({
               <span>Client secret</span>
               <input
                 type="password"
+                autoComplete="new-password"
+                placeholder="Blank preserves saved secret"
+                disabled={providerDraft.remove_client_secret}
                 value={providerDraft.client_secret}
                 onChange={(event) =>
                   onProviderDraftChange({ ...providerDraft, client_secret: event.target.value })
                 }
               />
+            </label>
+            <label className="switch">
+              <input type="checkbox" checked={providerDraft.remove_client_secret ?? false}
+                onChange={(event) => onProviderDraftChange({ ...providerDraft, remove_client_secret: event.target.checked })} />
+              <span>Remove saved client secret</span>
             </label>
             <label>
               <span>Scopes</span>
@@ -441,23 +449,21 @@ export function IdentityView({
                 }
               />
             </label>
-            <label className="switch" title="Route all DNS traffic through the tunnel for this group">
-              <input
-                checked={groupDraft.tunnel_all_dns}
-                onChange={(event) =>
-                  onGroupDraftChange({ ...groupDraft, tunnel_all_dns: event.target.checked })
-                }
-                type="checkbox"
-              />
+            <label title="Route all DNS traffic through the tunnel for this group">
               <span>Tunnel all DNS</span>
+              <select data-config-field="identity.group_policies[].tunnel_all_dns" value={groupDraft.tunnel_all_dns === null ? "inherit" : String(groupDraft.tunnel_all_dns)}
+                onChange={(event) => onGroupDraftChange({ ...groupDraft, tunnel_all_dns: event.target.value === "inherit" ? null : event.target.value === "true" })}>
+                <option value="inherit">Inherit server setting</option>
+                <option value="true">Yes</option><option value="false">No</option>
+              </select>
             </label>
-            <label className="switch" title="Disable UDP/DTLS for clients in this group">
-              <input
-                checked={groupDraft.no_udp}
-                onChange={(event) => onGroupDraftChange({ ...groupDraft, no_udp: event.target.checked })}
-                type="checkbox"
-              />
+            <label title="Disable UDP/DTLS for clients in this group">
               <span>No UDP</span>
+              <select data-config-field="identity.group_policies[].no_udp" value={groupDraft.no_udp === null ? "inherit" : String(groupDraft.no_udp)}
+                onChange={(event) => onGroupDraftChange({ ...groupDraft, no_udp: event.target.value === "inherit" ? null : event.target.value === "true" })}>
+                <option value="inherit">Inherit server setting</option>
+                <option value="true">Yes</option><option value="false">No</option>
+              </select>
             </label>
           </div>
             <div className="panel-footer">
@@ -480,6 +486,7 @@ export function IdentityView({
                 <td>{provider.client_id}</td>
                 <td>{provider.allowed_groups.join(", ")}</td>
                 <td>
+                  <ActionButton icon={Pencil} label={`Edit provider ${provider.name}`} onClick={() => onProviderDraftChange({ ...provider, client_secret: "", remove_client_secret: false })} />
                   <IconButton
                     label="Delete provider"
                     icon={Trash2}
@@ -501,6 +508,12 @@ export function IdentityView({
                 <td>{group.routes.join(", ")}</td>
                 <td>{[...group.dns, ...group.split_dns].join(", ")}</td>
                 <td>
+                  <ActionButton icon={Pencil} label={`Edit group ${group.name}`} onClick={() => onGroupDraftChange({
+                    ...group, display_name: group.display_name ?? "", routes: group.routes.join("\n"),
+                    no_routes: group.no_routes.join("\n"), dns: group.dns.join("\n"), split_dns: group.split_dns.join("\n"),
+                    max_same_clients: group.max_same_clients?.toString() ?? "",
+                    session_timeout: group.session_timeout?.toString() ?? "", idle_timeout: group.idle_timeout?.toString() ?? ""
+                  })} />
                   <IconButton
                     label="Delete group"
                     icon={Trash2}

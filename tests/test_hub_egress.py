@@ -107,6 +107,20 @@ def test_exit_to_a_set_or_inline_destination_is_accepted_since_d79() -> None:
     check_hub_policy(cfg(**sets), [node(2, ["exit"])])
 
 
+@pytest.mark.parametrize("name", ["active", "Active", "ACTIVE"])
+def test_active_profile_name_is_reserved(name: str) -> None:
+    with pytest.raises(ValidationError, match="reserved"):
+        cfg(
+            upstream={
+                "profiles": [{"name": name, "kind": "external_interface", "interface": "wg0"}]
+            }
+        )
+
+
+def test_active_alias_is_valid_without_a_selected_or_enabled_profile() -> None:
+    check_hub_policy(cfg(egress=[{"from": ["clients"], "to": "any", "via": "upstream:active"}]), [])
+
+
 def test_unknown_upstream_rejected() -> None:
     with pytest.raises(HubEgressError) as err:
         check_hub_policy(cfg(egress=[{"from": ["clients"], "to": "any", "via": "upstream:x"}]), [])

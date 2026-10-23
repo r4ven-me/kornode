@@ -55,6 +55,8 @@ egress:
   - `exit:<node>` — send through the fabric to node `<node>`, which applies
     its own `from: fabric` rules to it;
   - `upstream:<profile>` — the named external upstream, masquerade to it;
+  - `upstream:active` — the selected-profile alias, resolved to a concrete
+    upstream identity before classification; `active` is a reserved profile slug;
   - `drop` — explicit reject (ICMP admin-prohibited).
 - `kill_switch` (bool): when the exit is unavailable, traffic is rejected
   instead of falling through to the next rule. Default `true` for every `via`
@@ -89,10 +91,21 @@ egress:
 
 ## Compilation (see 03 for the kernel layout)
 
-- Each distinct exit gets a fwmark and a routing table:
-  - fwmark = `0x0c000000 | (exit_index << 8)`, mask `0xffffff00`;
-    the low byte is left free for other software.
-  - table id = `12000 + exit_index`.
+- Each concrete exit gets a stable identity mark, independent of rule order,
+  selected alias, and process lifetime. Mask `0xffffff00`; low byte is not part
+  of the identity. Marks are `0x0c000000 | (slot << 8)`:
+  - `local`: slot `0x8000`; `fabric`: slot `0x8001` (reserved, never reused);
+  - other exit names: slot `0x8002 + uint32_be(SHA256(name)[:4]) % 0x7ffe`;
+  - simultaneous numeric-mark collisions are a compile error, never resolved
+    by probing another slot (which would change an established flow's identity).
+- Conntrack also stores an identity label: the first 128 bits of SHA256 of
+  the concrete exit name. Restored marks are accepted only with their exact
+  current identity label. This rejects collisions with *deleted* identities
+  without a process-local allocator or recyclable persistent lease database.
+- Routing tables remain bounded slots, `12000 + exit_index`, with first-appearance
+  indices 1..99 and priorities `100 + exit_index`. More than 99 distinct exits
+  is an error. A fail-closed nft barrier covers route/rule updates (04), so a
+  table slot can be reassigned without sending old conntrack down another exit.
 - Each `to` becomes an nft set pair (`<name>_v4`, `<name>_v6`, interval,
   auto-merge). Domain resolutions go to the same set with element timeouts
   (`timeout 2h` refreshed on every resolve) instead of separate static/dynamic
@@ -108,6 +121,35 @@ egress:
 - NAT: one masquerade rule per (`via` that needs NAT, outgoing interface),
   matched on `meta mark` and `oifname`. No NAT is emitted for `fabric` or
   `exit:<node>`.
+
+## Upstream selection, availability and administrative disablement
+
+`upstream.active_profile` (overridden by the runtime `active-upstream` marker)
+selects only `upstream:active`. Named `upstream:<slug>` rules never follow a
+switch/failover. The compiler resolves the alias to the concrete profile's mark,
+interface and table; it never reuses one alias mark for different profiles.
+New flows follow the new selection. Existing flows retain their concrete
+identity while that exit is still referenced; otherwise they are dropped, not
+migrated. A deleted/disabled runtime selection does not silently select another
+profile. No selection compiles the alias as a blocked exit, even with
+`kill_switch: false`.
+
+`upstream.enabled: false` and `profiles[].enabled: false` are administrative
+unavailability, not a request for local egress. Known profile references remain
+valid and compile with permanent `unreachable` routes and nft rejection on
+**every** outgoing interface, even if the physical link is still up and even
+if the rule requested `kill_switch: false`. Explicit policy changes to `local`
+are how an administrator permits local egress. Unknown references still fail
+validation. Carrier exclusions remain available for declared profiles.
+
+Dialing/connection lifecycle and egress authorization are separate: manual
+`connect` can prepare a tunnel but does not enable disabled egress or change the
+selected profile. The watchdog's enablement flags control which connections it
+maintains. Disconnecting openconnect removes its tunnel; policy remains and
+normally fails closed. An `external_interface` is never torn down by kornode:
+its `disconnect` only reconciles existing policy and explicitly reports that
+policy/interface are untouched. Disable the profile or edit egress to change
+its authorization; disconnect must not claim routing was deactivated.
 
 ## Domain-based sets
 

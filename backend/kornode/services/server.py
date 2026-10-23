@@ -43,13 +43,18 @@ class ServerService:
     def stop(self, *, dry_run: bool = False) -> CommandResult:
         if dry_run:
             return _dry_run_result("stopProcess", "ocserv")
-        if not self.config.server.enabled:
-            return self._disabled_result("stopProcess")
-        return _run(lambda: self.rpc.stop_process("ocserv"), "stopProcess", "ocserv")
+
+        def _stop() -> None:
+            try:
+                self.rpc.stop_process("ocserv")
+            except SupervisorRpcError as exc:
+                if not _is_expected_fault(exc, (*_NOT_RUNNING_FAULTS, "BAD_NAME")):
+                    raise
+
+        return _run(_stop, "stopProcess", "ocserv")
 
     def _disabled_result(self, method: str) -> CommandResult:
-        # With server.enabled false there is no [program:ocserv] in the
-        # supervisor config, so the RPC would only answer BAD_NAME.
+        # A disabled server stays registered but must not be started.
         return CommandResult(
             ("supervisor-rpc", method, "ocserv"),
             1,
@@ -96,10 +101,20 @@ class ServerService:
         ocserv.conf the process was running with. Settings SIGHUP can't
         apply (auth methods, ports, device) get a full restart, which drops
         the active VPN sessions; everything else a reload, which keeps them.
-        Returns None when the ocserv server is disabled.
+        A disabled desired state always stops the observed process. An enabled
+        but stopped process must be started, not sent a reload signal.
         """
         if not self.config.server.enabled:
-            return None
+            return self.stop(dry_run=dry_run)
+        if not dry_run:
+            try:
+                info = self.rpc.get_process_info("ocserv")
+            except SupervisorRpcError as exc:
+                return CommandResult(
+                    ("supervisor-rpc", "getProcessInfo", "ocserv"), 1, "", str(exc)
+                )
+            if info.get("statename") != "RUNNING":
+                return self.start()
         current = OcservConfigRenderer().render(self.config)
         if restart_required(previous_ocserv_conf, current):
             return self.restart(dry_run=dry_run)
@@ -139,6 +154,8 @@ class ServerService:
             raise ValueError("unsupported managed process")
         if dry_run:
             return _dry_run_result(action, process)
+        if process == "ocserv" and action != "status":
+            return {"start": self.start, "stop": self.stop, "restart": self.restart}[action]()
         if action == "start":
             return _run(lambda: self.rpc.start_process(process), "startProcess", process)
         if action == "stop":
@@ -173,6 +190,8 @@ class ServerService:
         return ["api", "ocserv", "dnsmasq", "certbot-renew", "upstream-watchdog"]
 
     def missing_process_state(self, name: str) -> tuple[str, str]:
+        if name == "ocserv" and not self.config.server.enabled:
+            return "DISABLED", "ocserv is disabled"
         if name == "dnsmasq" and not self.config.dns_tunnel_active():
             return "DISABLED", "internal DNS and split DNS are disabled"
         if name == "certbot-renew" and not self.config.certificates.letsencrypt.enabled:

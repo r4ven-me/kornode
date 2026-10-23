@@ -15,14 +15,11 @@ from kornode.cli_agents import register as register_agent_commands
 from kornode.cli_egress import register as register_egress_commands
 from kornode.cli_fabric import register as register_fabric_commands
 from kornode.cli_hub import register as register_hub_commands
-from kornode.config.defaults import DEFAULT_CONFIG
-from kornode.config.env import combined_environment, env_overrides_from_mapping
 from kornode.config.loader import (
     DEFAULT_CONFIG_PATH,
     deep_merge,
     load_config,
-    load_yaml_file,
-    resolve_secret_refs,
+    validate_config_data,
 )
 from kornode.config.models import AppConfig, GroupPolicyConfig, OidcProviderConfig
 from kornode.registry.snapshot import due as registry_snapshot_due
@@ -30,10 +27,10 @@ from kornode.registry.snapshot import snapshot as registry_snapshot
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
+from kornode.services.config_store import mutate_config
 from kornode.services.diagnostics import DiagnosticsService
 from kornode.services.doctor import DoctorService
 from kornode.services.domain_resolver import DomainResolverService
-from kornode.services.files import FileManager
 from kornode.services.groups import GroupConfigService
 from kornode.services.host_dns import HostDnsService
 from kornode.services.internal_dns import InternalDnsService
@@ -148,23 +145,17 @@ def config_diff() -> None:
 
 def save_config_patch(patch: dict[str, Any], *, write_rendered: bool = True) -> AppConfig:
     path = STATE.get("config_path") or DEFAULT_CONFIG_PATH
-    old_data = load_yaml_file(path)
-    merged = deep_merge(old_data, patch)
-    _validate_config_data(merged, path)
-    FileManager().atomic_write_text(path, yaml.safe_dump(merged, sort_keys=False), mode=0o600)
-    config = get_config()
-    if write_rendered:
-        ConfigService().write_rendered_files(config)
+    config, _ = mutate_config(
+        path,
+        lambda raw: deep_merge(raw, patch),
+        write_rendered=write_rendered,
+        env_file=STATE.get("env_file"),
+    )
     return config
 
 
 def _validate_config_data(data: dict[str, Any], path: Path) -> AppConfig:
-    environment = combined_environment(path, STATE.get("env_file"), None)
-    env_overrides = env_overrides_from_mapping(environment)
-    merged = deep_merge(DEFAULT_CONFIG, env_overrides)
-    merged = deep_merge(merged, data)
-    merged = resolve_secret_refs(merged, environment)
-    return AppConfig.model_validate(merged)
+    return validate_config_data(data, path, env_file=STATE.get("env_file"))
 
 
 @server_app.command("start")

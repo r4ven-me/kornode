@@ -458,6 +458,7 @@ export function App() {
             rendered={state.renderedConfig}
             diff={configEditor.configDiff}
             validation={configEditor.configValidation}
+            sourceConflict={configEditor.configConflict}
             serverSettingsDraft={settings.serverSettingsDraft}
             authMethodsDraft={settings.authMethodsDraft}
             webSettingsDraft={settings.webSettingsDraft}

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import secrets
 import threading
 import time
@@ -9,6 +11,8 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, status
 
+from kornode.config.models import AppConfig
+from kornode.services.admin_totp import AdminTotpService
 from kornode.services.password_hash import verify_password
 
 SESSION_COOKIE = "kornode_session"
@@ -44,9 +48,44 @@ class AuthSessionRegistry:
         self._sessions: dict[str, AdminSession] = {}
         self._failures: dict[str, list[float]] = {}
         self._lock = threading.Lock()
+        self._auth_fingerprint: bytes | None = None
+        self._generation = 0
 
-    def create(self, username: str) -> tuple[str, AdminSession]:
+    def synchronize(self, config: AppConfig) -> None:
+        """Invalidate cookies when the running application's auth config changes."""
+        fingerprint = _auth_fingerprint(config)
         with self._lock:
+            if self._auth_fingerprint != fingerprint:
+                self._sessions.clear()
+                self._generation += 1
+                self._auth_fingerprint = fingerprint
+
+    def revoke_all(self) -> None:
+        with self._lock:
+            self._sessions.clear()
+            self._generation += 1
+
+    @property
+    def generation(self) -> int:
+        with self._lock:
+            return self._generation
+
+    def require_current_authority(self, generation: int, session_token: str | None) -> None:
+        with self._lock:
+            self._prune()
+            if generation != self._generation or (
+                session_token is not None and session_token not in self._sessions
+            ):
+                raise HTTPException(status_code=401, detail="authentication_changed")
+
+    def create(
+        self, username: str, *, expected_generation: int | None = None
+    ) -> tuple[str, AdminSession]:
+        with self._lock:
+            # A credential change must also reject logins that started before
+            # revocation but finish verifying the old credentials afterward.
+            if expected_generation is not None and expected_generation != self._generation:
+                raise HTTPException(status_code=401, detail="authentication_changed")
             self._prune()
             token = secrets.token_urlsafe(48)
             now = time.monotonic()
@@ -104,7 +143,63 @@ def auth_registry(request: Request) -> AuthSessionRegistry:
     if not isinstance(registry, AuthSessionRegistry):
         registry = AuthSessionRegistry(request.app.state.config.web.session_lifetime)
         request.app.state.auth_sessions = registry
+    registry.synchronize(request.app.state.config)
     return registry
+
+
+def _auth_fingerprint(config: AppConfig) -> bytes:
+    web = config.web
+    # Keep an opaque snapshot, not another plaintext copy of credentials.
+    return hashlib.sha256(
+        json.dumps(
+            [
+                web.admin_user,
+                web.admin_password,
+                web.admin_password_hash,
+                web.admin_totp_enabled,
+                web.admin_totp_secret,
+            ],
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).digest()
+
+
+def invalidate_auth_sessions(
+    request: Request, previous_config: AppConfig, new_config: AppConfig
+) -> None:
+    """Call after a successful config update; unrelated settings preserve sessions.
+
+    This is process-local, like the session registry itself. Config files modified
+    by an external CLI are not reloaded by the API; once a new config is installed
+    in app.state, auth_registry() also detects the change on the next auth check.
+    """
+    if _auth_fingerprint(previous_config) != _auth_fingerprint(new_config):
+        registry = getattr(request.app.state, "auth_sessions", None)
+        if isinstance(registry, AuthSessionRegistry):
+            registry.revoke_all()
+            registry.synchronize(new_config)
+
+
+def authenticate_totp(request: Request, code: str | None) -> None:
+    config = request.app.state.config
+    if not config.web.admin_totp_enabled:
+        return
+    if not code:
+        raise HTTPException(status_code=401, detail="totp_code_required")
+    registry = auth_registry(request)
+    # Separate from password failures, which are cleared by a valid password.
+    source = f"totp:{request.client.host if request.client else 'unknown'}"
+    if not registry.login_allowed(source):
+        raise HTTPException(status_code=429, detail="too many failed login attempts")
+    secret = config.web.admin_totp_secret
+    try:
+        valid = secret is not None and AdminTotpService(config).verify_code(secret, code)
+    except (ValueError, TypeError):
+        valid = False
+    if not valid:
+        registry.record_failure(source)
+        raise HTTPException(status_code=401, detail="invalid_totp_code")
+    registry.clear_failures(source)
 
 
 def authenticate_password(request: Request, username: str, password: str) -> None:
@@ -123,9 +218,13 @@ def authenticate_password(request: Request, username: str, password: str) -> Non
     password_matches = (
         verify_password(password, expected_hash)
         if expected_hash is not None
-        else expected_password is not None and secrets.compare_digest(password, expected_password)
+        else expected_password is not None
+        and secrets.compare_digest(password.encode("utf-8"), expected_password.encode("utf-8"))
     )
-    if not (secrets.compare_digest(username, config.web.admin_user) and password_matches):
+    if not (
+        secrets.compare_digest(username.encode("utf-8"), config.web.admin_user.encode("utf-8"))
+        and password_matches
+    ):
         registry.record_failure(source)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -135,9 +234,13 @@ def authenticate_password(request: Request, username: str, password: str) -> Non
 
 
 def require_admin(request: Request) -> None:
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        _reject_cross_origin_basic_request(request)
+    registry = auth_registry(request)
+    generation = registry.generation
     session_token = request.cookies.get(SESSION_COOKIE)
     if session_token:
-        session = auth_registry(request).get(session_token)
+        session = registry.get(session_token)
         if session is not None:
             if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
                 csrf_token = request.headers.get("x-kornode-csrf", "")
@@ -145,6 +248,7 @@ def require_admin(request: Request) -> None:
                     raise HTTPException(status_code=403, detail="CSRF validation failed")
             request.state.admin_username = session.username
             request.state.admin_session = session
+            request.state.admin_auth_generation = generation
             return
 
     credentials = parse_basic_authorization(request.headers.get("authorization"))
@@ -153,38 +257,48 @@ def require_admin(request: Request) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="authentication required",
         )
+    if request.app.state.config.web.admin_totp_enabled:
+        raise HTTPException(status_code=401, detail="totp_session_required")
     authenticate_password(request, credentials.username, credentials.password)
-    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        _reject_cross_origin_basic_request(request)
     request.state.admin_username = credentials.username
+    request.state.admin_auth_generation = generation
 
 
 def _reject_cross_origin_basic_request(request: Request) -> None:
-    """Same-origin check for mutating requests authenticated via HTTP Basic.
+    """Validate the full browser origin; headerless scripted Basic still works.
 
-    Basic Auth has no CSRF token to check the way the cookie-session branch
-    above does: unlike a JS-issued header, there is no session for a
-    non-browser API client (curl, a script) to have fetched one from. But a
-    BROWSER that has ever authenticated to this origin with Basic Auth
-    caches those credentials and resends them automatically on *any*
-    request to the same origin -- including one triggered by a third-party
-    page's plain `<form method=post>`, which needs no JS and isn't stopped
-    by SameSite cookie rules since no cookie is involved at all. Without
-    this check, that made every mutating endpoint CSRF-exploitable against
-    an admin who had ever used Basic Auth in a browser.
-
-    A browser always sends Origin (or, lacking that, Referer) on a
-    cross-origin state-changing request; a legitimate non-browser client
-    typically sends neither. So only a header that's present AND names a
-    different host is rejected -- its absence is not.
+    Use the ASGI URL (including its scheme), not untrusted forwarding headers.
+    Trusted reverse-proxy scheme/host normalization belongs at the server boundary.
     """
-    origin = request.headers.get("origin") or request.headers.get("referer")
-    if not origin:
+    origins = request.headers.getlist("origin")
+    referers = request.headers.getlist("referer")
+    values = origins if origins else referers
+    if not values:
         return
-    origin_host = urlparse(origin).hostname
-    request_host = (request.headers.get("host") or "").split(":", 1)[0]
-    if origin_host and request_host and origin_host != request_host:
-        raise HTTPException(status_code=403, detail="cross-origin request rejected")
+    try:
+        if len(values) != 1 or not values[0] or any(c.isspace() for c in values[0]):
+            raise ValueError
+        origin = urlparse(values[0])
+        target = urlparse(str(request.url))
+        if (
+            origin.scheme not in {"http", "https"}
+            or not origin.hostname
+            or origin.username is not None
+            or origin.password is not None
+            or origin.fragment
+            or (origins and (origin.path or origin.query))
+        ):
+            raise ValueError
+        defaults = {"http": 80, "https": 443}
+        origin_port = origin.port if origin.port is not None else defaults[origin.scheme]
+        target_port = target.port if target.port is not None else defaults[target.scheme]
+        origin_tuple = (origin.scheme, origin.hostname, origin_port)
+        target_tuple = (target.scheme, target.hostname, target_port)
+        if origin_tuple == target_tuple:
+            return
+    except (ValueError, KeyError):
+        pass
+    raise HTTPException(status_code=403, detail="cross-origin request rejected")
 
 
 def parse_basic_authorization(value: str | None) -> BasicCredentials | None:

@@ -153,6 +153,9 @@ def start_hub_server(lab: Lab, topology: Topology, tmp: Path) -> HubServerHandle
             str(root.generated_dir / "ocserv.conf"),
         ],
         log_file,
+        # Session hooks invoke korctl without --config. They must inherit
+        # this fixture's config, never reconcile the image's default policy.
+        env={**os.environ, "KORNODE_CONFIG": str(root.config_path)},
     )
     _wait_until(
         lambda: process.poll() is None and tcp_check(topology.node3, HUB_ADDR, SERVER_PORT),
@@ -350,6 +353,8 @@ def _popen_in_namespace(
     ns: Namespace,
     argv: list[str],
     log_file: Path,
+    *,
+    env: dict[str, str] | None = None,
 ) -> subprocess.Popen[bytes]:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     log = log_file.open("ab")
@@ -358,6 +363,7 @@ def _popen_in_namespace(
             ["ip", "netns", "exec", ns.full_name, *argv],
             stdout=log,
             stderr=subprocess.STDOUT,
+            env=env,
         )
     finally:
         log.close()

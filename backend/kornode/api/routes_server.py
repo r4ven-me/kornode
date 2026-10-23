@@ -98,50 +98,35 @@ class AuthMethodsSettingsRequest(BaseModel):
     otp_telegram_chat_id: str | None = None
 
 
-def otp_settings_from_payload(
-    payload: AuthMethodsSettingsRequest,
-    current: AppConfig,
-) -> dict[str, object]:
-    return {
+def otp_settings_patch(payload: AuthMethodsSettingsRequest) -> dict[str, object]:
+    patch: dict[str, object] = {
         "enabled": payload.otp_enabled,
         "ocserv_oath_auth": payload.otp_ocserv_oath_auth,
         "issuer": payload.otp_issuer,
         "send_by_email": payload.otp_send_by_email,
         "send_by_telegram": payload.otp_send_by_telegram,
-        "smtp_host": (
-            payload.otp_smtp_host
-            if "otp_smtp_host" in payload.model_fields_set
-            else current.auth.otp.smtp_host
-        ),
-        "smtp_port": payload.otp_smtp_port or current.auth.otp.smtp_port,
-        "smtp_username": (
-            payload.otp_smtp_username
-            if "otp_smtp_username" in payload.model_fields_set
-            else current.auth.otp.smtp_username
-        ),
-        "smtp_password": payload.otp_smtp_password or current.auth.otp.smtp_password,
-        "smtp_from": (
-            payload.otp_smtp_from
-            if "otp_smtp_from" in payload.model_fields_set
-            else current.auth.otp.smtp_from
-        ),
-        "smtp_starttls": (
-            payload.otp_smtp_starttls
-            if payload.otp_smtp_starttls is not None
-            else current.auth.otp.smtp_starttls
-        ),
-        "smtp_test_recipient": (
-            payload.otp_smtp_test_recipient
-            if "otp_smtp_test_recipient" in payload.model_fields_set
-            else current.auth.otp.smtp_test_recipient
-        ),
-        "telegram_bot_token": payload.otp_telegram_bot_token or current.auth.otp.telegram_bot_token,
-        "telegram_chat_id": (
-            payload.otp_telegram_chat_id
-            if "otp_telegram_chat_id" in payload.model_fields_set
-            else current.auth.otp.telegram_chat_id
-        ),
     }
+    for field in payload.model_fields_set:
+        if not field.startswith("otp_"):
+            continue
+        key = field.removeprefix("otp_")
+        value = getattr(payload, field)
+        # The UI sends null for untouched write-only secrets. Leave their raw
+        # references (or env-only values) in place instead of freezing a value.
+        if key in {"smtp_password", "telegram_bot_token", "smtp_port", "smtp_starttls"} and (
+            value is None or value == ""
+        ):
+            continue
+        patch[key] = value
+    return patch
+
+
+def otp_settings_from_payload(
+    payload: AuthMethodsSettingsRequest,
+    current: AppConfig,
+) -> dict[str, object]:
+    # Delivery tests need resolved values, unlike persistent config patches.
+    return {**current.auth.otp.model_dump(), **otp_settings_patch(payload)}
 
 
 def command_result(result: CommandResult, argv: tuple[str, ...] | None = None) -> dict[str, object]:
@@ -162,8 +147,14 @@ def running_ocserv_conf(request: Request) -> str:
 def ocserv_apply_result(result: CommandResult | None) -> dict[str, object] | None:
     if result is None:
         return None
-    action = "restart" if "restartProcess" in result.argv else "reload"
-    return command_result(result, ("korctl", "server", action))
+    actions = {
+        "startProcess": "start",
+        "stopProcess": "stop",
+        "restartProcess": "restart",
+        "signalProcess": "reload",
+    }
+    action = next((actions[arg] for arg in result.argv if arg in actions), None)
+    return command_result(result, ("korctl", "server", action) if action else None)
 
 
 @router.post("/settings")
@@ -172,6 +163,7 @@ def save_server_settings(
     payload: ServerSettingsRequest,
 ) -> dict[str, object]:
     patch = payload.model_dump(exclude={"reload"})
+    was_enabled = request.app.state.config.server.enabled
     previous = running_ocserv_conf(request)
     loaded_config, written = apply_config_patch(request, {"server": patch})
     # Rewriting ocserv.conf alone does not make the *running* ocserv process
@@ -179,8 +171,12 @@ def save_server_settings(
     # reload, the server keeps enforcing whatever was last loaded, silently
     # diverging from what the panel shows as saved. A port/listen/device
     # change needs a full restart, which apply_config_change picks.
+    # reload=False may defer tuning changes, but not an explicit start/stop.
+    enabled_changed = was_enabled != loaded_config.server.enabled
     reload_result = (
-        ServerService(loaded_config).apply_config_change(previous) if payload.reload else None
+        ServerService(loaded_config).apply_config_change(previous)
+        if payload.reload or enabled_changed
+        else None
     )
     return {
         "status": "saved",
@@ -198,7 +194,7 @@ def save_auth_methods_settings(
     patch = {
         "password": {"enabled": payload.password_enabled},
         "certificate": {"enabled": payload.certificate_enabled},
-        "otp": otp_settings_from_payload(payload, request.app.state.config),
+        "otp": otp_settings_patch(payload),
     }
     previous = running_ocserv_conf(request)
     loaded_config, written = apply_config_patch(request, {"auth": patch})

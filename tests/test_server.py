@@ -5,10 +5,10 @@ from typing import Any
 
 from kornode.config.models import AppConfig
 from kornode.services.server import ServerService
-from kornode.services.supervisor_rpc import SupervisorRpcError
+from kornode.services.supervisor_rpc import SupervisorRpcClient, SupervisorRpcError
 
 
-class FakeRpcClient:
+class FakeRpcClient(SupervisorRpcClient):
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
         self.all_process_info: list[dict[str, Any]] = []
@@ -160,7 +160,11 @@ def test_auth_method_change_restarts_ocserv(tmp_path: Path) -> None:
     )
 
     assert result is not None and result.ok
-    assert rpc.calls == [("stopProcess", "ocserv"), ("startProcess", "ocserv")]
+    assert rpc.calls == [
+        ("getProcessInfo", "ocserv"),
+        ("stopProcess", "ocserv"),
+        ("startProcess", "ocserv"),
+    ]
 
 
 def test_reloadable_change_only_sends_sighup(tmp_path: Path) -> None:
@@ -172,15 +176,16 @@ def test_reloadable_change_only_sends_sighup(tmp_path: Path) -> None:
 
     ServerService(after, rpc_client=rpc).apply_config_change(OcservConfigRenderer().render(before))
 
-    assert rpc.calls == [("signalProcess", "ocserv", "HUP")]
+    assert rpc.calls == [("getProcessInfo", "ocserv"), ("signalProcess", "ocserv", "HUP")]
 
 
-def test_apply_config_change_skips_disabled_ocserv(tmp_path: Path) -> None:
+def test_apply_config_change_stops_disabled_ocserv(tmp_path: Path) -> None:
     config = _config(tmp_path, server={"enabled": False})
     rpc = FakeRpcClient()
 
-    assert ServerService(config, rpc_client=rpc).apply_config_change("") is None
-    assert rpc.calls == []
+    result = ServerService(config, rpc_client=rpc).apply_config_change("")
+    assert result is not None and result.ok
+    assert rpc.calls == [("stopProcess", "ocserv")]
 
 
 def test_server_start_reports_failure_when_ocserv_is_disabled(tmp_path: Path) -> None:
@@ -206,7 +211,7 @@ def test_server_start_reports_failure_when_ocserv_is_disabled(tmp_path: Path) ->
     assert "server.enabled" in result.stderr
 
 
-def test_server_stop_and_restart_report_failure_when_ocserv_is_disabled(tmp_path: Path) -> None:
+def test_server_can_stop_but_cannot_restart_when_ocserv_is_disabled(tmp_path: Path) -> None:
     config = AppConfig.model_validate(
         {
             "server": {"enabled": False},
@@ -223,8 +228,42 @@ def test_server_stop_and_restart_report_failure_when_ocserv_is_disabled(tmp_path
     stopped = service.stop()
     restarted = service.restart()
 
-    assert rpc.calls == []
-    assert stopped.returncode == 1
+    assert rpc.calls == [("stopProcess", "ocserv")]
+    assert stopped.ok
     assert restarted.returncode == 1
-    assert "server.enabled" in stopped.stderr
     assert "server.enabled" in restarted.stderr
+
+
+def test_enabling_a_previously_disabled_server_starts_instead_of_reload(tmp_path: Path) -> None:
+    from kornode.renderers import OcservConfigRenderer
+
+    class StoppedRpc(FakeRpcClient):
+        def get_process_info(self, name: str) -> dict[str, Any]:
+            self.calls.append(("getProcessInfo", name))
+            return {"name": name, "statename": "STOPPED"}
+
+    rpc = StoppedRpc()
+    before = _config(tmp_path, server={"enabled": False})
+    after = _config(tmp_path, server={"enabled": True})
+    result = ServerService(after, rpc_client=rpc).apply_config_change(
+        OcservConfigRenderer().render(before),
+    )
+    assert result is not None and result.ok
+    assert rpc.calls == [("getProcessInfo", "ocserv"), ("startProcess", "ocserv")]
+
+
+def test_disabled_ocserv_generic_start_does_not_bypass_desired_state(tmp_path: Path) -> None:
+    config = _config(tmp_path, server={"enabled": False})
+    rpc = FakeRpcClient()
+    result = ServerService(config, rpc_client=rpc).process_action("start", "ocserv")
+    assert not result.ok
+    assert not rpc.calls
+
+
+def test_stop_is_idempotent_but_reports_unexpected_rpc_failures(tmp_path: Path) -> None:
+    config = _config(tmp_path, server={"enabled": False})
+    rpc = FakeRpcClient()
+    service = ServerService(config, rpc_client=rpc)
+    for fault, ok in (("NOT_RUNNING", True), ("BAD_NAME", True), ("permission denied", False)):
+        rpc.fail_stop_with = fault
+        assert service.stop().ok == ok

@@ -63,9 +63,9 @@ def selected_profile(config: AppConfig, files: FileManager) -> UpstreamProfileCo
     profiles = {profile.name: profile for profile in config.upstream.profiles}
     for line in files.read_lines(active_profile_file(config)):
         name = line.strip()
-        if name and name in profiles:
-            profile = profiles[name]
-            return profile if profile.enabled else None
+        if name:
+            profile = profiles.get(name)
+            return profile if profile and profile.enabled else None
     return config.upstream.selected_profile()
 
 
@@ -104,15 +104,17 @@ class HubNetInputs:
         tunnels: dict[str, TunnelFact] = {}
         upstreams: list[str] = []
         links = self._links()
-        if config.upstream.enabled:
-            for profile in config.upstream.profiles:
-                interface = config.upstream.profile_interface(profile)
-                tunnels[f"upstream:{profile_slug(profile.name)}"] = TunnelFact(
-                    interface=interface,
-                    up=links.get(interface, False),
-                    carrier=tuple(self._carrier(profile)),
-                )
-                upstreams.append(profile_slug(profile.name))
+        # Declaration and availability are different: disabled upstreams are
+        # still known references and retain their fail-closed exit tables.
+        for profile in config.upstream.profiles:
+            interface = config.upstream.profile_interface(profile)
+            tunnels[f"upstream:{profile_slug(profile.name)}"] = TunnelFact(
+                interface=interface,
+                up=config.upstream.enabled and profile.enabled and links.get(interface, False),
+                carrier=tuple(self._carrier(profile)),
+            )
+            upstreams.append(profile_slug(profile.name))
+        active = selected_profile(config, self.files)
         tunnel_ifaces = {tunnel.interface for tunnel in tunnels.values()}
         view = self._fabric_view()
         policy = self.policy()
@@ -130,6 +132,12 @@ class HubNetInputs:
             local_networks=tuple(self._local_networks(exclude=tunnel_ifaces)),
             resolved=self._resolved(),
             upstreams=tuple(upstreams),
+            active_upstream=profile_slug(active.name) if active else None,
+            disabled_upstreams=tuple(
+                profile_slug(profile.name)
+                for profile in config.upstream.profiles
+                if not config.upstream.enabled or not profile.enabled
+            ),
             sources={
                 source.name: SourceFact(present=source.interface in links)
                 for source in policy.sources

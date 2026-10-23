@@ -1,3 +1,16 @@
+# Never send repository metadata, nested audit worktrees or local credentials.
+.git
+.ai
+.claude
+.serena
+**/.git
+**/.env
+**/.env.*
+!.env.example
+/secrets
+/certificates
+/lists
+id_ed25519*
 .venv
 .e2e-venv
 artifacts

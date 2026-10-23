@@ -2113,7 +2113,8 @@ def test_enforce_profile_enablement_tears_down_disabled_external_interface(
     results = service.enforce_profile_enablement()
 
     assert len(results) == 1
-    assert results[0].stdout == "routing deactivated (interface untouched)"
+    assert "routing reconciled" in results[0].stdout
+    assert "egress policy untouched" in results[0].stdout
     assert net.calls == ["converge"]
 
 
