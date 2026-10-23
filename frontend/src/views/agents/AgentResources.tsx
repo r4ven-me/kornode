@@ -20,14 +20,14 @@ export function SourceEditor({ sources, busy, mutate }: { sources: Source[]; bus
   const [draft, setDraft] = useState<Source>(empty); const [editing, setEditing] = useState(false);
   return <section className="panel"><h2>Attached sources</h2><p className="field-help">kornode does not create external VPN interfaces. Full source/interlink integration is P4.</p>
     <ul className="agent-items" data-capability="agent.source.list">{sources.map(s => <li key={s.name}><span>{s.name} · {s.interface} · {s.cidr}</span><div className="row-actions"><button className="action-button" type="button" onClick={() => { setDraft(s); setEditing(true); }}>Edit</button><button className="action-button" type="button" disabled={busy} data-capability="agent.source.delete" onClick={() => void mutate(`/sources/${encodeURIComponent(s.name)}`, "DELETE", undefined, `Remove source ${s.name}? Referencing rules must be removed first.`)}>Remove</button></div></li>)}</ul>
-    <form onSubmit={e => { e.preventDefault(); const { name, ...data } = draft; void mutate(`/sources/${encodeURIComponent(name)}`, "PUT", data); }}>
+    <form data-capability="agent.source.set" onSubmit={e => { e.preventDefault(); const { name, ...data } = draft; void mutate(`/sources/${encodeURIComponent(name)}`, "PUT", data); }}>
       <fieldset className="agent-fields" disabled={busy}>
-        <label>Source name<input value={draft.name} disabled={editing} onChange={e => setDraft({ ...draft, name: e.target.value })} required /></label>
-        <label>Source interface<input value={draft.interface} onChange={e => setDraft({ ...draft, interface: e.target.value })} required /></label>
-        <label>Source CIDR<input value={draft.cidr} onChange={e => setDraft({ ...draft, cidr: e.target.value })} required /></label>
-        <label>Source description<input value={draft.description ?? ""} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
-        <label className="agent-check"><input type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export source</label>
-        <label className="agent-check"><input type="checkbox" checked={draft.allow_outside_pool ?? false} onChange={e => setDraft({ ...draft, allow_outside_pool: e.target.checked })} /> Allow outside derived source pool</label>
+        <label>Source name<input data-config-field="sources[].name" value={draft.name} disabled={editing} onChange={e => setDraft({ ...draft, name: e.target.value })} required /></label>
+        <label>Source interface<input data-config-field="sources[].interface" value={draft.interface} onChange={e => setDraft({ ...draft, interface: e.target.value })} required /></label>
+        <label>Source CIDR<input data-config-field="sources[].cidr" value={draft.cidr} onChange={e => setDraft({ ...draft, cidr: e.target.value })} required /></label>
+        <label>Source description<input data-config-field="sources[].description" value={draft.description ?? ""} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
+        <label className="agent-check"><input data-config-field="sources[].export" type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export source</label>
+        <label className="agent-check"><input data-config-field="sources[].allow_outside_pool" type="checkbox" checked={draft.allow_outside_pool ?? false} onChange={e => setDraft({ ...draft, allow_outside_pool: e.target.checked })} /> Allow outside derived source pool</label>
       </fieldset>
       <div className="panel-footer"><button className="action-button" type="button" onClick={() => { setDraft(empty); setEditing(false); }}>New source</button><button className="action-button primary" disabled={busy} data-capability="agent.source.set">Save source</button></div>
     </form>

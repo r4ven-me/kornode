@@ -630,6 +630,28 @@ def test_upgrade_deployment_has_an_independent_client_and_only_owned_ports(
     assert "awg" not in services and "awg-client" not in services
 
 
+def test_upgrade_restart_targets_only_node_and_preserves_client_image(
+    worker: FakeWorker, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker.role, worker.case = "agent-b", "upgrade"
+    worker.directory.mkdir()
+    client = {"image": "baseline:previous", "entrypoint": ["sleep", "infinity"]}
+    compose_path = worker.directory / "compose.json"
+    compose_path.write_text(json.dumps({"services": {
+        "node": {"image": "baseline:previous"}, "client": client,
+    }}))
+    worker.payload = {"image": "current:agent"}
+    monkeypatch.setattr(worker, "owned_case", lambda: {"image": "baseline:previous"})
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(worker, "compose", lambda *args: calls.append(args))
+    worker.restart()
+    services = json.loads(compose_path.read_text())["services"]
+    assert services["client"] == client
+    assert services["node"]["image"] == "current:agent"
+    assert calls == [("up", "-d", "--force-recreate", "node")]
+    assert worker.commands == []
+
+
 @pytest.mark.parametrize(
     "action",
     [
@@ -660,6 +682,95 @@ def test_upgrade_policy_uses_only_the_shared_local_client_subset(worker: FakeWor
         {"id": "clients-out", "from": ["clients"], "to": "any", "via": "local"},
     ]}]
     assert not (worker.directory / "access-policy.json").exists()
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_access_client_hook_restores_routes_on_reconnect_without_relogin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, full: bool,
+) -> None:
+    import subprocess
+
+    from tests.e2e.worker import ACCESS_CLIENT
+
+    directory = tmp_path / "access"
+    dials: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        if argv[0] == "openconnect":
+            dials.append(argv)
+            return SimpleNamespace(returncode=0)
+        if argv == ["ip", "-4", "-j", "route", "show", "default"]:
+            return SimpleNamespace(returncode=0, stdout=b'[{"gateway":"192.0.2.254"}]')
+        assert argv == ["ip", "-4", "-j", "addr", "show", "dev", "kn-vpnc0"]
+        return SimpleNamespace(returncode=0, stdout=b'[{"addr_info":[{"local":"10.9.0.2"}]}]')
+
+    options = {
+        "host": "192.0.2.2", "port": 8443, "pin": "fake-pin", "user": "alice",
+        "password": "local-test-only", "routes": ["192.0.2.4/32"], "full": full,
+    }
+    # Execute the actual generator, but never start openconnect or inspect real routes.
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stdin", io.StringIO(json.dumps(options)))
+        patch.setattr(subprocess, "run", run)
+        code = ACCESS_CLIENT.replace("/tmp/kn-access", str(directory))
+        exec(compile(code, "<access-client>", "exec"), {})
+    assert len(dials) == 1
+    assert "--script=" + str(directory / "vpnc") in dials[0]
+
+    state_path = tmp_path / "ip-state.json"
+    state_path.write_text(json.dumps({"address": None, "routes": {}, "errors": 0}))
+    ip = tmp_path / "ip"
+    ip.write_text(
+        "#!" + sys.executable + "\n" + '''import json,os,sys
+from pathlib import Path
+path=Path(os.environ["FAKE_IP_STATE"])
+state=json.loads(path.read_text());args=sys.argv[1:];code=0
+if args[:2]==["link","set"]:
+ pass
+elif args[0] in {"addr","route"} and args[1] in {"add","replace"}:
+ target=args[2]
+ exists=state["address"] is not None if args[0]=="addr" else target in state["routes"]
+ if args[1]=="add" and exists:
+  state["errors"]+=1;code=2
+ elif args[0]=="addr":
+  state["address"]=target
+ else:
+  state["routes"][target]=args[3:]
+else:
+ raise SystemExit("unexpected fake ip command")
+path.write_text(json.dumps(state))
+sys.exit(code)
+'''
+    )
+    ip.chmod(0o700)
+    env = {
+        **os.environ, "PATH": str(tmp_path), "FAKE_IP_STATE": str(state_path),
+        "TUNDEV": "kn-vpnc0", "INTERNAL_IP4_ADDRESS": "10.9.0.2",
+    }
+
+    def hook(reason: str) -> dict[str, Any]:
+        subprocess.run(["/bin/sh", str(directory / "vpnc")], env={**env, "reason": reason},
+                       check=True, capture_output=True, timeout=5)
+        return cast(dict[str, Any], json.loads(state_path.read_text()))
+
+    connected = hook("connect")
+    expected_routes = {"192.0.2.4/32": ["dev", "kn-vpnc0"]}
+    if full:
+        expected_routes.update({
+            "192.0.2.2/32": ["via", "192.0.2.254"], "default": ["dev", "kn-vpnc0"],
+        })
+    assert connected["routes"] == expected_routes
+    # A link flap may remove routes while leaving the assigned address. The hook
+    # must restore those routes, not rely on a new login or a fresh tun device.
+    connected["routes"] = {}
+    state_path.write_text(json.dumps(connected))
+    assert hook("attempt-reconnect") == connected
+    for _ in range(2):
+        recovered = hook("reconnect")
+        assert recovered["routes"] == expected_routes
+        assert recovered["address"] == "10.9.0.2/32"
+        assert recovered["errors"] == 0
+    assert len(dials) == 1
 
 
 @pytest.mark.parametrize(
@@ -748,6 +859,43 @@ def test_upgrade_preserves_client_gap_and_checks_post_upgrade_success(
     assert actions.index(("agent-b", "upgrade_traffic_start")) < actions.index(("hub", "restart"))
     assert actions[-1] == ("agent-b", "upgrade_traffic_status")
     assert successes[0] >= 6  # baseline, completion snapshot, fresh recovery
+
+
+@pytest.mark.parametrize("healthy", [False, True])
+def test_upgrade_rejects_stale_client_success_without_operator_relogin(
+    environment: dict[str, str], monkeypatch: pytest.MonkeyPatch, healthy: bool,
+) -> None:
+    fleet = Fleet(Inventory.from_env(environment))
+    fleet.image_ids = {"hub": "hub-id", "agent": "agent-id"}
+    cluster = Cluster(fleet, "upgrade")
+    actions: list[tuple[str, str]] = []
+    replaced: list[str] = []
+
+    def call(role: str, action: str, **payload: Any) -> Any:
+        actions.append((role, action))
+        if action == "upgrade_traffic_status":
+            return {"healthy": healthy if replaced else True, "successes": 2}
+        if action == "restart":
+            replaced.append(role)
+            return {"image_id": fleet.image_ids["hub" if role == "hub" else "agent"]}
+        return {"started": True}
+
+    def bounded_wait(predicate: Any, seconds: float, message: str) -> None:
+        if message == "upgrade access-client forwarding did not recover automatically":
+            assert seconds == 40
+            assert replaced == ["hub", "agent-a", "agent-b"]
+            assert not predicate()
+            assert not predicate()
+            raise E2EError(message)
+        wait_for(predicate, seconds, message)
+
+    monkeypatch.setattr(cluster, "call", call)
+    monkeypatch.setattr(cluster, "ping", lambda role: 204)
+    monkeypatch.setattr("tests.e2e.fleet.wait_for", bounded_wait)
+    with pytest.raises(E2EError, match="forwarding did not recover automatically"):
+        cluster.upgrade()
+    assert all(action != "access_client" for _, action in actions)
+    assert actions[-3:] == [("agent-b", "upgrade_traffic_status")] * 3
 
 
 def test_nl05_capture_filter_counts_only_cleartext_target_packets_on_the_uplink() -> None:

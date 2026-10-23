@@ -7,24 +7,22 @@ are limited to the `interlink:` section of the config file.
 
 from __future__ import annotations
 
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import ValidationError
 
-from kornode.config.loader import load_config, load_yaml_file
+from kornode.config.loader import deep_merge
 from kornode.config.models import AppConfig
 from kornode.net.addressing import derive_addresses
 from kornode.services.agent_models import ManagementError
 from kornode.services.agents import AgentService
-from kornode.services.config import ConfigService
-from kornode.services.files import FileManager
+from kornode.services.config_store import ConfigApplyError, ConfigPreflightError, mutate_config
 from kornode.services.hub_egress import HubEgressService
 from kornode.services.interlink_dns import InterlinkDnsService
 from kornode.services.net import NetService
+from kornode.services.secrets import sanitized_validation_errors
 
 HUB_NODE_ID = 1
 SETTINGS_KEYS = ("cidr", "client_pool", "source_pool", "enroll_pool", "domain", "reserved")
@@ -38,11 +36,13 @@ class InterlinkService:
         config: AppConfig,
         path: Path,
         *,
+        env_file: Path | None = None,
         saved: Callable[[AppConfig], None] | None = None,
         sync: Callable[[AppConfig], None] | None = None,
     ) -> None:
         self.config = config
         self.path = path
+        self.env_file = env_file
         self.saved = saved
         self.sync = sync or self._sync
 
@@ -91,37 +91,49 @@ class InterlinkService:
             )
         if not data:
             raise ManagementError(422, "invalid", "no interlink settings given")
-        raw = load_yaml_file(self.path)
-        values = {key: value for key, value in data.items() if key != "node_id"}
-        raw["interlink"] = {**(raw.get("interlink") or {}), **values}
+        patch: dict[str, Any] = {
+            "interlink": {key: value for key, value in data.items() if key != "node_id"},
+        }
         if "node_id" in data:
-            raw["node"] = {**(raw.get("node") or {}), "id": data["node_id"]}
-        self._validate(raw)
-        FileManager().atomic_write_text(self.path, yaml.safe_dump(raw, sort_keys=False), mode=0o600)
-        self.config = load_config(self.path)
-        if self.saved is not None:
-            self.saved(self.config)
-        self.sync(self.config)
-        return {"interlink": self.settings()}
+            patch["node"] = {"id": data["node_id"]}
 
-    def _validate(self, raw: dict[str, Any]) -> None:
-        # The loader validates the whole file (derived addresses, DNS) exactly as a
-        # restart would, so it reads a sibling copy and never the live file.
-        with tempfile.NamedTemporaryFile(
-            "w", dir=self.path.parent, prefix=".interlink-check-", suffix=".yaml", delete=False
-        ) as handle:
-            temp = Path(handle.name)
-            handle.write(yaml.safe_dump(raw, sort_keys=False))
+        def installed(config: AppConfig) -> None:
+            self.config = config
+            if self.saved is not None:
+                self.saved(config)
+
         try:
-            load_config(temp)
+            mutate_config(
+                self.path,
+                lambda raw: deep_merge(raw, patch),
+                env_file=self.env_file,
+                on_commit=installed,
+                after_apply=self.sync,
+            )
         except ValidationError as exc:
-            messages = [str(error["msg"]) for error in exc.errors()]
-            fields = [".".join(str(part) for part in error["loc"]) for error in exc.errors()]
-            raise ManagementError(422, "invalid", "; ".join(messages), fields) from None
-        except ValueError as exc:
-            raise ManagementError(422, "invalid", str(exc)) from None
-        finally:
-            temp.unlink(missing_ok=True)
+            raise ManagementError(
+                422,
+                "invalid",
+                "Invalid interlink configuration",
+                sanitized_validation_errors(exc.errors()),
+            ) from None
+        except ValueError:
+            raise ManagementError(422, "invalid", "Invalid interlink configuration") from None
+        except ConfigPreflightError:
+            raise ManagementError(
+                500,
+                "not_saved",
+                "Render preflight failed; configuration was not saved",
+                {"saved": False, "applied": False},
+            ) from None
+        except ConfigApplyError:
+            raise ManagementError(
+                500,
+                "saved_but_not_applied",
+                "Configuration saved; runtime application failed. Retry rendering before reload.",
+                {"saved": True, "applied": False},
+            ) from None
+        return {"interlink": self.settings()}
 
     def _service_address(self, node_id: int) -> object:
         interlink = self.config.interlink
@@ -135,5 +147,4 @@ class InterlinkService:
 
     @staticmethod
     def _sync(config: AppConfig) -> None:
-        ConfigService().write_rendered_files(config)
         NetService(config).wake()

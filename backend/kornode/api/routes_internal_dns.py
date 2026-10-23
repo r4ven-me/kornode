@@ -4,11 +4,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
-from kornode.api.routes_config import apply_config_patch
+from kornode.api.routes_config import apply_config_patch, runtime_config_path
 from kornode.config.models import AppConfig
 from kornode.services.apply import apply_dns_configuration, client_dns_signature
 from kornode.services.command import CommandResult
 from kornode.services.internal_dns import InternalDnsService
+from kornode.services.render_transaction import render_config
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -87,6 +88,7 @@ def save_internal_dns_settings(
         loaded_config,
         background_tasks,
         reconnect_clients=reconnect_required,
+        config_path=runtime_config_path(request),
     )
     return {
         "status": "saved_and_applied",
@@ -114,7 +116,12 @@ def apply_internal_dns(
 ) -> list[dict[str, object]]:
     """Explicitly apply DNS configuration and reconnect active clients."""
     config: AppConfig = request.app.state.config
-    results = apply_dns_configuration(config, background_tasks, reconnect_clients=True)
+    results = apply_dns_configuration(
+        config,
+        background_tasks,
+        reconnect_clients=True,
+        config_path=runtime_config_path(request),
+    )
     return [_command_payload(result) for result in results]
 
 
@@ -131,10 +138,14 @@ def refresh_blocklist(
         )
     result = InternalDnsService(config).refresh_url_blocklist(payload.url, preview=payload.preview)
     written: list[str] = []
-    if result.saved and config.internal_dns.blocklist_enabled:
-        from kornode.services.config import ConfigService
+    if result.saved:
+        path = runtime_config_path(request)
+        if path is not None:
+            written = render_config(path)
+        else:
+            from kornode.services.config import ConfigService
 
-        written = [str(path) for path in ConfigService().write_rendered_files(config)]
+            written = [str(item) for item in ConfigService().write_rendered_files(config)]
     return {
         "status": "previewed" if payload.preview else "refreshed",
         "url": result.url,

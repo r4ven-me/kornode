@@ -74,6 +74,7 @@ def test_missing_config_source_does_not_materialize_env_or_defaults(tmp_path: Pa
         "/api/config/source",
         auth=("admin", "secret"),
         json={"content": "server:\n  realm: Saved VPN\n", "write_rendered": False},
+        headers={"If-Match": source_response.headers["ETag"]},
     )
 
     assert save_response.status_code == 200
@@ -86,13 +87,15 @@ def test_missing_config_source_does_not_materialize_env_or_defaults(tmp_path: Pa
 def test_config_source_save_preserves_masked_secret_values(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path)
-    source = client.get("/api/config/source", auth=("admin", "secret")).json()["content"]
+    source_response = client.get("/api/config/source", auth=("admin", "secret"))
+    source = source_response.json()["content"]
     edited = source.replace("realm: Korvus Node VPN", "realm: Edited VPN")
 
     response = client.post(
         "/api/config/source",
         auth=("admin", "secret"),
         json={"content": edited, "write_rendered": False},
+        headers={"If-Match": source_response.headers["ETag"]},
     )
 
     assert response.status_code == 200

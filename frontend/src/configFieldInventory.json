@@ -1,0 +1,71 @@
+{
+  "scope": "Scoped regression inventory only: ControlConfig, Source, DestSet, and GroupPolicyConfig nullable booleans. This is not proof of complete AppConfig coverage.",
+  "models": [
+    {
+      "name": "ControlConfig",
+      "module": "kornode.config.models",
+      "coverage": "all_fields",
+      "surfaces": [
+        { "component": "control", "file": "views/config/ControlSettingsPanel.tsx", "marker": "control.settings", "api": "POST /api/web-config/control-settings" }
+      ],
+      "fields": {
+        "enabled": { "binding": "control.enabled", "label": "Enable agent control plane", "control": "checkbox", "sample": true },
+        "port": { "binding": "control.port", "label": "Control plane port", "control": "number", "sample": 9444 },
+        "long_poll_seconds": { "binding": "control.long_poll_seconds", "label": "Long poll (seconds)", "control": "number", "sample": 100 },
+        "report_interval_seconds": { "binding": "control.report_interval_seconds", "label": "Report interval (seconds)", "control": "number", "sample": 40 },
+        "offline_after_seconds": { "binding": "control.offline_after_seconds", "label": "Offline threshold (seconds)", "control": "number", "sample": 120 },
+        "cert_lifetime_days": { "binding": "control.cert_lifetime_days", "label": "Agent certificate lifetime (days)", "control": "number", "sample": 60 },
+        "enroll_token_ttl_minutes": { "binding": "control.enroll_token_ttl_minutes", "label": "Enrollment token lifetime (minutes)", "control": "number", "sample": 30 },
+        "bundle_history": { "binding": "control.bundle_history", "label": "Bundle history", "control": "number", "sample": 10 },
+        "min_agent_version": { "binding": "control.min_agent_version", "label": "Minimum agent version", "control": "text", "sample": "2.1.0" },
+        "signing_key": { "binding": "control.signing_key", "label": "Signing-key path (advanced deployment setting)", "control": "text", "nullable": true, "sample": "/deployment/custom-signing.pem" }
+      }
+    },
+    {
+      "name": "Source",
+      "module": "kornode.net.model",
+      "coverage": "all_fields",
+      "surfaces": [
+        { "component": "hub-source", "file": "views/network/HubEgress.tsx", "marker": "sources.hub.set", "api": "PUT /api/sources/{name}" },
+        { "component": "agent-source", "file": "views/agents/AgentResources.tsx", "marker": "agent.source.set", "api": "PUT /api/agents/{name}/sources/{source}" }
+      ],
+      "fields": {
+        "name": { "binding": "sources[].name", "label": "Source name", "control": "text", "sample": "branch" },
+        "interface": { "binding": "sources[].interface", "label": "Source interface", "control": "text", "sample": "wg1" },
+        "cidr": { "binding": "sources[].cidr", "label": "Source CIDR", "control": "text", "sample": "10.8.2.0/24" },
+        "export": { "binding": "sources[].export", "labels": { "hub-source": "Export to the interlink", "agent-source": "Export source" }, "control": "checkbox", "sample": false },
+        "allow_outside_pool": { "binding": "sources[].allow_outside_pool", "label": "Allow outside derived source pool", "control": "checkbox", "sample": true },
+        "description": { "binding": "sources[].description", "label": "Source description", "control": "text", "sample": "Branch attached VPN" }
+      }
+    },
+    {
+      "name": "DestSet",
+      "module": "kornode.net.model",
+      "coverage": "all_fields",
+      "surfaces": [
+        { "component": "hub-set", "file": "views/network/HubEgress.tsx", "fields_file": "views/network/DestinationSets.tsx", "label_prefix": "Set corp", "marker": "egress.hub.set", "api": "PUT /api/egress" },
+        { "component": "agent-set", "file": "views/agents/AgentPolicy.tsx", "fields_file": "views/network/DestinationSets.tsx", "label_prefix": "Set corp", "marker": "agent.policy.set", "api": "PUT /api/agents/{name}/policy" },
+        { "component": "hub-inline", "file": "views/network/HubEgress.tsx", "fields_file": "views/network/DestinationSets.tsx", "label_prefix": "Rule 1 destination", "marker": "egress.hub.set", "api": "PUT /api/egress" },
+        { "component": "agent-inline", "file": "views/agents/AgentPolicy.tsx", "fields_file": "views/network/DestinationSets.tsx", "label_prefix": "Rule 1 destination", "marker": "agent.policy.set", "api": "PUT /api/agents/{name}/policy" }
+      ],
+      "fields": {
+        "routes": { "binding": "DestSet.routes", "config_paths": ["sets.*.routes", "egress[].to.routes"], "label": "routes", "control": "textarea", "sample": ["10.20.0.0/16"] },
+        "domains": { "binding": "DestSet.domains", "config_paths": ["sets.*.domains", "egress[].to.domains"], "label": "domains", "control": "textarea", "sample": ["private.example.com"] },
+        "route_urls": { "binding": "DestSet.route_urls", "config_paths": ["sets.*.route_urls", "egress[].to.route_urls"], "label": "route list urls", "control": "textarea", "sample": ["https://example.com/routes.txt"] },
+        "domain_urls": { "binding": "DestSet.domain_urls", "config_paths": ["sets.*.domain_urls", "egress[].to.domain_urls"], "label": "domain list urls", "control": "textarea", "sample": ["https://example.com/domains.txt"] }
+      }
+    },
+    {
+      "name": "GroupPolicyConfig",
+      "module": "kornode.config.models",
+      "coverage": "nullable_boolean_fields",
+      "surfaces": [
+        { "component": "identity-group", "file": "views/IdentityView.tsx", "marker": "identity.group.set", "api": "POST /api/identity/groups" }
+      ],
+      "fields": {
+        "tunnel_all_dns": { "binding": "identity.group_policies[].tunnel_all_dns", "label": "Tunnel all DNS", "control": "select", "states": [{ "value": "inherit", "label": "Inherit server setting", "model_value": null }, { "value": "true", "label": "Yes", "model_value": true }, { "value": "false", "label": "No", "model_value": false }] },
+        "no_udp": { "binding": "identity.group_policies[].no_udp", "label": "No UDP", "control": "select", "states": [{ "value": "inherit", "label": "Inherit server setting", "model_value": null }, { "value": "true", "label": "Yes", "model_value": true }, { "value": "false", "label": "No", "model_value": false }] }
+      }
+    }
+  ]
+}

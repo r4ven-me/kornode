@@ -26,7 +26,7 @@ reconciler. Contracts: `docs/spec/` (start with `00-overview.md`); decisions: `d
 
 ## Layers (hub)
 
-1. **Configuration**: defaults → YAML → `.env` → environment → CLI flags, validated with Pydantic
+1. **Configuration**: defaults → `.env` → environment → YAML → CLI overrides (lowest to highest priority), validated with Pydantic
    (`config/models.py`). Removed v1 keys fail validation and name their replacement.
 2. **Registry** (`registry/`): SQLite (`data_dir/registry.db`) with nodes, prefixes, per-node egress policy,
    externals, bundle history.

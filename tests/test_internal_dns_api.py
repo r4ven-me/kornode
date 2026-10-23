@@ -219,17 +219,40 @@ def test_forward_domains_change_reconnects_clients_and_feeds_split_dns(
     assert "split-dns = r4ven.lan" in ocserv_conf
 
 
-def test_internal_dns_settings_rejects_bad_url(tmp_path: Path) -> None:
-    client = _client(tmp_path / "config.yaml", tmp_path)
+@pytest.mark.parametrize(
+    ("bad_url", "message"),
+    [
+        (
+            "ftp://url-user:url-password-do-not-echo@lists.example.com/x?token=url-token-do-not-echo",
+            "internal_dns.blocklist_urls entries must be HTTP(S) URLs",
+        ),
+        (
+            "https://lists.example.com/bad path?token=url-token-do-not-echo",
+            "internal_dns.blocklist_urls entries must not contain whitespace",
+        ),
+    ],
+)
+def test_internal_dns_settings_rejects_bad_url(tmp_path: Path, bad_url: str, message: str) -> None:
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+    original_source = config_path.read_bytes()
+    original_config = client.app.state.config
 
     response = client.post(
         "/api/internal-dns/settings",
         auth=("admin", "secret"),
-        json={"blocklist_enabled": False, "blocklist_urls": ["ftp://lists.example.com/x"]},
+        json={"blocklist_enabled": False, "blocklist_urls": [bad_url]},
     )
 
     assert response.status_code == 400
-    assert "HTTP(S)" in response.json()["detail"]
+    assert response.json()["detail"] == [
+        {"loc": ["internal_dns", "blocklist_urls"], "type": "value_error", "msg": message}
+    ]
+    assert bad_url not in response.text
+    assert "url-password-do-not-echo" not in response.text
+    assert "url-token-do-not-echo" not in response.text
+    assert config_path.read_bytes() == original_source
+    assert client.app.state.config is original_config
 
 
 def test_internal_dns_settings_rejects_invalid_domains(tmp_path: Path) -> None:

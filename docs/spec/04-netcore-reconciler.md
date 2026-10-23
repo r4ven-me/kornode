@@ -53,18 +53,36 @@ tests snapshot the output for every example in `docs/spec/examples/`.
 
 - `Plan` = ordered list of ops: `SetSysctl`, `AddRule`, `DelRule`,
   `ReplaceRoute`, `DelRoute`, `NftLoad(script)`, `NftElements(add, delete)`.
-- Order: sysctl → routes into exit tables (unreachable first) → rules (add new
-  before deleting old) → nft → delete stale routes/tables.
+- When compiled routing rules/routes need changing, first install a temporary
+  `NftLoad(guard=True)` ruleset: it classifies using the desired identities but
+  drops all kornode-marked traffic in forward/postrouting. Its destination,
+  source and local/carrier sets are filled in the **same transaction**:
+  temporarily empty split sets would let host traffic fall through unmarked
+  to main. This closes the interval during which a bounded table slot is
+  reassigned to another identity.
+  Failure to install this barrier aborts before any routing mutation.
+- Then: sysctl → routes into exit tables (unreachable first) → rules (add new
+  before deleting old) → delete stale routes/tables → final nft. Stale route
+  deletion is a routing mutation too: never lift the barrier while an old
+  default or prefix can still send a pinned flow down a reassigned slot.
+  The final nft transaction lifts the barrier and refills its sets. A route/rule/sysctl error
+  keeps an installed barrier instead of exposing partially updated routing;
+  the next reconciler pass retries. Brief interruption of marked flows during
+  routing mutations is intentional; element-only changes do not install it.
 - Rules/routes owned by kornode are identified by priority range / table id
   range (03). Anything else is never touched.
-- nft: full `NftLoad` only when the chain/set schema hash changed; otherwise
-  `NftElements` only.
+- nft: full `NftLoad` when the chain/set schema hash changed or a routing
+  barrier needs lifting; otherwise `NftElements` only. The observed schema is
+  valid only while **both** `inet kornode` and `ip kornode_nat` exist. Losing
+  either table forces a full reload, even if the filter table's hash still
+  matches; element-only reconciliation cannot repair a missing NAT table.
 - Apply is idempotent; applying the same plan twice is a no-op on the second
   run (asserted in tests).
-- A failed op does not abort the pass (D-33): the remaining ops that only add
-  state (sysctls, routes, rules, nft with the kill-switch) still run, the
-  deletions after the failure are skipped, and all failures are raised
-  together at the end. One bad sysctl or a tunnel vanishing mid-pass must not
+- Except for initial routing-barrier failure, a failed op does not abort the
+  pass (D-33): the remaining additive sysctl/route/rule operations still run,
+  deletions are skipped and all failures are raised together at the end.
+  If a barrier is installed, the final unguarded nft transaction is also
+  skipped on failure (A02). One bad sysctl or a tunnel vanishing mid-pass must not
   leave the node without its fail-closed rules.
 
 ## Reconciler loop
@@ -112,11 +130,11 @@ and resolved domain addresses (`resolved/<set>.txt`).
   "from_class": "clients",
   "matched_rule": {"index": 1, "id": null, "to": {"set": "corp"}, "via": "upstream:office"},
   "implicit": null,
-  "mark": "0x0c000200",
+  "mark": "0x0cc63d00",
   "table": 12002,
   "route": "default dev oc-office0",
   "nat": "masquerade to 10.11.11.7",
-  "kernel_check": "ip route get 10.60.1.5 from 10.100.3.15 iif vpns0 mark 0x0c000200 -> dev oc-office0",
+  "kernel_check": "ip route get 10.60.1.5 from 10.100.3.15 iif vpns0 mark 0x0cc63d00 -> dev oc-office0",
   "warnings": []
 }
 ```

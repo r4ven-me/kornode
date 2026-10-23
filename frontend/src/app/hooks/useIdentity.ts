@@ -48,11 +48,11 @@ export function useIdentity(core: PanelCore) {
     no_routes: "",
     dns: "",
     split_dns: "",
-    tunnel_all_dns: false,
+    tunnel_all_dns: null,
     max_same_clients: "",
     session_timeout: "",
     idle_timeout: "",
-    no_udp: false
+    no_udp: null
   });
 
   core.registerHydrator("identity", ({ identity }) => {
@@ -113,7 +113,7 @@ export function useIdentity(core: PanelCore) {
         "identity",
         syntheticCommand(["korctl", "identity", "oidc", "provider-set"], "saved")
       );
-      setOidcProviderDraft((current) => ({ ...current, client_secret: "" }));
+      setOidcProviderDraft((current) => ({ ...current, client_secret: "", remove_client_secret: false }));
     }
   };
 

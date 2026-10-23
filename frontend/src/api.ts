@@ -160,6 +160,7 @@ export type OidcProvider = {
 
 export type OidcProviderDraft = OidcProvider & {
   client_secret: string;
+  remove_client_secret?: boolean;
 };
 
 export type GroupPolicy = {
@@ -183,11 +184,11 @@ export type GroupPolicyDraft = {
   no_routes: string;
   dns: string;
   split_dns: string;
-  tunnel_all_dns: boolean;
+  tunnel_all_dns: boolean | null;
   max_same_clients: string;
   session_timeout: string;
   idle_timeout: string;
-  no_udp: boolean;
+  no_udp: boolean | null;
 };
 
 export type GroupConfigRecord = {
@@ -293,10 +294,12 @@ export type ConfigSource = {
   path: string;
   exists: boolean;
   content: string;
+  etag: string;
 };
 
 export type ConfigSourceSaveResult = {
   path: string;
+  etag: string;
   written: string[];
   config: Record<string, unknown>;
   content: string;
@@ -370,6 +373,13 @@ export function setCsrfToken(value: string | null): void {
   csrfToken = value;
 }
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function requestJson<T>(
   path: string,
   _token: string | null,
@@ -409,7 +419,7 @@ export async function requestJson<T>(
     } catch {
       // Keep status text for non-JSON responses.
     }
-    throw new Error(detail);
+    throw new ApiError(response.status, detail);
   }
   return response.json() as Promise<T>;
 }
@@ -522,23 +532,26 @@ export function fetchTotpStatus(token: string): Promise<TotpStatus> {
   return requestJson<TotpStatus>("/api/auth/totp/status", token);
 }
 
-export function setupTotp(token: string): Promise<TotpSetup> {
-  return requestJson<TotpSetup>("/api/auth/totp/setup", token, { method: "POST" });
+export type Reauthenticate = { current_password: string; totp_code?: string };
+
+export function setupTotp(token: string, credentials: Reauthenticate): Promise<TotpSetup> {
+  return requestJson<TotpSetup>("/api/auth/totp/setup", token, { method: "POST", body: body(credentials) });
 }
 
 export function confirmTotp(
   token: string,
   secret: string,
-  code: string
+  code: string,
+  credentials: Reauthenticate
 ): Promise<{ status: string }> {
   return requestJson<{ status: string }>("/api/auth/totp/confirm", token, {
     method: "POST",
-    body: body({ secret, code })
+    body: body({ secret, code, ...credentials })
   });
 }
 
-export function disableTotp(token: string): Promise<{ status: string }> {
-  return requestJson<{ status: string }>("/api/auth/totp/disable", token, { method: "POST" });
+export function disableTotp(token: string, credentials: Reauthenticate): Promise<{ status: string }> {
+  return requestJson<{ status: string }>("/api/auth/totp/disable", token, { method: "POST", body: body(credentials) });
 }
 
 export function fetchAuthInfo(): Promise<AuthInfo> {
@@ -572,10 +585,13 @@ export function validateConfigSource(
 export function saveConfigSource(
   token: string,
   content: string,
-  writeRendered: boolean
+  writeRendered: boolean,
+  etag: string
 ): Promise<ConfigSourceSaveResult> {
+  if (!etag) return Promise.reject(new ApiError(428, "Source version missing. Reload the YAML source before saving."));
   return requestJson<ConfigSourceSaveResult>("/api/config/source", token, {
     method: "POST",
+    headers: { "If-Match": etag },
     body: body({ content, write_rendered: writeRendered })
   });
 }
@@ -1048,7 +1064,8 @@ export function saveOidcProvider(
     method: "POST",
     body: body({
       ...payload,
-      client_secret: payload.client_secret || null
+      remove_client_secret: undefined,
+      client_secret: payload.remove_client_secret ? null : payload.client_secret || undefined
     })
   });
 }

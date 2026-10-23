@@ -2,17 +2,22 @@ import { Ban, CheckCircle2, ShieldCheck, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ActionButton, Pill } from "../../components/ui";
 import { confirmAction } from "../../lib/async";
-import { errorMessage } from "../../lib/errors";
 import { type TotpSetup, confirmTotp, disableTotp, fetchTotpStatus, setupTotp } from "../../api";
 
 export function AdminTotpPanel({
-  onNotice
+  onNotice,
+  onReauthenticate = () => window.location.reload()
 }: {
   onNotice: (kind: "ok" | "warning" | "error", text: string) => void;
+  onReauthenticate?: () => void;
 }) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [setup, setSetup] = useState<TotpSetup | null>(null);
   const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [currentCode, setCurrentCode] = useState("");
+  const credentials = { current_password: password, totp_code: currentCode.trim() || undefined };
+  const clearCredentials = () => { setPassword(""); setCurrentCode(""); };
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,11 +29,11 @@ export function AdminTotpPanel({
   const handleEnable = async () => {
     setBusy("totp-setup");
     try {
-      const result = await setupTotp("session");
+      const result = await setupTotp("session", credentials);
       setSetup(result);
       setCode("");
-    } catch (error) {
-      onNotice("error", errorMessage(error));
+    } catch {
+      onNotice("error", "Two-factor action failed. Check your password and authenticator code, then try again.");
     } finally {
       setBusy(null);
     }
@@ -40,13 +45,15 @@ export function AdminTotpPanel({
     }
     setBusy("totp-confirm");
     try {
-      await confirmTotp("session", setup.secret, code.trim());
+      await confirmTotp("session", setup.secret, code.trim(), credentials);
       setEnabled(true);
       setSetup(null);
       setCode("");
-      onNotice("ok", "Two-factor authentication enabled");
-    } catch (error) {
-      onNotice("error", errorMessage(error));
+      clearCredentials();
+      onNotice("ok", "Two-factor authentication enabled. Sign in again.");
+      onReauthenticate();
+    } catch {
+      onNotice("error", "Two-factor action failed. Check your password and authenticator code, then try again.");
     } finally {
       setBusy(null);
     }
@@ -58,11 +65,13 @@ export function AdminTotpPanel({
     }
     setBusy("totp-disable");
     try {
-      await disableTotp("session");
+      await disableTotp("session", credentials);
       setEnabled(false);
-      onNotice("ok", "Two-factor authentication disabled");
-    } catch (error) {
-      onNotice("error", errorMessage(error));
+      clearCredentials();
+      onNotice("ok", "Two-factor authentication disabled. Sign in again.");
+      onReauthenticate();
+    } catch {
+      onNotice("error", "Two-factor action failed. Check your password and authenticator code, then try again.");
     } finally {
       setBusy(null);
     }
@@ -78,9 +87,13 @@ export function AdminTotpPanel({
         Require a TOTP code from an authenticator app (Google Authenticator, Authy, etc.) when
         signing in to this panel.
       </p>
+      <div className="settings-grid">
+        <label><span>Current password for two-factor changes</span><input type="password" autoComplete="current-password" value={password} disabled={busy !== null} onChange={event => setPassword(event.target.value)} /></label>
+        {enabled && <label><span>Current two-factor code</span><input autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={currentCode} disabled={busy !== null} onChange={event => setCurrentCode(event.target.value)} /></label>}
+      </div>
       {!enabled && !setup && (
         <div className="panel-footer">
-          <ActionButton label="Enable" icon={ShieldCheck} primary busy={busy === "totp-setup"} onClick={handleEnable} data-capability="web.totp.setup" />
+          <ActionButton label="Enable" icon={ShieldCheck} primary busy={busy === "totp-setup"} disabled={!password || enabled === null} onClick={handleEnable} data-capability="web.totp.setup" />
         </div>
       )}
       {setup && (
@@ -107,6 +120,7 @@ export function AdminTotpPanel({
               onClick={() => {
                 setSetup(null);
                 setCode("");
+                clearCredentials();
               }}
             />
             <ActionButton
@@ -114,7 +128,7 @@ export function AdminTotpPanel({
               icon={CheckCircle2}
               primary
               busy={busy === "totp-confirm"}
-              disabled={code.trim().length !== 6}
+              disabled={code.trim().length !== 6 || !password || (enabled === true && currentCode.trim().length !== 6)}
               onClick={() => void handleConfirm()}
               data-capability="web.totp.confirm"
             />
@@ -128,6 +142,7 @@ export function AdminTotpPanel({
             icon={Ban}
             danger
             busy={busy === "totp-disable"}
+            disabled={!password || currentCode.trim().length !== 6}
             onClick={handleDisable}
             data-capability="web.totp.disable"
           />

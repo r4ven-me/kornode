@@ -12,10 +12,26 @@
 
 - An agent's openconnect process could keep an UP tunnel while retrying a dead upstream, blackholing traffic instead of exposing its unreachable route. Existing configured `check_host` probes now reset that upstream after three consecutive failures, reconciling before redial. No new config fields; interlink and unmonitored upstreams are unchanged. Two real AmneziaWG abrupt-loss runs passed fast ICMP/no-leak/recovery checks.
 
-### Tests and acceptance
+### Integration with audited 1.2.0 (development branch only)
+
+- Preserved the prior work in `9b9ee4d` and integrated `origin/main` at `33df415` in `redesign/interlink-nodes-integration`. The merge retains raw config transactions/ETags/secret references, auth hardening, stable routing marks/conntrack labels/fail-closed barriers, and structured audit controls alongside interlink and Nodes.
+- Fixed the test access-client hook to restore addresses/routes on `reconnect` using idempotent replacements; deterministic local regressions preserve the client SLA, VPN path and expected exit checks. This does not establish the cause or acceptance of the earlier failed VM run.
+- Combined-code validation: **2014 backend tests, 84 frontend tests, 49 mock-local Playwright tests** passed; lint, both mypy targets, build, render and parity passed. No VPS/SSH, remote runtime tests, images or deployment. UI acceptance and full network/upgrade acceptance remain pending. See `docs/redesign/INTEGRATION.md`.
+
+### Historical pre-integration tests and acceptance
 
 - Added example forwarding netlab coverage, removed obsolete blocked-scenario placeholders, and added continuous access-client traffic during E2E-06 upgrades. Backend: **1334 passed / 104 opt-in skipped**, lint/typecheck/render/parity green; frontend: **48 passed**, build green, **44 Playwright passed**. Netlab: **83 unique passed** across bounded runs.
 - **Not a completed release acceptance:** continuous client recovery in E2E-06 still fails on a distinct compatible post-D85 baseline. The final VM run was interrupted at the owner's request; owned resources were cleaned up. See `tests/e2e/ACCEPTANCE-2026-10-23.md`. No commit/push/PR or GitHub workflow dispatch was performed.
+
+## [1.2.0] — 2026-10-23
+
+### Security and reliability
+
+- Production audit hardening A01–A25: MFA/session protection, secret-safe command logging, validated PKI publication, stable conntrack routing identity and fail-closed update barriers, serialized config mutations with source ETags, and stricter container readiness. Details and upgrade requirements: `docs/audit-remediation.md`.
+- Follow-up review closes CLI collection lost updates/secret-reference expansion, stale render/runtime writers, and password/TOTP updates through symlinked config paths.
+- Structured control settings, source/destination-set editors, nullable group inheritance, immutable release version tags and mandatory ocserv source checksum.
+- Existing VPN sessions may need reconnecting; conntrack-label support is required. MFA-enabled Basic clients must use the authenticated session flow. This release does **not** include the unaccepted interlink/Nodes redesign.
+
 
 
 ### Changed (role `gateway`, `via: node:<n>`, D-84, branch `redesign/rename-gateway-role`)

@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
@@ -36,17 +38,20 @@ from kornode.api import (
     routes_users,
     routes_web_config,
 )
+from kornode.api.auth import AuthSessionRegistry
 from kornode.config.loader import DEFAULT_CONFIG_PATH, load_config
 from kornode.config.models import AddressOverlapError, AppConfig
 from kornode.services.agent_models import ManagementError
 from kornode.services.audit import AuditService
 from kornode.services.command import CommandError
+from kornode.services.secrets import sanitized_validation_errors
 
 
 def create_app(
     config: AppConfig | None = None,
     config_path: Path | str | None = None,
 ) -> FastAPI:
+    in_memory_only = config is not None and config_path is None and not os.getenv("KORNODE_CONFIG")
     if config_path is None:
         config_path_env = os.getenv("KORNODE_CONFIG")
         resolved_config_path = Path(config_path_env) if config_path_env else DEFAULT_CONFIG_PATH
@@ -58,6 +63,11 @@ def create_app(
     app = FastAPI(title="Korvus Node API", version=__version__)
     app.state.config = config
     app.state.config_path = resolved_config_path
+    # Embedded callers may supply an unsaved initialization candidate. Only
+    # source-backed apps opt into authoritative runtime reloads.
+    app.state.config_source = None if in_memory_only else resolved_config_path
+    app.state.auth_sessions = AuthSessionRegistry(config.web.session_lifetime)
+    app.state.auth_sessions.synchronize(config)
 
     app.add_middleware(
         CORSMiddleware,
@@ -81,7 +91,7 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        if request.url.path.startswith(("/api/agents", "/api/control", "/api/hub")):
+        if request.url.path.startswith(("/api/agents", "/api/control", "/api/hub", "/api/auth")):
             response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
@@ -117,9 +127,29 @@ def create_app(
     def management_error_handler(_request: Request, exc: ManagementError) -> JSONResponse:
         return JSONResponse(status_code=exc.status, content=exc.body())
 
+    @app.exception_handler(RequestValidationError)
+    def request_validation_error_handler(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422, content={"detail": sanitized_validation_errors(exc.errors())}
+        )
+
+    @app.exception_handler(ValidationError)
+    def config_validation_error_handler(_request: Request, exc: ValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": sanitized_validation_errors(
+                    exc.errors(include_input=False, include_context=False, include_url=False)
+                )
+            },
+        )
+
     @app.exception_handler(ValueError)
-    def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
-        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    def value_error_handler(_request: Request, _exc: ValueError) -> JSONResponse:
+        # Exception text may contain an entire submitted config or a secret.
+        return JSONResponse(status_code=400, content={"detail": "Invalid request value"})
 
     @app.exception_handler(AddressOverlapError)
     def address_overlap_handler(_request: Request, exc: AddressOverlapError) -> JSONResponse:

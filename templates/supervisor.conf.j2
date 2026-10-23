@@ -32,8 +32,9 @@ stdout_logfile={{ config.system.log_dir }}/reconciler.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
 
-{% if config.server.enabled %}
 [program:ocserv]
+; Always registered so enabling the server does not require a supervisor restart.
+autostart={{ "true" if config.server.enabled else "false" }}
 ; --log-stderr (long form only: ocserv's getopt short-option string omits
 ; 'e' even though usage() documents "-e, --log-stderr", so "-e" itself
 ; fails with "invalid option -- 'e'" for both ocserv and ocserv-worker).
@@ -45,7 +46,6 @@ autorestart=true
 stdout_logfile={{ config.system.log_dir }}/ocserv.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
-{% endif %}
 
 [program:dnsmasq]
 ; Always register the process so DNS can be enabled through the panel without

@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
+
+import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 from kornode.config.models import AppConfig
 from kornode.services.certificates import CertificateService
@@ -36,6 +43,7 @@ class RecordingRunner(CommandRunner):
         check: bool = True,
         dry_run: bool = False,
         extra_secrets: Sequence[str] | None = None,
+        **_kwargs: Any,
     ) -> CommandResult:
         self.calls.append(
             CommandCall(
@@ -52,30 +60,69 @@ class RecordingRunner(CommandRunner):
         return CommandResult(tuple(argv), 0, "", "", dry_run=dry_run)
 
 
-class WritingRunner(CommandRunner):
-    """Unlike RecordingRunner, actually creates the file named after
-    --outfile -- needed to exercise chmod-after-write behavior, since chmod
-    on a path certtool never actually created would raise FileNotFoundError."""
+def _key_bytes(key: ec.EllipticCurvePrivateKey) -> bytes:
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
 
-    def run(
-        self,
-        argv: Sequence[str],
-        *,
-        timeout: int = 30,
-        cwd: str | None = None,
-        input_text: str | None = None,
-        env: Mapping[str, str] | None = None,
-        check: bool = True,
-        dry_run: bool = False,
-        extra_secrets: Sequence[str] | None = None,
-    ) -> CommandResult:
-        del timeout, cwd, input_text, env, check, extra_secrets
-        argv = list(argv)
-        if not dry_run and "--outfile" in argv:
-            out_path = Path(argv[argv.index("--outfile") + 1])
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text("placeholder", encoding="utf-8")
-        return CommandResult(tuple(argv), 0, "", "", dry_run=dry_run)
+
+def _certificate(
+    key: ec.EllipticCurvePrivateKey,
+    *,
+    ca: bool = True,
+    issuer_key: ec.EllipticCurvePrivateKey | None = None,
+    issuer: x509.Name | None = None,
+) -> bytes:
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "audit test")])
+    return (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer or subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=10))
+        .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+        .sign(issuer_key or key, hashes.SHA256())
+        .public_bytes(serialization.Encoding.PEM)
+    )
+
+
+class WritingRunner(RecordingRunner):
+    """Produce real, matching crypto fixtures without executing certtool."""
+
+    def run(self, argv: Sequence[str], **kwargs: Any) -> CommandResult:
+        result = super().run(argv, **kwargs)
+        if result.dry_run or "--outfile" not in argv:
+            return result
+        out = Path(argv[argv.index("--outfile") + 1])
+        if "--generate-crl" not in argv:
+            assert out.stat().st_mode & 0o777 == 0o600
+        if "--generate-privkey" in argv:
+            out.write_bytes(_key_bytes(ec.generate_private_key(ec.SECP256R1())))
+        elif "--generate-crl" in argv:
+            out.write_text("test CRL")
+        else:
+            key = serialization.load_pem_private_key(
+                Path(argv[argv.index("--load-privkey") + 1]).read_bytes(),
+                password=None,
+            )
+            assert isinstance(key, ec.EllipticCurvePrivateKey)
+            if "--generate-self-signed" in argv:
+                out.write_bytes(_certificate(key))
+            else:
+                issuer_key = serialization.load_pem_private_key(
+                    Path(argv[argv.index("--load-ca-privkey") + 1]).read_bytes(),
+                    password=None,
+                )
+                assert isinstance(issuer_key, ec.EllipticCurvePrivateKey)
+                issuer = x509.load_pem_x509_certificate(
+                    Path(argv[argv.index("--load-ca-certificate") + 1]).read_bytes(),
+                ).subject
+                out.write_bytes(_certificate(key, ca=False, issuer_key=issuer_key, issuer=issuer))
+        return result
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -182,6 +229,7 @@ def test_create_user_certificate_chmods_the_private_key_to_owner_only(
     config = _config(tmp_path)
     service = CertificateService(config, runner=WritingRunner())
 
+    service.init_ca()
     service.create_user_certificate("alice")
 
     mode = (config.system.data_dir / "certs" / "users" / "alice.key").stat().st_mode & 0o777
@@ -209,9 +257,10 @@ def test_save_ca_material_writes_private_files(tmp_path: Path) -> None:
         }
     )
 
+    key = ec.generate_private_key(ec.SECP256R1())
     result = CertificateService(config).save_ca_material(
-        ca_cert=b"-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
-        ca_key=b"-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n",
+        ca_cert=_certificate(key),
+        ca_key=_key_bytes(key),
     )
 
     assert result.returncode == 0
@@ -235,10 +284,11 @@ def test_revoke_certificate_pem_appends_revoked_and_generates_crl(tmp_path: Path
             *,
             timeout: int = 30,
             input_text: str | None = None,
-            env: dict[str, str] | None = None,
+            env: Mapping[str, str] | None = None,
             check: bool = True,
             dry_run: bool = False,
             extra_secrets: Sequence[str] | None = None,
+            **_kwargs: Any,
         ) -> CommandResult:
             del timeout, input_text, env, check, dry_run, extra_secrets
             return CommandResult(tuple(argv), 0, "crl\n", "")
@@ -314,10 +364,11 @@ def test_list_revoked_certificates_parses_one_entry_per_pem_block(tmp_path: Path
             *,
             timeout: int = 30,
             input_text: str | None = None,
-            env: dict[str, str] | None = None,
+            env: Mapping[str, str] | None = None,
             check: bool = True,
             dry_run: bool = False,
             extra_secrets: Sequence[str] | None = None,
+            **_kwargs: Any,
         ) -> CommandResult:
             del timeout, env, check, dry_run, extra_secrets
             assert input_text is not None
@@ -373,10 +424,11 @@ def test_certificate_info_parses_subject_issuer_and_sans(tmp_path: Path) -> None
             *,
             timeout: int = 30,
             input_text: str | None = None,
-            env: dict[str, str] | None = None,
+            env: Mapping[str, str] | None = None,
             check: bool = True,
             dry_run: bool = False,
             extra_secrets: Sequence[str] | None = None,
+            **_kwargs: Any,
         ) -> CommandResult:
             del timeout, env, check, dry_run, extra_secrets
             assert input_text is not None
@@ -408,15 +460,18 @@ def test_server_certificate_reuses_an_existing_key(tmp_path: Path) -> None:
     config = _config(tmp_path)
     key = config.cert_path("server.key")
     key.parent.mkdir(parents=True, exist_ok=True)
-    key.write_text("existing key", encoding="utf-8")
-    runner = RecordingRunner()
-
-    CertificateService(config, runner=runner).create_server_certificate()
+    original_key = _key_bytes(ec.generate_private_key(ec.SECP256R1()))
+    key.write_bytes(original_key)
+    runner = WritingRunner()
+    service = CertificateService(config, runner=runner)
+    service.init_ca()
+    runner.calls.clear()
+    service.create_server_certificate()
 
     commands = [call["argv"] for call in runner.calls]
     assert not any("--generate-privkey" in argv for argv in commands)
     assert any("--generate-certificate" in argv for argv in commands)
-    assert key.read_text(encoding="utf-8") == "existing key"
+    assert key.read_bytes() == original_key
 
 
 def test_server_certificate_generates_a_key_when_missing(tmp_path: Path) -> None:
@@ -425,3 +480,193 @@ def test_server_certificate_generates_a_key_when_missing(tmp_path: Path) -> None
     CertificateService(_config(tmp_path), runner=runner).create_server_certificate(dry_run=True)
 
     assert any("--generate-privkey" in call["argv"] for call in runner.calls)
+
+
+@pytest.mark.parametrize("existing", ["ca.key", "ca.crt"])
+def test_init_ca_refuses_partial_material(tmp_path: Path, existing: str) -> None:
+    config = _config(tmp_path)
+    path = config.cert_path(existing)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"original")
+    runner = RecordingRunner()
+    with pytest.raises(ValueError, match="incomplete CA state"):
+        CertificateService(config, runner=runner).init_ca()
+    assert path.read_bytes() == b"original"
+    assert runner.calls == []
+
+
+def test_init_ca_is_idempotent_and_validates_existing_pair(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    runner = WritingRunner()
+    service = CertificateService(config, runner=runner)
+    service.init_ca()
+    original = config.cert_path("ca.key").read_bytes()
+    runner.calls.clear()
+    assert service.init_ca() == []
+    assert not runner.calls
+    assert config.cert_path("ca.key").read_bytes() == original
+    config.cert_path("ca.crt").write_text("invalid")
+    with pytest.raises(ValueError, match="invalid certificate/private key pair"):
+        service.init_ca()
+    assert config.cert_path("ca.key").read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "operation,stem",
+    [
+        ("ca", "ca"),
+        ("server", "server"),
+        ("user", "users/alice"),
+        ("control", "control"),
+        ("interlink", "interlink"),
+    ],
+)
+@pytest.mark.parametrize("failure", ["key", "certificate", "invalid", "publish"])
+def test_generation_failures_preserve_original_pairs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    stem: str,
+    failure: str,
+) -> None:
+    import os
+
+    from kornode.services.command import CommandError
+
+    config = _config(tmp_path)
+    runner = WritingRunner()
+    service = CertificateService(config, runner=runner)
+    service.init_ca()
+
+    def issue() -> object:
+        if operation == "ca":
+            return service.regenerate_ca()
+        if operation == "server":
+            return service.create_server_certificate()
+        if operation == "user":
+            return service.create_user_certificate("alice")
+        if operation == "control":
+            return service.ensure_control_certificate("10.100.1.1")
+        return service.ensure_interlink_certificate()
+
+    issue()
+    key, crt = config.cert_path(stem + ".key"), config.cert_path(stem + ".crt")
+    # Key generation is skipped for pinned listener keys; exercise a partial
+    # original state there too, without deleting the surviving certificate.
+    if failure == "key" and operation in {"server", "control", "interlink"}:
+        key.unlink()
+    original = {path: path.read_bytes() if path.exists() else None for path in (key, crt)}
+    run = runner.run
+
+    def fail_run(argv: Sequence[str], **kwargs: Any) -> CommandResult:
+        target = (
+            "--generate-privkey"
+            if failure == "key"
+            else ("--generate-self-signed" if operation == "ca" else "--generate-certificate")
+        )
+        if target in argv and failure in {"key", "certificate", "invalid"}:
+            out = Path(argv[argv.index("--outfile") + 1])
+            out.write_text("partial-invalid-output")
+            if failure == "invalid":
+                return CommandResult(tuple(argv), 0, "", "")
+            raise CommandError(CommandResult(tuple(argv), 1, "", "injected failure"))
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(runner, "run", fail_run)
+    replace = os.replace
+
+    def fail_replace(src: Path, dst: Path) -> None:
+        if Path(dst) == crt:
+            raise OSError("injected publish failure")
+        replace(src, dst)
+
+    if failure == "publish":
+        monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises((CommandError, ValueError, OSError)):
+        issue()
+    for path, data in original.items():
+        assert (path.read_bytes() if path.exists() else None) == data
+    assert not list(key.parent.glob(".issue-*"))
+    assert not list(key.parent.glob(".publish-*"))
+
+
+def test_ca_upload_rejects_mismatched_pair_without_writing(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    service = CertificateService(config, runner=WritingRunner())
+    service.init_ca()
+    before = {name: config.cert_path(name).read_bytes() for name in ("ca.key", "ca.crt")}
+    key = ec.generate_private_key(ec.SECP256R1())
+    other_key = ec.generate_private_key(ec.SECP256R1())
+    with pytest.raises(ValueError, match="invalid certificate/private key pair"):
+        service.save_ca_material(ca_key=_key_bytes(key), ca_cert=_certificate(other_key))
+    assert {name: config.cert_path(name).read_bytes() for name in before} == before
+
+
+def test_only_explicit_regeneration_rotates_an_existing_ca(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    service = CertificateService(config, runner=WritingRunner())
+    service.init_ca()
+    original = config.cert_path("ca.key").read_bytes()
+    service.regenerate_ca()
+    assert config.cert_path("ca.key").read_bytes() != original
+    CertificateService._validate_pair(
+        config.cert_path("ca.key").read_bytes(),
+        config.cert_path("ca.crt").read_bytes(),
+        ca=True,
+    )
+
+
+@pytest.mark.parametrize("failure", ["none", "command", "invalid", "publish"])
+def test_p12_export_is_validated_and_atomic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    from kornode.services.command import CommandError
+    from kornode.services.files import FileManager
+
+    config = _config(tmp_path)
+    key = ec.generate_private_key(ec.SECP256R1())
+    certificate = x509.load_pem_x509_certificate(_certificate(key, ca=False))
+    data = pkcs12.serialize_key_and_certificates(
+        b"alice",
+        key,
+        certificate,
+        None,
+        serialization.BestAvailableEncryption(b"bundle-secret"),
+    )
+
+    class ExportRunner(CommandRunner):
+        def run(self, argv: Sequence[str], **_kwargs: Any) -> CommandResult:
+            out = Path(argv[argv.index("--outfile") + 1])
+            assert out.stat().st_mode & 0o777 == 0o600
+            out.write_bytes(b"invalid" if failure == "invalid" else data)
+            result = CommandResult(("export",), 1 if failure == "command" else 0, "", "")
+            if not result.ok:
+                raise CommandError(result)
+            return result
+
+    service = CertificateService(config, runner=ExportRunner())
+    out = service.user_p12_path("alice")
+    out.parent.mkdir(parents=True)
+    out.write_bytes(b"original")
+    write = FileManager.atomic_write_bytes
+
+    def fail_publish(self: FileManager, path: Path, data: bytes, mode: int = 0o600) -> None:
+        if path == out:
+            raise OSError("publish failed")
+        write(self, path, data, mode)
+
+    if failure == "publish":
+        monkeypatch.setattr(FileManager, "atomic_write_bytes", fail_publish)
+    if failure == "none":
+        assert service.create_p12("alice", "bundle-secret").ok
+        assert out.read_bytes() == data
+        assert out.stat().st_mode & 0o777 == 0o600
+    else:
+        with pytest.raises((CommandError, ValueError, OSError)):
+            service.create_p12("alice", "bundle-secret")
+        assert out.read_bytes() == b"original"
+    assert not list(out.parent.glob(".p12-*"))

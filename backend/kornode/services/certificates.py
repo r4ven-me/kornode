@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import fcntl
 import ipaddress
+import os
 import re
 import secrets
+import tempfile
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
 
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult, CommandRunner
@@ -24,6 +31,7 @@ _CERT_PEM_RE = re.compile(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE--
 # other's revocation -- generate_crl() would then produce a CRL that doesn't
 # actually revoke the certificate that was "lost".
 _REVOKED_REWRITE_LOCK = threading.Lock()
+_CERT_MATERIAL_LOCK = threading.RLock()
 _CERT_INFO_FIELDS = {
     "serial": re.compile(r"Serial Number \(hex\):\s*(\S+)"),
     "subject": re.compile(r"Subject:\s*(.+)"),
@@ -67,16 +75,166 @@ class CertificateService:
         self.files.atomic_write_text(path, content, mode=0o600)
         return path
 
-    def _chmod_private_key(self, path: Path, *, dry_run: bool) -> None:
-        """certtool writes the key file itself with whatever the process's
-        ambient umask allows (e.g. world-readable under a common 022 umask)
-        -- protection would otherwise rely entirely on cert_dir's own 0o700
-        mode, with no defense-in-depth at the individual file level (e.g. if
-        the key is later copied or bind-mounted out of cert_dir)."""
-        if not dry_run:
-            path.chmod(0o600)
+    @contextmanager
+    def _material_lock(self) -> Iterator[None]:
+        self.files.ensure_dir(self.cert_dir, mode=0o700)
+        with _CERT_MATERIAL_LOCK, (self.cert_dir / ".material.lock").open("a") as lock:
+            os.fchmod(lock.fileno(), 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
 
-    def init_ca(self, *, dry_run: bool = False) -> list[CommandResult]:
+    @staticmethod
+    def _validate_pair(key_data: bytes, cert_data: bytes, *, ca: bool = False) -> x509.Certificate:
+        try:
+            key = serialization.load_pem_private_key(key_data, password=None)
+            certificate = x509.load_pem_x509_certificate(cert_data)
+            encoding = serialization.Encoding.DER
+            fmt = serialization.PublicFormat.SubjectPublicKeyInfo
+            if key.public_key().public_bytes(
+                encoding, fmt
+            ) != certificate.public_key().public_bytes(encoding, fmt):
+                raise ValueError("key mismatch")
+            if (
+                ca
+                and not certificate.extensions.get_extension_for_class(
+                    x509.BasicConstraints
+                ).value.ca
+            ):
+                raise ValueError("not a CA")
+        except (ValueError, TypeError, x509.ExtensionNotFound):
+            # Parser errors may include material supplied by a caller; do not expose them.
+            raise ValueError("invalid certificate/private key pair") from None
+        return certificate
+
+    def _publish_pair(self, key: Path, crt: Path, key_data: bytes, cert_data: bytes) -> None:
+        """Per-file atomic publication with rollback on a failed second replace.
+
+        Fixed legacy filenames cannot provide crash-atomic two-file replacement.
+        Keep recovery copies if rollback itself fails; never truncate live material.
+        """
+        import shutil
+
+        work = Path(tempfile.mkdtemp(prefix=".publish-", dir=key.parent))
+        cleanup = True
+        replaced: list[Path] = []
+        originals: dict[Path, Path | None] = {}
+        try:
+            for path, data in ((key, key_data), (crt, cert_data)):
+                backup = work / (path.name + ".original")
+                originals[path] = backup if path.exists() else None
+                if path.exists():
+                    self.files.atomic_write_bytes(backup, path.read_bytes())
+                self.files.atomic_write_bytes(work / path.name, data)
+            try:
+                for path in (key, crt):
+                    os.replace(work / path.name, path)
+                    replaced.append(path)
+            except OSError:
+                try:
+                    for path in reversed(replaced):
+                        recovery = originals[path]
+                        if recovery is None:
+                            path.unlink()
+                        else:
+                            os.replace(recovery, path)
+                except OSError:
+                    cleanup = False
+                    raise RuntimeError(
+                        f"certificate rollback failed; recovery files: {work}"
+                    ) from None
+                raise
+        finally:
+            if cleanup:
+                shutil.rmtree(work)
+
+    def _generate_pair(
+        self,
+        key: Path,
+        crt: Path,
+        template: Path,
+        *,
+        reuse_key: bool = False,
+        legacy_key: Path | None = None,
+        self_signed: bool = False,
+        ecc: bool = False,
+        replace: bool = True,
+        dry_run: bool = False,
+    ) -> list[CommandResult]:
+        # Serialize API requests AND independent CLI processes sharing the certificate directory.
+        self.files.ensure_dir(key.parent, mode=0o700)
+        with self._material_lock():
+            if not replace and (key.exists() or crt.exists()):
+                if not key.exists() or not crt.exists():
+                    raise ValueError(
+                        "incomplete CA state; restore the missing file "
+                        "or explicitly regenerate the CA"
+                    )
+                self._validate_pair(key.read_bytes(), crt.read_bytes(), ca=True)
+                return []
+            with tempfile.TemporaryDirectory(prefix=".issue-", dir=key.parent) as directory:
+                source_key = key if key.exists() or legacy_key is None else legacy_key
+                keep_key = reuse_key and source_key.exists()
+                stage_key = (
+                    (source_key if keep_key else key) if dry_run else Path(directory) / key.name
+                )
+                stage_crt = crt if dry_run else Path(directory) / crt.name
+                results: list[CommandResult] = []
+                if not dry_run:
+                    self.files.atomic_write_bytes(
+                        stage_key, source_key.read_bytes() if keep_key else b""
+                    )
+                    self.files.atomic_write_bytes(stage_crt, b"")
+                if not keep_key:
+                    argv = ["certtool", "--generate-privkey"]
+                    if ecc:
+                        argv.append("--ecc")
+                    results.append(
+                        self.runner.run(
+                            [*argv, "--outfile", str(stage_key)],
+                            timeout=60,
+                            dry_run=dry_run,
+                        )
+                    )
+                argv = [
+                    "certtool",
+                    "--generate-self-signed" if self_signed else "--generate-certificate",
+                    "--load-privkey",
+                    str(stage_key),
+                ]
+                if not self_signed:
+                    argv.extend(
+                        [
+                            "--load-ca-certificate",
+                            str(self.config.cert_path("ca.crt")),
+                            "--load-ca-privkey",
+                            str(self.config.cert_path("ca.key")),
+                        ]
+                    )
+                results.append(
+                    self.runner.run(
+                        [*argv, "--template", str(template), "--outfile", str(stage_crt)],
+                        timeout=60,
+                        dry_run=dry_run,
+                    )
+                )
+                if not dry_run:
+                    key_data, cert_data = stage_key.read_bytes(), stage_crt.read_bytes()
+                    certificate = self._validate_pair(key_data, cert_data, ca=self_signed)
+                    issuer = (
+                        certificate
+                        if self_signed
+                        else x509.load_pem_x509_certificate(
+                            self.config.cert_path("ca.crt").read_bytes()
+                        )
+                    )
+                    try:
+                        certificate.verify_directly_issued_by(issuer)
+                    except (ValueError, TypeError, InvalidSignature):
+                        raise ValueError("generated certificate failed issuer validation") from None
+                    self._publish_pair(key, crt, key_data, cert_data)
+                return results
+
+    def init_ca(self, *, dry_run: bool = False, _replace: bool = False) -> list[CommandResult]:
         self.files.ensure_dir(self.cert_dir, mode=0o700)
         ca_key = self.config.cert_path("ca.key")
         ca_crt = self.config.cert_path("ca.crt")
@@ -87,47 +245,28 @@ class CertificateService:
                     f"cn = {self.config.certificates.ca_name}",
                     "ca",
                     "cert_signing_key",
+                    "crl_signing_key",
                     "expiration_days = 3650",
                     "",
                 ]
             ),
         )
-        privkey_result = self.runner.run(
-            ["certtool", "--generate-privkey", "--outfile", str(ca_key)],
-            timeout=60,
+        return self._generate_pair(
+            ca_key,
+            ca_crt,
+            ca_template,
+            self_signed=True,
+            replace=_replace,
             dry_run=dry_run,
         )
-        self._chmod_private_key(ca_key, dry_run=dry_run)
-        return [
-            privkey_result,
-            self.runner.run(
-                [
-                    "certtool",
-                    "--generate-self-signed",
-                    "--load-privkey",
-                    str(ca_key),
-                    "--template",
-                    str(ca_template),
-                    "--outfile",
-                    str(ca_crt),
-                ],
-                timeout=60,
-                dry_run=dry_run,
-            ),
-        ]
 
     def save_ca_material(self, *, ca_cert: bytes, ca_key: bytes) -> CommandResult:
         self.files.ensure_dir(self.cert_dir, mode=0o700)
         ca_crt_path = self.config.cert_path("ca.crt")
         ca_key_path = self.config.cert_path("ca.key")
-        ca_cert_text = ca_cert.decode("utf-8")
-        ca_key_text = ca_key.decode("utf-8")
-        if "BEGIN CERTIFICATE" not in ca_cert_text:
-            raise ValueError("CA certificate must be PEM encoded")
-        if "BEGIN" not in ca_key_text or "PRIVATE KEY" not in ca_key_text:
-            raise ValueError("CA private key must be PEM encoded")
-        self.files.atomic_write_private_text(ca_crt_path, ca_cert_text)
-        self.files.atomic_write_private_text(ca_key_path, ca_key_text)
+        self._validate_pair(ca_key, ca_cert, ca=True)
+        with self._material_lock():
+            self._publish_pair(ca_key_path, ca_crt_path, ca_key, ca_cert)
         return CommandResult(
             ("korctl", "certificates", "ca", "upload"),
             0,
@@ -136,14 +275,12 @@ class CertificateService:
         )
 
     def regenerate_ca(self, *, dry_run: bool = False) -> list[CommandResult]:
-        return self.init_ca(dry_run=dry_run)
+        return self.init_ca(dry_run=dry_run, _replace=True)
 
     def create_server_certificate(self, *, dry_run: bool = False) -> list[CommandResult]:
         self.files.ensure_dir(self.cert_dir, mode=0o700)
         key = self.config.cert_path("server.key")
         crt = self.config.cert_path("server.crt")
-        ca_key = self.config.cert_path("ca.key")
-        ca_crt = self.config.cert_path("ca.crt")
         identities = _certificate_identities(self.config.server.cn)
         template = self._write_template(
             self._template_path("server.tmpl"),
@@ -159,41 +296,8 @@ class CertificateService:
                 ]
             ),
         )
-        results: list[CommandResult] = []
-        # Keep an existing key: remote openconnect clients pin this server by
-        # its public key (--servercert pin-sha256:...), so re-issuing the
-        # certificate must not rotate the key underneath them. Delete
-        # server.key to rotate it deliberately.
-        if not key.exists():
-            results.append(
-                self.runner.run(
-                    ["certtool", "--generate-privkey", "--outfile", str(key)],
-                    timeout=60,
-                    dry_run=dry_run,
-                )
-            )
-            self._chmod_private_key(key, dry_run=dry_run)
-        return [
-            *results,
-            self.runner.run(
-                [
-                    "certtool",
-                    "--generate-certificate",
-                    "--load-privkey",
-                    str(key),
-                    "--load-ca-certificate",
-                    str(ca_crt),
-                    "--load-ca-privkey",
-                    str(ca_key),
-                    "--template",
-                    str(template),
-                    "--outfile",
-                    str(crt),
-                ],
-                timeout=60,
-                dry_run=dry_run,
-            ),
-        ]
+        # Keep the public-key pin stable when reissuing the server certificate.
+        return self._generate_pair(key, crt, template, reuse_key=True, dry_run=dry_run)
 
     def ensure_control_certificate(self, address: str, *, dry_run: bool = False) -> bool:
         """Server certificate of the control API listener, IP SAN = the hub interlink
@@ -202,7 +306,7 @@ class CertificateService:
         crt = self.config.cert_path("control.crt")
         key = self.config.cert_path("control.key")
         if crt.exists() and key.exists() and not dry_run:
-            parsed = x509.load_pem_x509_certificate(crt.read_bytes())
+            parsed = self._validate_pair(key.read_bytes(), crt.read_bytes())
             left = parsed.not_valid_after_utc - datetime.now(UTC)
             if left > timedelta(days=30):
                 return False
@@ -222,31 +326,7 @@ class CertificateService:
             ),
         )
         try:
-            if not key.exists():
-                self.runner.run(
-                    ["certtool", "--generate-privkey", "--ecc", "--outfile", str(key)],
-                    timeout=60,
-                    dry_run=dry_run,
-                )
-                self._chmod_private_key(key, dry_run=dry_run)
-            self.runner.run(
-                [
-                    "certtool",
-                    "--generate-certificate",
-                    "--load-privkey",
-                    str(key),
-                    "--load-ca-certificate",
-                    str(self.config.cert_path("ca.crt")),
-                    "--load-ca-privkey",
-                    str(self.config.cert_path("ca.key")),
-                    "--template",
-                    str(template),
-                    "--outfile",
-                    str(crt),
-                ],
-                timeout=60,
-                dry_run=dry_run,
-            )
+            self._generate_pair(key, crt, template, reuse_key=True, ecc=True, dry_run=dry_run)
         finally:
             template.unlink(missing_ok=True)
         return True
@@ -259,13 +339,8 @@ class CertificateService:
         key = self.config.cert_path("interlink.key")
         name = self.config.interlink.server_name
         legacy_key = self.config.cert_path("fabric.key")
-        migrated_key = not dry_run and not key.exists() and legacy_key.exists()
-        if migrated_key:
-            # Keep the pinned identity and leave the legacy files available for
-            # recovery. The renamed certificate is reissued for the new SNI below.
-            self.files.atomic_write_bytes(key, legacy_key.read_bytes(), mode=0o600)
-        if crt.exists() and key.exists() and not dry_run and not migrated_key:
-            parsed = x509.load_pem_x509_certificate(crt.read_bytes())
+        if crt.exists() and key.exists() and not dry_run:
+            parsed = self._validate_pair(key.read_bytes(), crt.read_bytes())
             left = parsed.not_valid_after_utc - datetime.now(UTC)
             if left > timedelta(days=30) and name in _certificate_dns_names(parsed):
                 return False
@@ -285,30 +360,10 @@ class CertificateService:
             ),
         )
         try:
-            if not key.exists() and not legacy_key.exists():
-                self.runner.run(
-                    ["certtool", "--generate-privkey", "--ecc", "--outfile", str(key)],
-                    timeout=60,
-                    dry_run=dry_run,
-                )
-                self._chmod_private_key(key, dry_run=dry_run)
-            self.runner.run(
-                [
-                    "certtool",
-                    "--generate-certificate",
-                    "--load-privkey",
-                    str(key),
-                    "--load-ca-certificate",
-                    str(self.config.cert_path("ca.crt")),
-                    "--load-ca-privkey",
-                    str(self.config.cert_path("ca.key")),
-                    "--template",
-                    str(template),
-                    "--outfile",
-                    str(crt),
-                ],
-                timeout=60,
-                dry_run=dry_run,
+            # Stage a legacy key without publishing it until issuance and issuer
+            # validation succeed. The active interlink key always takes priority.
+            self._generate_pair(
+                key, crt, template, reuse_key=True, legacy_key=legacy_key, ecc=True, dry_run=dry_run
             )
         finally:
             template.unlink(missing_ok=True)
@@ -324,8 +379,6 @@ class CertificateService:
         self.files.ensure_dir(self.cert_dir / "users", mode=0o700)
         key = self.cert_dir / "users" / f"{username}.key"
         crt = self.cert_dir / "users" / f"{username}.crt"
-        ca_key = self.config.cert_path("ca.key")
-        ca_crt = self.config.cert_path("ca.crt")
         template = self._write_template(
             self._template_path(f"{username}.tmpl"),
             "\n".join(
@@ -338,33 +391,7 @@ class CertificateService:
                 ]
             ),
         )
-        privkey_result = self.runner.run(
-            ["certtool", "--generate-privkey", "--outfile", str(key)],
-            timeout=60,
-            dry_run=dry_run,
-        )
-        self._chmod_private_key(key, dry_run=dry_run)
-        return [
-            privkey_result,
-            self.runner.run(
-                [
-                    "certtool",
-                    "--generate-certificate",
-                    "--load-privkey",
-                    str(key),
-                    "--load-ca-certificate",
-                    str(ca_crt),
-                    "--load-ca-privkey",
-                    str(ca_key),
-                    "--template",
-                    str(template),
-                    "--outfile",
-                    str(crt),
-                ],
-                timeout=60,
-                dry_run=dry_run,
-            ),
-        ]
+        return self._generate_pair(key, crt, template, dry_run=dry_run)
 
     def create_p12(
         self,
@@ -399,12 +426,31 @@ class CertificateService:
             argv.extend(["--password", passphrase])
         else:
             argv.append("--empty-password")
-        return self.runner.run(
-            argv,
-            timeout=60,
-            dry_run=dry_run,
-            extra_secrets=[passphrase or ""],
-        )
+        if dry_run:
+            return self.runner.run(argv, timeout=60, dry_run=True, extra_secrets=[passphrase or ""])
+        from cryptography.hazmat.primitives.serialization import pkcs12
+
+        self.files.ensure_dir(out.parent, mode=0o700)
+        with (
+            self._material_lock(),
+            tempfile.TemporaryDirectory(prefix=".p12-", dir=out.parent) as directory,
+        ):
+            staged = Path(directory) / out.name
+            self.files.atomic_write_bytes(staged, b"")
+            argv[argv.index("--outfile") + 1] = str(staged)
+            result = self.runner.run(argv, timeout=60, extra_secrets=[passphrase or ""])
+            data = staged.read_bytes()
+            try:
+                bundle_key, bundle_cert, _ = pkcs12.load_key_and_certificates(
+                    data,
+                    passphrase.encode() if passphrase else None,
+                )
+                if bundle_key is None or bundle_cert is None:
+                    raise ValueError("missing key/certificate")
+            except (ValueError, TypeError):
+                raise ValueError("invalid generated PKCS#12 bundle") from None
+            self.files.atomic_write_bytes(out, data)
+            return result
 
     def revoke_user_certificate(self, username: str, *, dry_run: bool = False) -> CommandResult:
         self.users.validate_username(username)

@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import yaml
-
-from kornode.config.loader import DEFAULT_CONFIG_PATH, load_config
+from kornode.config.loader import DEFAULT_CONFIG_PATH, deep_merge, load_config
 from kornode.config.models import AppConfig
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandError
 from kornode.services.config import ConfigService
+from kornode.services.config_store import mutate_config
 from kornode.services.files import FileManager
 from kornode.services.net import NetApplyError, NetService
 from kornode.services.server_certificates import ServerCertificateService
@@ -31,6 +30,12 @@ def unlink_stale_runtime_sockets(generated_dir: Path) -> None:
 def initialize_runtime(config_path: Path | None = None) -> None:
     resolved_config_path = config_path or DEFAULT_CONFIG_PATH
     config = load_config(resolved_config_path)
+    ca_key_exists = config.cert_path("ca.key").exists()
+    ca_cert_exists = config.cert_path("ca.crt").exists()
+    if ca_key_exists != ca_cert_exists:
+        raise SystemExit(
+            "incomplete CA state; restore the missing file or explicitly regenerate the CA"
+        )
     files = FileManager()
     files.ensure_dir(config.system.data_dir)
     files.ensure_dir(config.system.log_dir)
@@ -42,8 +47,7 @@ def initialize_runtime(config_path: Path | None = None) -> None:
     _converge_kernel(config)
 
     certs = CertificateService(config, files=files)
-    if not config.cert_path("ca.key").exists() or not config.cert_path("ca.crt").exists():
-        certs.init_ca()
+    certs.init_ca()  # Idempotent; an existing CA is validated, never implicitly rotated.
     certs.ensure_interlink_certificate()
     # ocserv refuses to start with `crl =` pointing at a missing file; the CA only exists now.
     certs.ensure_crl()
@@ -104,8 +108,7 @@ def prepare_startup_letsencrypt(
         },
     }
     if config_path is not None:
-        _persist_certificate_patch(config_path, patch, files)
-        return load_config(config_path)
+        return _persist_certificate_patch(config_path, patch, files)
     return AppConfig.model_validate({"certificates": patch})
 
 
@@ -113,17 +116,14 @@ def _persist_certificate_patch(
     config_path: Path,
     patch: dict[str, Any],
     files: FileManager,
-) -> None:
-    if config_path.exists():
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        data = cast(dict[str, Any], loaded if isinstance(loaded, dict) else {})
-    else:
-        data = {}
-    certificates = data.setdefault("certificates", {})
-    if not isinstance(certificates, dict):
-        raise ValueError("certificates config must be a mapping")
-    certificates.update(patch)
-    files.atomic_write_text(config_path, yaml.safe_dump(data, sort_keys=False), mode=0o600)
+) -> AppConfig:
+    config, _ = mutate_config(
+        config_path,
+        lambda raw: deep_merge(raw, {"certificates": patch}),
+        write_rendered=False,
+        file_manager=files,
+    )
+    return config
 
 
 def _write_startup_warning(path: Path, message: str) -> None:

@@ -139,21 +139,20 @@ def test_compile_is_deterministic_regardless_of_input_order() -> None:
     assert compile_policy(policy, facts) == compile_policy(policy, shuffled)
 
 
-def test_marks_and_tables_follow_first_appearance() -> None:
+def test_marks_are_identity_based_and_tables_are_bounded_slots() -> None:
     compiled = compile_policy(*hub_case())
-
     exits = {exit_.name: (exit_.mark, exit_.table) for exit_ in compiled.exits}
-    # Matches the spec 04 explain example: upstream:office -> 0x0c000200 / 12002.
-    assert exits["upstream:office"] == (0x0C000200, 12002)
-    assert exits["interlink"] == (0x0C000100, 12001)
-    assert exits["local"][0] == 0x0C000300
+    assert exits["upstream:office"] == (0x0CC63D00, 12002)
+    assert exits["interlink"] == (0x0C800100, 12001)
+    assert exits["local"][0] == 0x0C800000
+    assert all(mark & 0xFF == 0 and mark >> 24 == 0x0C for mark, _ in exits.values())
 
 
 def test_local_exit_has_no_rule_or_table_but_is_masqueraded() -> None:
     compiled = compile_policy(*hub_case())
 
     assert not [rule for rule in compiled.desired.rules if rule.table == 12003]
-    assert '== 0x0c000300 oifname != "lo" masquerade' in compiled.script
+    assert '== 0x0c800000 oifname != "lo" masquerade' in compiled.script
 
 
 def test_implicit_returns_come_before_every_rule() -> None:
@@ -184,7 +183,7 @@ def test_kill_switch_blocks_the_uplink_only() -> None:
     script = compile_policy(*hub_case()).script
 
     assert (
-        'meta mark & 0xffffff00 { 0x0c000100, 0x0c000200 } oifname "eth0" '
+        'meta mark & 0xffffff00 { 0x0c800100, 0x0cc63d00 } oifname "eth0" '
         "reject with icmpx admin-prohibited"
     ) in script
     assert "oifname !=" not in script.split("chain forward", 1)[1].split("}", 1)[0]
@@ -211,7 +210,7 @@ def test_kill_switch_is_strict_when_uplink_unknown() -> None:
     script = compile_policy(policy, facts).script
 
     assert (
-        'meta mark & 0xffffff00 == 0x0c000200 oifname != "oc-office0" '
+        'meta mark & 0xffffff00 == 0x0cc63d00 oifname != "oc-office0" '
         "reject with icmpx admin-prohibited"
     ) in script
 
@@ -222,14 +221,14 @@ def test_stale_own_marks_never_leave_via_the_uplink() -> None:
     policy, facts = hub_case()
     stale = (
         "meta mark & 0xff000000 == 0x0c000000 "
-        "meta mark & 0xffffff00 != { 0x0c000100, 0x0c000200, 0x0c000300 }"
+        "meta mark & 0xffffff00 != { 0x0c800100, 0x0cc63d00, 0x0c800000 }"
     )
 
     script = compile_policy(policy, facts).script
     strict = compile_policy(policy, dataclasses.replace(facts, uplink=None)).script
 
-    assert f'{stale} oifname "eth0" reject with icmpx admin-prohibited' in script
-    assert f'{stale} oifname "eth0" drop' in script
+    assert f'{stale} reject with icmpx admin-prohibited' in script
+    assert f'{stale} drop' in script
     assert f"{stale} reject with icmpx admin-prohibited" in strict
     assert f"{stale} drop" in strict
 

@@ -68,9 +68,39 @@ def test_initialize_runtime_leaves_everything_ocserv_needs_to_start(
     monkeypatch.setattr("kornode.main.NetService", QuietNetService)
     monkeypatch.setattr("kornode.main.prepare_startup_letsencrypt", lambda cfg, *_a: cfg)
 
+    from kornode.services.certificates import CertificateService
+    from test_certificates import WritingRunner
+
+    monkeypatch.setattr(
+        "kornode.main.CertificateService",
+        lambda cfg, files: CertificateService(cfg, files=files, runner=WritingRunner()),
+    )
     initialize_runtime(tmp_path / "config.yaml")
 
     for name in ("ca.crt", "ca.key", "server.crt", "interlink.crt", "interlink.key", "crl.pem"):
         assert config.cert_path(name).is_file(), name
     rendered = (config.system.generated_dir / "ocserv.conf").read_text(encoding="utf-8")
     assert f"[vhost:{config.interlink.server_name}]" in rendered
+
+
+@pytest.mark.parametrize("existing", ["ca.key", "ca.crt"])
+def test_partial_ca_aborts_before_any_runtime_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing: str,
+) -> None:
+    config = AppConfig.model_validate({"system": {"data_dir": tmp_path}})
+    path = config.cert_path(existing)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"original")
+    monkeypatch.setattr("kornode.main.load_config", lambda _path: config)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("partial CA must abort before network/config/certificate changes")
+
+    monkeypatch.setattr("kornode.main._converge_kernel", forbidden)
+    monkeypatch.setattr("kornode.main.prepare_startup_letsencrypt", forbidden)
+    monkeypatch.setattr("kornode.main.CertificateService", forbidden)
+    with pytest.raises(SystemExit, match="incomplete CA state"):
+        initialize_runtime(tmp_path / "config.yaml")
+    assert path.read_bytes() == b"original"

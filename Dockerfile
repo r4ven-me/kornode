@@ -3,9 +3,12 @@
 ARG DEBIAN_VERSION=13
 ARG DEBIAN_CODENAME=trixie
 ARG OCSERV_VERSION=1.5.0
-# SHA-256 of ocserv-${OCSERV_VERSION}.tar.xz. When set, the build refuses a
-# tarball that doesn't match; update it together with OCSERV_VERSION.
-ARG OCSERV_SHA256=
+# Verified against the upstream HTTPS checksum and independently hashed tarball:
+# https://www.infradead.org/ocserv/download/ocserv-1.5.0.tar.xz.sha256sum
+# https://www.infradead.org/ocserv/download/ocserv-1.5.0.tar.xz
+# Retrieved 2026-10-23; HTTPS trust, not an independently verified GPG signature.
+# Keep the pin tied to this version: overrides MUST supply their own SHA-256.
+ARG OCSERV_SHA256=42ced08958b9576ab134fcb7bdc7f8df5e13214fd147855f99021fedcf0eedbe
 
 FROM debian:${DEBIAN_VERSION}-slim AS ocserv-builder
 
@@ -15,6 +18,13 @@ ARG OCSERV_SHA256
 
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-Eeuo", "pipefail", "-c"]
+
+# Reject missing/malformed pins and version overrides reusing the default pin
+# before downloading or extracting source code.
+RUN [[ "${OCSERV_SHA256}" =~ ^[[:xdigit:]]{64}$ ]] \
+    && { [[ "${OCSERV_VERSION}" == "1.5.0" ]] \
+         || [[ "${OCSERV_SHA256}" != "42ced08958b9576ab134fcb7bdc7f8df5e13214fd147855f99021fedcf0eedbe" ]]; } \
+    || { echo "Supply OCSERV_SHA256 for the selected OCSERV_VERSION" >&2; exit 1; }
 
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
@@ -69,14 +79,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       ruby-ronn \
       xz-utils \
       yajl-tools \
-    && curl -fL "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz" \
+    && curl --fail --location --proto '=https' --proto-redir '=https' \
+      --retry 3 --connect-timeout 15 --max-time 120 \
+      "https://www.infradead.org/ocserv/download/ocserv-${OCSERV_VERSION}.tar.xz" \
       -o "/tmp/ocserv-${OCSERV_VERSION}.tar.xz" \
-    && if [ -n "${OCSERV_SHA256}" ]; then \
-         echo "${OCSERV_SHA256}  /tmp/ocserv-${OCSERV_VERSION}.tar.xz" | sha256sum -c -; \
-       else \
-         echo "WARNING: OCSERV_SHA256 is not set; ocserv tarball integrity not verified" >&2; \
-         sha256sum "/tmp/ocserv-${OCSERV_VERSION}.tar.xz"; \
-       fi \
+    && echo "${OCSERV_SHA256}  /tmp/ocserv-${OCSERV_VERSION}.tar.xz" | sha256sum -c - \
     && tar -C /tmp -xf "/tmp/ocserv-${OCSERV_VERSION}.tar.xz" \
     && cd "/tmp/ocserv-${OCSERV_VERSION}" \
     && meson setup build -Doidc-auth=enabled \
@@ -96,7 +103,7 @@ RUN npm audit --audit-level=moderate && npm test && npm run build
 FROM frontend-base AS frontend
 RUN npm run build
 
-FROM python:3.12-slim-trixie AS backend-test
+FROM python:3.12-slim-trixie AS backend-test-deps
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
@@ -108,16 +115,28 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/kornode
-COPY pyproject.toml README.md ./
+# Repository contracts read these files as well as Python modules. Keep the
+# explicit context complete without copying local state or credentials.
+COPY pyproject.toml README.md parity.yaml .env.example Dockerfile Dockerfile.agent Makefile .dockerignore ./
+COPY compose*.yaml ./
+COPY frontend/src ./frontend/src
+COPY docs ./docs
+COPY .github ./.github
+COPY agent ./agent
 COPY backend ./backend
 COPY templates ./templates
 COPY tests ./tests
 COPY config.example.yaml ./config.example.yaml
 COPY examples ./examples
-RUN pip install --no-cache-dir '.[dev]' \
-    && python -m ruff check backend tests \
+RUN pip install --no-cache-dir '.[dev]'
+
+# Ordinary builds cannot create network namespaces. Kernel tests run separately
+# in the explicitly isolated privileged netlab runner, never in BuildKit.
+FROM backend-test-deps AS backend-test
+RUN python -m ruff check backend tests \
     && python -m mypy backend \
-    && python -m pytest \
+    && python -m mypy --explicit-package-bases tests/e2e \
+    && python -m pytest -m 'not netlab' \
     && korctl --config config.example.yaml config render --dry-run
 
 FROM debian:${DEBIAN_VERSION}-slim AS runtime

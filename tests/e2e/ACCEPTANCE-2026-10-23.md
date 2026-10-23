@@ -37,6 +37,67 @@ No broad `--delete` was used. Fifteen obsolete rename-source files were removed
 only after checking their bytes against the old tracked versions. Baseline images
 and registry were not rebuilt, pushed or replaced. No branches or commits.
 
+## Local-only E2E-06 investigation during audit merge
+
+This investigation used repository code and mocked/local unit tests only. No
+VM, SSH, remote logs, Docker runtime, deployment or release was contacted. The
+compatible `15b87a6` failure above remains **unverified and unresolved at runtime**;
+`f0d68ed`'s SNI flag day does not explain it.
+
+### Proven harness defect and bounded fix
+
+`worker.ACCESS_CLIENT` generated a hook that accepted only `reason=connect`.
+Consequently a later `reason=reconnect` could not restore the tunnel address or
+explicit routes. A deterministic regression executes the actual generated hook
+with a fake `ip`: connect succeeds, simulated link-flap route loss leaves the
+address intact, then reconnect must restore routes without another login. Both
+split-route and full-route cases failed against the original hook (routes stayed
+empty). The hook now handles connect/reconnect and uses `addr/route replace` so
+repeated events are idempotent, including the full-route server bypass. This
+proves the hook defect, **not that route loss occurred in the recorded run**.
+
+Lifecycle review: the client runs one background OpenConnect process; there is
+no harness watchdog or automatic replacement login after that process exits.
+Transport reconnection is left to OpenConnect itself. Its independent `client`
+container also holds the 600-second forwarding observer. Upgrade replaces only
+`node`, in order hub -> agent-a -> agent-b; it does not change the client's
+baseline image. The ext listener is not replaced. After both agents answer mTLS,
+the harness snapshots the success count and requires a fresh healthy client
+success. Added mocks verify node-only replacement and rejection of stale success
+counts even when the cached healthy flag is true. Existing tests still reject
+non-VPN paths, wrong exits, and retain gaps over 30 seconds; the E2E <=30-second
+assertion and recovery deadlines are unchanged. No operator relogin was added.
+
+### Evidence still needed, supplied locally by the owner only
+
+For run `3168f99d0b3d4658ce3519b0`, inspect an owner-provided local copy of the
+existing private JUnit and `upgrade/agent-a.tar.gz`, `upgrade/agent-b.tar.gz`
+archives, with replacement/apply timestamps. Those agent-only archives do not
+establish the independent client's process, hook or route state. To distinguish
+client exit, failed TLS/authentication, missing client route, absent server
+session, or node forwarding failure, the necessary contemporaneous evidence is:
+
+- Client OpenConnect PID/liveness and exit status if known; redacted
+  `/tmp/kn-access/log`; hook reasons/timestamps/exit codes if captured; VPN address,
+  link state and `ip -j route get <ext>` before/during/after replacement.
+- `/tmp/kn-upgrade-traffic.json` snapshots and observer liveness/timing: successes,
+  failures, healthy, wrong-peer count and maximum gap, including a fresh sample
+  after the last replacement (a frozen file alone cannot establish recovery).
+- Agent-a access-server supervisor/ocserv state and redacted session/reconnect
+  errors, applied bundle version, client-pool route, forwarding/NAT counters and
+  bounded packet-path evidence to ext, correlated with the client timestamps.
+
+Do not include passwords, cookies, tokens, private keys or raw secret-bearing
+config. Cleanup has already removed the client container; absent saved evidence
+cannot be reconstructed by these mocks. No new runtime run is authorized here.
+No production change is justified by local evidence alone.
+
+Local validation after the hook fix: **90 harness tests passed**, owned-path Ruff
+passed, and strict mypy passed for 10 files with `--explicit-package-bases
+--follow-imports=silent`. The unsuppressed import-following mypy invocation found
+four out-of-scope diagnostics in `tests/test_bundle.py`; these were not changed.
+These results are not network acceptance or proof of the <=30-second live SLA.
+
 ## Earlier broad validation (before the targeted NL-05 fix)
 
 | Check | Result |

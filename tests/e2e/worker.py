@@ -233,11 +233,11 @@ if o.get("full"):
  gw=json.loads(r.stdout)[0]["gateway"]
 script="\\n".join([
  "#!/bin/sh",
- '[ "$reason" = connect ] || exit 0',
+ 'case "$reason" in connect|reconnect) ;; *) exit 0 ;; esac',
  'ip link set dev "$TUNDEV" up mtu "${INTERNAL_IP4_MTU:-1400}"',
- 'ip addr add "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"',
- *["ip route add %s dev \\"$TUNDEV\\""%r for r in o["routes"]],
- *(["ip route add %s/32 via %s"%(o["host"],gw)] if gw else []),
+ 'ip addr replace "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"',
+ *["ip route replace %s dev \\"$TUNDEV\\""%r for r in o["routes"]],
+ *(["ip route replace %s/32 via %s"%(o["host"],gw)] if gw else []),
  *(['ip route replace default dev "$TUNDEV"'] if gw else []),
  ""])
 open(d+"/vpnc","w").write(script)

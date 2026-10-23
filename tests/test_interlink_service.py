@@ -131,3 +131,48 @@ def test_cli_show_and_set(world: World) -> None:
     saved = runner.invoke(app, [*base, "interlink", "set", "--domain", "mesh.example", "--json"])
     assert saved.exit_code == 0, saved.output
     assert load_config(world.path).interlink.domain == "mesh.example"
+
+
+@pytest.mark.parametrize("use_alias", [False, True])
+def test_cli_set_keeps_explicit_env_file_and_raw_secret_refs(
+    world: World, tmp_path: Path, use_alias: bool
+) -> None:
+    raw = yaml.safe_load(world.path.read_text())
+    raw["web"]["admin_password"] = "${SECRET:ADMIN}"
+    world.path.write_text(yaml.safe_dump(raw))
+    env_file = tmp_path / "selected.env"
+    env_file.write_text("ADMIN=selected-secret\nKORNODE_FABRIC__DOMAIN=selected.example\n")
+    world.path.with_name(".env").write_text("ADMIN=wrong-secret\n")
+    path = world.path
+    if use_alias:
+        alias_dir = tmp_path / "alias"
+        alias_dir.mkdir()
+        path = alias_dir / "config.yaml"
+        path.symlink_to(world.path)
+        path.with_name(".env").write_text("ADMIN=wrong-alias-secret\n")
+    result = CliRunner().invoke(
+        app,
+        [
+            "--config",
+            str(path),
+            "--env-file",
+            str(env_file),
+            "interlink",
+            "set",
+            "--reserved",
+            "192.0.2.0/24",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["interlink"]["domain"] == "selected.example"
+    saved = yaml.safe_load(world.path.read_text())
+    assert saved["web"]["admin_password"] == "${SECRET:ADMIN}"
+    assert saved["interlink"] == {"reserved": ["192.0.2.0/24"]}
+    assert "fabric" not in saved
+    config = load_config(path, env_file=env_file)
+    assert config.web.admin_password == "selected-secret"
+    assert "selected-secret" not in result.output
+    assert "selected-secret" not in world.path.read_text()
+    if use_alias:
+        assert path.is_symlink()

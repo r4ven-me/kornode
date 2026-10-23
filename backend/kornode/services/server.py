@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 from kornode.config.models import AppConfig
 from kornode.renderers import OcservConfigRenderer
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
 from kornode.services.ocserv_reload import restart_required
+from kornode.services.render_transaction import rendered_configuration
 from kornode.services.supervisor_rpc import SupervisorRpcClient, SupervisorRpcError
 
 _NOT_RUNNING_FAULTS = ("NOT_RUNNING", "STOPPED", "already stopped")
@@ -27,29 +30,57 @@ class ServerService:
         config: AppConfig,
         rpc_client: SupervisorRpcClient | None = None,
         config_service: ConfigService | None = None,
+        *,
+        config_path: Path | None = None,
+        env_file: Path | None = None,
     ) -> None:
+        # No source path means an intentional in-memory candidate (e.g. a
+        # lock-owning transaction callback), never an implicit reload of defaults.
+        self.config_path = config_path
+        self.env_file = env_file
+        self._rpc_override = rpc_client
+        self._already_rendered = False
         self.config = config
         self.rpc = rpc_client or SupervisorRpcClient(config.generated_path("supervisor.sock"))
         self.config_service = config_service or ConfigService()
 
+    @contextmanager
+    def _authoritative(self) -> Iterator[ServerService]:
+        assert self.config_path is not None
+        with rendered_configuration(
+            self.config_path, env_file=self.env_file, service=self.config_service
+        ) as (config, _):
+            current = ServerService(config, self._rpc_override, self.config_service)
+            current._already_rendered = True
+            yield current
+
     def start(self, *, dry_run: bool = False) -> CommandResult:
         if dry_run:
             return _dry_run_result("startProcess", "ocserv")
+        if self.config_path is not None:
+            with self._authoritative() as current:
+                return current.start()
         if not self.config.server.enabled:
             return self._disabled_result("startProcess")
-        self.config_service.write_rendered_files(self.config)
+        if not self._already_rendered:
+            self.config_service.write_rendered_files(self.config)
         return _run(lambda: self.rpc.start_process("ocserv"), "startProcess", "ocserv")
 
     def stop(self, *, dry_run: bool = False) -> CommandResult:
         if dry_run:
             return _dry_run_result("stopProcess", "ocserv")
-        if not self.config.server.enabled:
-            return self._disabled_result("stopProcess")
-        return _run(lambda: self.rpc.stop_process("ocserv"), "stopProcess", "ocserv")
+
+        def _stop() -> None:
+            try:
+                self.rpc.stop_process("ocserv")
+            except SupervisorRpcError as exc:
+                if not _is_expected_fault(exc, (*_NOT_RUNNING_FAULTS, "BAD_NAME")):
+                    raise
+
+        return _run(_stop, "stopProcess", "ocserv")
 
     def _disabled_result(self, method: str) -> CommandResult:
-        # With server.enabled false there is no [program:ocserv] in the
-        # supervisor config, so the RPC would only answer BAD_NAME.
+        # A disabled server stays registered but must not be started.
         return CommandResult(
             ("supervisor-rpc", method, "ocserv"),
             1,
@@ -70,9 +101,13 @@ class ServerService:
     def restart(self, *, dry_run: bool = False) -> CommandResult:
         if dry_run:
             return _dry_run_result("restartProcess", "ocserv")
+        if self.config_path is not None:
+            with self._authoritative() as current:
+                return current.restart()
         if not self.config.server.enabled:
             return self._disabled_result("restartProcess")
-        self.config_service.write_rendered_files(self.config)
+        if not self._already_rendered:
+            self.config_service.write_rendered_files(self.config)
 
         def _restart() -> None:
             try:
@@ -96,10 +131,23 @@ class ServerService:
         ocserv.conf the process was running with. Settings SIGHUP can't
         apply (auth methods, ports, device) get a full restart, which drops
         the active VPN sessions; everything else a reload, which keeps them.
-        Returns None when the ocserv server is disabled.
+        A disabled desired state always stops the observed process. An enabled
+        but stopped process must be started, not sent a reload signal.
         """
+        if self.config_path is not None and not dry_run:
+            with self._authoritative() as authoritative:
+                return authoritative.apply_config_change(previous_ocserv_conf)
         if not self.config.server.enabled:
-            return None
+            return self.stop(dry_run=dry_run)
+        if not dry_run:
+            try:
+                info = self.rpc.get_process_info("ocserv")
+            except SupervisorRpcError as exc:
+                return CommandResult(
+                    ("supervisor-rpc", "getProcessInfo", "ocserv"), 1, "", str(exc)
+                )
+            if info.get("statename") != "RUNNING":
+                return self.start()
         current = OcservConfigRenderer().render(self.config)
         if restart_required(previous_ocserv_conf, current):
             return self.restart(dry_run=dry_run)
@@ -139,6 +187,8 @@ class ServerService:
             raise ValueError("unsupported managed process")
         if dry_run:
             return _dry_run_result(action, process)
+        if process == "ocserv" and action != "status":
+            return {"start": self.start, "stop": self.stop, "restart": self.restart}[action]()
         if action == "start":
             return _run(lambda: self.rpc.start_process(process), "startProcess", process)
         if action == "stop":
@@ -173,6 +223,8 @@ class ServerService:
         return ["api", "ocserv", "dnsmasq", "certbot-renew", "upstream-watchdog"]
 
     def missing_process_state(self, name: str) -> tuple[str, str]:
+        if name == "ocserv" and not self.config.server.enabled:
+            return "DISABLED", "ocserv is disabled"
         if name == "dnsmasq" and not self.config.dns_tunnel_active():
             return "DISABLED", "internal DNS and split DNS are disabled"
         if name == "certbot-renew" and not self.config.certificates.letsencrypt.enabled:

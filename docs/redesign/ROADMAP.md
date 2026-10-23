@@ -1,6 +1,20 @@
 # Roadmap
 
-## Current working-tree status — 2026-10-23
+## Integration branch — 2026-10-23
+
+`redesign/interlink-nodes-integration` preserves the WIP in checkpoint `9b9ee4d`
+and integrates audited `origin/main` (`33df415`). Interlink/Nodes, backward
+readers, audit config transactions, MFA, stable routing identities/barriers,
+structured controls and ETags coexist. Local validation: **2014 backend tests**,
+**84 frontend tests**, **49 Playwright tests**, lint/typecheck/build/render/parity
+passed. No VPS/SSH, runtime netlab/E2E, image publication or deployment.
+
+A deterministic regression proves and fixes an E2E access-client reconnect-hook
+bug; the old VM failure is **not** considered attributed or accepted. UX changes
+and runtime acceptance remain open. See [INTEGRATION.md](INTEGRATION.md) for scope,
+validation and the pending certificate-path reload/restart defect.
+
+## Historical working-tree status before integration — 2026-10-23
 
 D-85 implementation and Nodes consolidation are complete locally (not committed or
 published). Legacy config/env/cache readers and schema tests are included; signed

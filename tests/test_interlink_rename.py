@@ -130,6 +130,12 @@ def test_aliases_preserve_precedence_between_sources(
 def test_settings_save_upgrades_the_section_without_losing_values(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text("fabric: {domain: kornode.internal, reserved: [192.0.2.0/24]}\n")
+    from tests.test_config_source_api import _client
+
+    _client(path)  # local runtime paths for transactional rendered writes
+    path.write_text(
+        path.read_text() + "fabric: {domain: kornode.internal, reserved: [192.0.2.0/24]}\n"
+    )
     service = InterlinkService(load_config(path, environ={}), path, sync=lambda config: None)
     service.set({"domain": "custom.example"})
     written = yaml.safe_load(path.read_text())
@@ -378,19 +384,25 @@ def test_stored_transport_ciphertext_survives_rename(tmp_path: Path) -> None:
         env.registry.conn.close()
 
 
-def _certificate(key: ec.EllipticCurvePrivateKey, name: str) -> bytes:
+def _certificate(
+    key: ec.EllipticCurvePrivateKey,
+    name: str,
+    *,
+    issuer_key: ec.EllipticCurvePrivateKey | None = None,
+    issuer: x509.Name | None = None,
+) -> bytes:
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
     now = datetime.now(UTC)
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
-        .issuer_name(subject)
+        .issuer_name(issuer or subject)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(days=1))
         .not_valid_after(now + timedelta(days=365))
         .add_extension(x509.SubjectAlternativeName([x509.DNSName(name)]), critical=False)
-        .sign(key, hashes.SHA256())
+        .sign(issuer_key or key, hashes.SHA256())
     )
     return cert.public_bytes(serialization.Encoding.PEM)
 
@@ -415,6 +427,14 @@ def test_existing_fabric_key_migration_is_pin_stable_and_non_destructive(
         old_cert = _certificate(key, "fabric.kornode.internal")
         legacy_cert.write_bytes(old_cert)
         pin = certificate_file_pin(legacy_cert).pin
+        from tests.test_certificates import WritingRunner
+
+        CertificateService(env.config, runner=WritingRunner()).init_ca()
+        issuer_key = serialization.load_pem_private_key(
+            env.config.cert_path("ca.key").read_bytes(), password=None
+        )
+        assert isinstance(issuer_key, ec.EllipticCurvePrivateKey)
+        issuer = x509.load_pem_x509_certificate(env.config.cert_path("ca.crt").read_bytes()).subject
         calls: list[list[str]] = []
 
         def run(self: CommandRunner, argv: list[str], **kwargs: Any) -> CommandResult:
@@ -423,7 +443,9 @@ def test_existing_fabric_key_migration_is_pin_stable_and_non_destructive(
             if not kwargs.get("dry_run"):
                 assert Path(argv[argv.index("--load-privkey") + 1]).read_bytes() == pem
                 Path(argv[argv.index("--outfile") + 1]).write_bytes(
-                    _certificate(key, env.config.interlink.server_name)
+                    _certificate(
+                        key, env.config.interlink.server_name, issuer_key=issuer_key, issuer=issuer
+                    )
                 )
             return CommandResult(tuple(argv), 0, "", "")
 
@@ -486,12 +508,14 @@ def test_source_editor_validates_and_saves_old_yaml_as_interlink(tmp_path: Path)
     path = tmp_path / "config.yaml"
     client = _client(path)
     source = path.read_text() + "fabric: {domain: kornode.internal}\n"
+    etag = client.get("/api/config/source", auth=("admin", "secret")).headers["etag"]
     response = client.post(
         "/api/config/source",
         auth=("admin", "secret"),
         json={
             "content": source,
             "write_rendered": False,
+            "etag": etag,
         },
     )
     assert response.status_code == 200, response.text
@@ -520,11 +544,12 @@ def test_legacy_config_validation_errors_never_echo_secret_input(
         else {
             "content": yaml.safe_dump(payload),
             "write_rendered": False,
+            "etag": client.get("/api/config/source", auth=("admin", "secret")).headers["etag"],
         }
     )
     response = client.post(f"/api/config/{endpoint}", auth=("admin", "secret"), json=request)
     assert response.status_code == 400
-    assert "web.admin_password" in response.text
+    assert any(error["loc"] == ["web", "admin_password"] for error in response.json()["detail"])
     assert sensitive not in response.text
     assert sensitive not in caplog.text
     assert "input_value=" not in response.text
@@ -627,7 +652,8 @@ def test_failed_certificate_issue_keeps_legacy_identity_for_retry(
                 service.ensure_interlink_certificate()
             assert old_key.read_bytes() == b"pinned-legacy-key"
             assert old_cert.read_bytes() == b"legacy-certificate"
-            assert (service.cert_dir / "interlink.key").read_bytes() == old_key.read_bytes()
+            assert not (service.cert_dir / "interlink.key").exists()
+            assert not (service.cert_dir / "interlink.crt").exists()
     finally:
         env.registry.conn.close()
 
@@ -670,3 +696,100 @@ def test_pre_rename_backup_configuration_and_identity_can_be_staged(tmp_path: Pa
         assert result["staged"] and result["restart_required"]
     finally:
         env.registry.conn.close()
+
+
+@pytest.mark.parametrize("failure", ["command", "invalid", "issuer", "publish"])
+def test_legacy_certificate_migration_failure_publishes_no_partial_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    import os
+
+    from tests.test_certificates import WritingRunner
+
+    from kornode.services.command import CommandError
+
+    env = Env(tmp_path)
+    try:
+        runner = WritingRunner()
+        service = CertificateService(env.config, runner=runner)
+        service.init_ca()
+        key = ec.generate_private_key(ec.SECP256R1())
+        pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        old_key, old_cert = service.cert_dir / "fabric.key", service.cert_dir / "fabric.crt"
+        old_key.write_bytes(pem)
+        old_cert.write_bytes(_certificate(key, "fabric.kornode.internal"))
+        originals = old_key.read_bytes(), old_cert.read_bytes()
+        run, replace = runner.run, os.replace
+
+        def fail_run(argv: Any, **kwargs: Any) -> CommandResult:
+            assert "--generate-privkey" not in argv
+            result = run(argv, **kwargs)
+            if failure == "command":
+                raise CommandError(CommandResult(tuple(argv), 1, "", "issuance failed"))
+            target = Path(argv[argv.index("--outfile") + 1])
+            if failure == "invalid":
+                target.write_bytes(b"invalid certificate")
+            elif failure == "issuer":
+                # Correct key/SAN, wrong issuer: pair matching alone is not sufficient.
+                target.write_bytes(_certificate(key, env.config.interlink.server_name))
+            return result
+
+        def fail_publish(source: Any, target: Any) -> None:
+            if Path(target) == service.cert_dir / "interlink.crt":
+                raise OSError("publication failed")
+            replace(source, target)
+
+        with monkeypatch.context() as changes:
+            changes.setattr(runner, "run", fail_run)
+            if failure == "publish":
+                changes.setattr(os, "replace", fail_publish)
+            with pytest.raises((CommandError, ValueError, OSError)):
+                service.ensure_interlink_certificate()
+        assert (old_key.read_bytes(), old_cert.read_bytes()) == originals
+        assert not (service.cert_dir / "interlink.key").exists()
+        assert not (service.cert_dir / "interlink.crt").exists()
+        assert not list(service.cert_dir.glob(".issue-*"))
+        assert not list(service.cert_dir.glob(".publish-*"))
+        assert not env.config.generated_path("interlink.tmpl").exists()
+        assert service.ensure_interlink_certificate()
+        assert (service.cert_dir / "interlink.key").read_bytes() == pem
+        assert (old_key.read_bytes(), old_cert.read_bytes()) == originals
+    finally:
+        env.registry.conn.close()
+
+
+@pytest.mark.parametrize("name", ["fabric", "interlink"])
+def test_unsaved_candidate_and_cli_aliases_use_loader_precedence_and_provenance(
+    tmp_path: Path, name: str
+) -> None:
+    from kornode.config.loader import validate_config_data
+
+    path = tmp_path / "config.yaml"
+    raw = {name: {"domain": "yaml.example"}, "web": {"admin_password": "${SECRET:ADMIN}"}}
+    original = copy.deepcopy(raw)
+    path.write_text(yaml.safe_dump(raw))
+    overrides = {name: {"client_pool": "10.120.{id}.0/24"}, "node": {"id": 7}}
+    original_overrides = copy.deepcopy(overrides)
+    environment = {"ADMIN": "not-persisted", "KORNODE_FABRIC__DOMAIN": "env.example"}
+    candidate = validate_config_data(raw, path, cli_overrides=overrides, environ=environment)
+    assert candidate == load_config(path, cli_overrides=overrides, environ=environment)
+    assert candidate.interlink.domain == "yaml.example"
+    assert candidate.server.ipv4_network == "10.120.7.0/24"
+    assert candidate.internal_dns.listen == "10.120.7.1"
+    assert candidate.web.admin_password == "not-persisted"
+    assert raw == original
+    assert overrides == original_overrides
+    assert "not-persisted" not in path.read_text()
+
+
+def test_cli_rejects_ambiguous_section_aliases(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="both `fabric` and `interlink`"):
+        load_config(
+            tmp_path / "missing.yaml",
+            environ={},
+            cli_overrides={"fabric": {"domain": "old.example"}, "interlink": {}},
+        )

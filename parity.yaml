@@ -668,6 +668,18 @@ capabilities:
     api: "POST /api/web-config/settings"
     ui: web.settings
     exempt: "v1 gap: web settings are panel/API-only; no dedicated CLI settings command yet."
+  - id: web.password.change
+    service: null
+    cli: null
+    api: "POST /api/auth/password"
+    ui: web.password.change
+    exempt: "Dedicated reauthenticated panel/API flow; CLI credentials are managed through deployment configuration."
+  - id: control.settings
+    service: null
+    cli: null
+    api: "POST /api/web-config/control-settings"
+    ui: control.settings
+    exempt: "Structured panel/API settings; CLI can manage the same values through YAML and environment configuration."
   - id: web.totp.status
     service: null
     cli: null

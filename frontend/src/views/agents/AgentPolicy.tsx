@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { Mutate, Policy, Rule } from "../../agentsApi";
+import type { JsonObject, Mutate, Policy, Rule } from "../../agentsApi";
 import { EgressRules } from "../network/EgressRules";
+import { DestinationSets } from "../network/DestinationSets";
 
 const NEW_AGENT_RULE: Rule = { from: ["host"], to: "any", via: "local" };
 
@@ -14,11 +15,16 @@ export function AgentPolicy({ policy, busy, mutate }: { policy: Policy; busy: bo
     setSets(JSON.stringify(policy.sets ?? {}, null, 2));
     setError("");
   }, [policy]);
+  let parsedSets: JsonObject | null = null;
+  try {
+    const value: unknown = JSON.parse(sets);
+    if (value && typeof value === "object" && !Array.isArray(value)) parsedSets = value as JsonObject;
+  } catch { /* The advanced editor retains invalid JSON for correction. */ }
   const classes = ["clients", "host", "interlink", ...(policy.sources ?? []).map(source => source.name)];
   return <section className="panel" data-capability="agent.policy.show">
     <h2>Egress policy</h2>
     <p className="field-help">First match wins; drag a rule or use the arrows to reorder. The compiler preserves the interlink recovery path. A saved policy is not proof of connectivity: the backend validates semantics and refuses what the node cannot run.</p>
-    <form onSubmit={e => {
+    <form data-capability="agent.policy.set" onSubmit={e => {
       e.preventDefault(); setError("");
       let parsed: Policy["sets"];
       try { parsed = JSON.parse(sets); } catch { setError("Destination sets must contain valid JSON."); return; }
@@ -27,6 +33,7 @@ export function AgentPolicy({ policy, busy, mutate }: { policy: Policy; busy: bo
       <fieldset disabled={busy} className="agent-rule-list">
         <EgressRules rules={rules} disabled={busy} classes={classes} deadRules={[]} explain={null} onChange={setRules} />
         <button className="action-button" type="button" onClick={() => setRules([...rules, NEW_AGENT_RULE])}>Add rule</button>
+        {parsedSets !== null && <DestinationSets sets={parsedSets} disabled={busy} onChange={value => setSets(JSON.stringify(value, null, 2))} />}
         <label>Destination sets (JSON)<textarea className="agent-code" rows={8} value={sets} onChange={e => setSets(e.target.value)} /></label>
       </fieldset>
       {error && <p role="alert">{error}</p>}

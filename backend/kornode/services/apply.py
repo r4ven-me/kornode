@@ -10,11 +10,14 @@ and rewrites nftables state. Dry-run is not threaded through the save path.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import BackgroundTasks
 
 from kornode.config.models import AppConfig
 from kornode.services.command import CommandResult
 from kornode.services.internal_dns import InternalDnsService
+from kornode.services.render_transaction import rendered_configuration
 from kornode.services.server import ServerService
 from kornode.services.sessions import SessionService
 
@@ -36,10 +39,28 @@ def apply_dns_configuration(
     background_tasks: BackgroundTasks,
     *,
     reconnect_clients: bool,
+    config_path: Path | None = None,
+    env_file: Path | None = None,
 ) -> list[CommandResult]:
+    """Apply current disk state when a source is supplied by an unlocked caller.
+
+    Without a source, the caller owns the in-memory candidate and serialization;
+    this preserves intentional initialization/transaction overrides.
+    """
+    if config_path is not None:
+        with rendered_configuration(config_path, env_file=env_file) as (current, _):
+            return _apply_dns_runtime(
+                current, background_tasks, reconnect_clients=reconnect_clients
+            )
     from kornode.services.config import ConfigService
 
     ConfigService().write_rendered_files(config)
+    return _apply_dns_runtime(config, background_tasks, reconnect_clients=reconnect_clients)
+
+
+def _apply_dns_runtime(
+    config: AppConfig, background_tasks: BackgroundTasks, *, reconnect_clients: bool
+) -> list[CommandResult]:
     results: list[CommandResult] = []
     server = ServerService(config)
     if config.dns_tunnel_active():

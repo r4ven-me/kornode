@@ -1,5 +1,11 @@
 # Korvus Node
 
+> **Unreleased development tree:** `redesign/interlink-nodes-integration` combines
+> interlink/Nodes with the 1.2.0 audit hardening. Published 1.2.0 images do not
+> include these changes. This branch is not approved for deployment; runtime
+> upgrade acceptance and further UI work remain pending. See
+> [integration status](docs/redesign/INTEGRATION.md).
+
 Korvus Node (`kornode`) is a Python-first management platform for OpenConnect/ocserv
 VPN in Docker. It is a hub plus agents:
 

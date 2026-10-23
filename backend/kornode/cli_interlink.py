@@ -15,12 +15,15 @@ from kornode.services.interlink import InterlinkService
 
 
 def register(
-    app: typer.Typer, config: Callable[[], AppConfig], path: Callable[[], Path | None]
+    app: typer.Typer,
+    config: Callable[[], AppConfig],
+    path: Callable[[], Path | None],
+    env_file: Callable[[], Path | None] = lambda: None,
 ) -> None:
     interlink = typer.Typer(help="Interlink overview: addressing, nodes, prefixes, DNS and sources")
 
     def service() -> InterlinkService:
-        return InterlinkService(config(), path() or DEFAULT_CONFIG_PATH)
+        return InterlinkService(config(), path() or DEFAULT_CONFIG_PATH, env_file=env_file())
 
     @interlink.command("show")
     def interlink_show(json: Json = False) -> None:
