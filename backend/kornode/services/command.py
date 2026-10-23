@@ -573,7 +573,10 @@ def _log_sink_main() -> None:
             for key, _ in events.select():
                 if key.data == "data":
                     if not eof:
-                        read_data(8192)
+                        # A preceding control event in this batch may have
+                        # drained the pipe, invalidating its data readiness.
+                        with suppress(BlockingIOError):
+                            read_data(8192)
                     continue
                 request = control.recv(1)
                 if not request:

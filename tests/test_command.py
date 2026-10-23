@@ -477,6 +477,8 @@ def generated_private_key(request: pytest.FixtureRequest) -> bytes:
 def _fragment_log_sink(
     monkeypatch: pytest.MonkeyPatch,
     size: int,
+    *,
+    barrier_first: bool = False,
 ) -> list[subprocess.Popen[Any]]:
     """Force real pipe reads to split PEM markers and registered secrets."""
     popen = subprocess.Popen
@@ -492,6 +494,24 @@ def _fragment_log_sink(
                 f"    return original_read(fd, min(count, {size}))\n"
                 "os.read = fragmented_read\n"
             )
+            if barrier_first:
+                # Queue both events, then drain the pipe via the barrier before
+                # handling the now-stale data readiness from the same batch.
+                prefix += (
+                    "import select, selectors\n"
+                    "original_select = selectors.DefaultSelector.select\n"
+                    "first_select = True\n"
+                    "def barrier_first_select(self, *args, **kwargs):\n"
+                    "    global first_select\n"
+                    "    if first_select:\n"
+                    "        first_select = False\n"
+                    "        control = next(k.fd for k in self.get_map().values() "
+                    "if k.data == 'control')\n"
+                    "        select.select([control], [], [])\n"
+                    "    return sorted(original_select(self, *args, **kwargs), "
+                    "key=lambda event: event[0].data != 'control')\n"
+                    "selectors.DefaultSelector.select = barrier_first_select\n"
+                )
             argv = [*argv[:2], prefix + argv[2], *argv[3:]]
         process = popen(argv, *args, **kwargs)
         if helper:
@@ -548,6 +568,7 @@ def test_pem_suppression_precedes_registered_secret_replacement(
             helper.wait(timeout=5)
 
 
+@pytest.mark.parametrize("barrier_first", [False, True], ids=["natural-order", "barrier-first"])
 @pytest.mark.parametrize("cut_at", ["begin", "body", "end"])
 @pytest.mark.parametrize("secret_kind", ["PRIVATE", "KEY", "BEGIN", "newline", "delimiter"])
 def test_raw_pem_boundaries_survive_background_flush_barriers(
@@ -556,8 +577,9 @@ def test_raw_pem_boundaries_survive_background_flush_barriers(
     generated_private_key: bytes,
     cut_at: str,
     secret_kind: str,
+    barrier_first: bool,
 ) -> None:
-    helpers = _fragment_log_sink(monkeypatch, 2)
+    helpers = _fragment_log_sink(monkeypatch, 2, barrier_first=barrier_first)
     pem = generated_private_key
     cut = {
         "begin": pem.index(b"PRIVATE") + 3,
@@ -596,6 +618,7 @@ def test_raw_pem_boundaries_survive_background_flush_barriers(
         release.touch()
         for helper in helpers:
             helper.wait(timeout=5)
+    assert all(helper.returncode == 0 for helper in helpers), "log sink exited unsuccessfully"
     content = log.read_text()
     _assert_no_private_payload(pem, content)
     assert "after" in content
