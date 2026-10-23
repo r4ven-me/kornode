@@ -12,8 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 NAME_PATTERN = r"^[a-z][a-z0-9_-]{0,30}$"
 _DOMAIN_RE = re.compile(r"^(\*\.)?([A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,63}$")
+# `exit:<n>` is the spelling before D-84; it is read as `node:<n>` and written back as such.
 _VIA_RE = re.compile(
-    r"^(local|fabric|drop|exit:([1-9][0-9]{0,2})|upstream:([a-z][a-z0-9_-]{0,30}))$"
+    r"^(local|fabric|drop|(?:node|exit):([1-9][0-9]{0,2})|upstream:([a-z][a-z0-9_-]{0,30}))$"
 )
 
 BUILTIN_CLASSES = ("clients", "host", "fabric")
@@ -116,7 +117,7 @@ To = Literal["any", "fabric"] | SetRef | NodeRef | InlineDest
 
 @dataclass(frozen=True, slots=True)
 class Via:
-    kind: Literal["local", "fabric", "drop", "exit", "upstream"]
+    kind: Literal["local", "fabric", "drop", "node", "upstream"]
     target: str | None = None
 
     @classmethod
@@ -125,7 +126,7 @@ class Via:
         if match is None:
             raise ValueError(f"invalid via {value!r}")
         if match.group(2):
-            return cls("exit", match.group(2))
+            return cls("node", match.group(2))
         if match.group(3):
             return cls("upstream", match.group(3))
         return cls(value)  # type: ignore[arg-type]
@@ -146,8 +147,7 @@ class Rule(_Strict):
     @field_validator("via")
     @classmethod
     def _valid_via(cls, value: str) -> str:
-        Via.parse(value)
-        return value
+        return Via.parse(value).name
 
     @field_validator("from_")
     @classmethod

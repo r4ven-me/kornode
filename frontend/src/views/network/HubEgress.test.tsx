@@ -37,9 +37,9 @@ describe("Hub egress", () => {
     await screen.findByText(/wg · wg0/);
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/egress/check", "POST", shown.policy, "session"));
-    mocks.write.mockRejectedValueOnce(new Error("exit:9 needs an active agent with role exit"));
+    mocks.write.mockRejectedValueOnce(new Error("node:9 needs an active agent with role gateway"));
     await userEvent.click(screen.getByRole("button", { name: "Save policy" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("exit:9");
+    expect((await screen.findByRole("alert")).textContent).toContain("node:9");
   });
 
   const two = {
@@ -86,9 +86,9 @@ describe("Hub egress", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     await userEvent.selectOptions(screen.getByLabelText("Rule 2 to kind"), "set");
     await userEvent.type(screen.getByLabelText("Rule 2 to value"), "corp");
-    await userEvent.selectOptions(screen.getByLabelText("Rule 2 via kind"), "exit");
+    await userEvent.selectOptions(screen.getByLabelText("Rule 2 via kind"), "node");
     await userEvent.type(screen.getByLabelText("Rule 2 via target"), "3");
-    const expected = { from: ["clients"], to: { set: "corp" }, via: "exit:3" };
+    const expected = { from: ["clients"], to: { set: "corp" }, via: "node:3" };
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/egress/check", "POST", { ...shown.policy, egress: [...shown.policy.egress, expected] }, "session"));
     expect(screen.getByRole("button", { name: "Save source" }).closest("fieldset")?.disabled).toBe(true);
   });

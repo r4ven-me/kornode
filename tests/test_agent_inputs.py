@@ -168,7 +168,7 @@ def test_a_node_that_takes_fabric_traffic_routes_the_fabric_prefixes_in_main(
         {
             "egress": [
                 {"id": "to-fabric", "from": ["host"], "to": "fabric", "via": "fabric"},
-                {"id": "exit-local", "from": ["fabric"], "to": "any", "via": "local"},
+                {"id": "gateway-local", "from": ["fabric"], "to": "any", "via": "local"},
             ]
         }
     )

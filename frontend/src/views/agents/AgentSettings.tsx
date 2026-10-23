@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Agent, Mutate } from "../../agentsApi";
+import { AGENT_ROLES, ROLE_HINTS } from "./roles";
 
 export function AgentSettings({ agent, busy, mutate }: { agent: Agent; busy: boolean; mutate: Mutate }) {
   const [description, setDescription] = useState(agent.description);
@@ -28,7 +29,7 @@ export function AgentSettings({ agent, busy, mutate }: { agent: Agent; busy: boo
     }}>
       <fieldset className="agent-fields" disabled={busy || agent.state === "revoked"}>
         <label>Description<textarea value={description} onChange={e => setDescription(e.target.value)} /></label>
-        <div className="agent-checks">{["access", "exit"].map(role => <label key={role}><input type="checkbox" checked={roles.includes(role)} onChange={e => setRoles(e.target.checked ? [...roles, role] : roles.filter(r => r !== role))} /> {role} role</label>)}</div>
+        <div className="agent-checks">{AGENT_ROLES.map(role => <label key={role} title={ROLE_HINTS[role]}><input type="checkbox" checked={roles.includes(role)} onChange={e => setRoles(e.target.checked ? [...roles, role] : roles.filter(r => r !== role))} /> {role} role</label>)}<p className="field-help agent-roles-help">access: serves its own VPN clients. gateway: other nodes may leave to the internet through it (<code>via node:&lt;id&gt;</code>).</p></div>
         <label>Transport<select value={transport} onChange={e => setTransport(e.target.value)}><option value="tcp">TCP only</option><option value="auto">Auto (DTLS when available)</option></select></label>
         <label>DPD (seconds)<input type="number" value={dpd} onChange={e => setDpd(Number(e.target.value))} /></label>
         <label>Keepalive (seconds)<input type="number" value={keepalive} onChange={e => setKeepalive(Number(e.target.value))} /></label>

@@ -25,7 +25,7 @@ from kornode.net.compile import (
     compile_policy,
     dest_members,
 )
-from kornode.net.lists import parse_exit_sets
+from kornode.net.lists import parse_gateway_sets, report_gateway_sets
 from kornode.net.model import EgressPolicy, InlineDest, SetRef
 from kornode.net.state import DesiredState
 from kornode.registry.db import migrate, open_registry
@@ -78,7 +78,7 @@ class FabricView:
     # node id -> ocserv session device while the node is connected
     sessions: dict[int, str] = field(default_factory=dict)
     # node id -> addresses the agent resolved for the destinations of its exit rules (D-79)
-    exit_sets: dict[int, dict[str, frozenset[str]]] = field(default_factory=dict)
+    gateway_sets: dict[int, dict[str, frozenset[str]]] = field(default_factory=dict)
 
 
 class HubNetInputs:
@@ -116,11 +116,11 @@ class HubNetInputs:
         tunnel_ifaces = {tunnel.interface for tunnel in tunnels.values()}
         view = self._fabric_view()
         policy = self.policy()
-        # `exit:<n>` of the hub's own policy leaves through node n's ocserv session; while
+        # `node:<n>` of the hub's own policy leaves through node n's ocserv session; while
         # that session is down there is no fact and the exit only fails closed.
         for rule in policy.egress:
             via = rule.parsed_via
-            device = view.sessions.get(int(via.target or 0)) if via.kind == "exit" else None
+            device = view.sessions.get(int(via.target or 0)) if via.kind == "node" else None
             if device is not None:
                 tunnels[via.name] = TunnelFact(interface=device, up=True)
         return NodeFacts(
@@ -200,11 +200,11 @@ class HubNetInputs:
             registry = Registry(conn)
             nodes = [node for node in registry.list_nodes() if node.state == "active"]
             prefixes = registry.list_prefixes()
-            exit_sets = {}
+            gateway_sets = {}
             for node in nodes:
                 reports = registry.list_reports(node.id, 1) if node.id != 1 else []
                 if reports:
-                    exit_sets[node.id] = parse_exit_sets(reports[0].body.get("exit_sets"))
+                    gateway_sets[node.id] = parse_gateway_sets(report_gateway_sets(reports[0].body))
         finally:
             conn.close()
         sessions: dict[int, str] = {}
@@ -212,7 +212,9 @@ class HubNetInputs:
             device = device_of.get(str(self._fabric_address(node.id)))
             if device is not None and node.id != 1:
                 sessions[node.id] = device
-        return FabricView(nodes=nodes, prefixes=prefixes, sessions=sessions, exit_sets=exit_sets)
+        return FabricView(
+            nodes=nodes, prefixes=prefixes, sessions=sessions, gateway_sets=gateway_sets
+        )
 
     def _fabric_address(self, node_id: int) -> ipaddress.IPv4Address:
         fabric = self.config.fabric
@@ -230,7 +232,7 @@ class HubNetInputs:
         hub += [ipaddress.ip_network(cidr) for cidr in self.config.exported_source_cidrs()]
         result: dict[int, tuple[Network, ...]] = {1: tuple(hub)}
         active = {node.id for node in view.nodes}
-        # A node without exported prefixes is still a valid `exit:<n>` target.
+        # A node without exported prefixes is still a valid `node:<n>` target.
         for node_id in sorted(active - {1}):
             result[node_id] = ()
         for item in view.prefixes:
@@ -243,8 +245,8 @@ class HubNetInputs:
 
     def _transit_exits(self, view: FabricView, own: EgressPolicy) -> list[TransitExit]:
         """Exits that agents declare for their own traffic (D-69): `from` classes of a
-        rule `to: any via exit:<n>` become the source prefixes the hub marks for node
-        n's table. Only an active node with role `exit` is honoured; anything else stays
+        rule `to: any via node:<n>` become the source prefixes the hub marks for node
+        n's table. Only an active node with role `gateway` is honoured; anything else stays
         unmarked and is rejected by the agent guard."""
         fabric = self.config.fabric
         roles = {node.id: node.roles for node in view.nodes}
@@ -253,10 +255,10 @@ class HubNetInputs:
         # for the strict reverse path, which must let the answers through (D-69).
         for rule in own.egress:
             via = rule.parsed_via
-            if via.kind != "exit":
+            if via.kind != "node":
                 continue
             target = int(via.target or 0)
-            if "exit" in roles.get(target, []):
+            if "gateway" in roles.get(target, []):
                 found.append(TransitExit(target, (), view.sessions.get(target)))
         for node in view.nodes:
             if node.id == 1:
@@ -281,13 +283,13 @@ class HubNetInputs:
             }
             for index, rule in enumerate(policy.egress):
                 via = rule.parsed_via
-                if via.kind != "exit":
+                if via.kind != "node":
                     continue
                 is_dest = isinstance(rule.to, SetRef | InlineDest)
                 if rule.to != "any" and not is_dest:
                     continue
                 target = int(via.target or 0)
-                if "exit" not in roles.get(target, []) or target == node.id:
+                if "gateway" not in roles.get(target, []) or target == node.id:
                     continue
                 sources: list[Network] = []
                 for name in rule.from_:
@@ -304,7 +306,7 @@ class HubNetInputs:
                     reported = NodeFacts(
                         node_id=node.id,
                         client_pool=None,
-                        resolved=view.exit_sets.get(node.id, {}),
+                        resolved=view.gateway_sets.get(node.id, {}),
                     )
                     dest, _ = dest_members(rule, index, policy, reported)
                 found.append(TransitExit(target, tuple(sources), view.sessions.get(target), dest))

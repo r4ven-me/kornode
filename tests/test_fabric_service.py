@@ -42,7 +42,7 @@ class World:
         registry = Registry(open_registry(self.config.system.data_dir / "registry.db"))
         migrate(registry.conn)
         registry.create_node(id=1, name="hub", state="active")
-        registry.create_node(id=2, name="alpha", state="active", roles=["exit"])
+        registry.create_node(id=2, name="alpha", state="active", roles=["gateway"])
         registry.set_prefixes(2, [{"prefix": "192.168.50.0/24", "kind": "lan", "export": True}])
 
     def service(self) -> FabricService:
@@ -60,7 +60,7 @@ def test_show_aggregates_nodes_prefixes_dns_and_sources(world: World) -> None:
     assert shown["fabric"]["domain"] == world.config.fabric.domain
     assert shown["hub"]["fabric_address"] == "10.99.0.1"
     (node,) = shown["nodes"]
-    assert (node["name"], node["roles"], node["online"]) == ("alpha", ["exit"], False)
+    assert (node["name"], node["roles"], node["online"]) == ("alpha", ["gateway"], False)
     assert node["fabric_address"] == "10.99.0.2"
     assert node["prefixes"] == [{"prefix": "192.168.50.0/24", "kind": "lan", "export": True}]
     assert shown["dns"]["domain"] == world.config.fabric.domain

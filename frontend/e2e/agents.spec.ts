@@ -51,7 +51,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByLabel("Server", { exact: true })).toBeFocused();
       await page.screenshot({ path: info.outputPath("agents-upstreams.png"), fullPage: true });
       await page.getByLabel("Agent section").selectOption("users");
-      await expect(page.getByText(/Saving here does not create a working VPN login yet/)).toBeVisible();
+      await expect(page.getByText(/Users reach the agent as password hashes/)).toBeVisible();
       await expect(page.getByRole("alert")).toHaveCount(0);
       expect(pageErrors).toEqual([]);
       await page.screenshot({ path: info.outputPath("agents-users.png"), fullPage: true });

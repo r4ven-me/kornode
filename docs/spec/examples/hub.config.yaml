@@ -50,7 +50,7 @@ egress:
     from: [clients, host]
     to: { set: corp }
     via: upstream:office
-  # Agents that declared `exit:1` use the hub as their internet exit.
+  # Agents that declared `node:1` use the hub as their internet gateway.
   - id: fabric-exit
     from: [fabric]
     to: any

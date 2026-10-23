@@ -55,7 +55,7 @@ export function HubEgress({ token }: { token: string | null }) {
   const notices = (scope: "rules" | "sources") => scope === noticeScope && <>{error && <p role="alert">{error}</p>}{note && <p role="status">{note}</p>}</>;
   return <>
     <section className="panel" data-capability="egress.hub.show">
-      <div className="panel-header"><div><h2>Egress rules</h2><p className="muted-line">Where traffic of VPN clients and sources goes. First match wins; traffic that matches no rule is dropped. <code>local</code> leaves through this server, <code>upstream:&lt;profile&gt;</code> through an external VPN, <code>exit:&lt;n&gt;</code> through agent node n with the exit role.</p></div></div>
+      <div className="panel-header"><div><h2>Egress rules</h2><p className="muted-line">Where traffic of VPN clients and sources goes. First match wins; traffic that matches no rule is dropped. <code>local</code> leaves through this server, <code>upstream:&lt;profile&gt;</code> through an external VPN, <code>node:&lt;n&gt;</code> through agent node n with the gateway role.</p></div></div>
       {notices("rules")}
       {live?.problem && dirty && <p role="status" className="muted-line">Draft is not valid yet: {live.problem}</p>}
       {warnings.map(w => <p key={w} className="muted-line">{w}</p>)}

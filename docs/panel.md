@@ -8,7 +8,7 @@ action here also exists in `korctl` and the REST API (see
 
 - **Hub** — this server. It runs ocserv for VPN clients and hosts the panel.
 - **Agent** — another server of yours joined to the hub over openconnect on 443/tcp. It can
-  serve its own VPN clients and can be an exit for somebody else's traffic.
+  serve its own VPN clients and can be a gateway to the internet for the other nodes.
 - **Fabric** — the internal network between the hub and the agents (`10.99.0.0/24` by
   default). Each node has an ID; its addresses derive from it: node 1 serves clients from
   `10.100.1.0/24`, its sources default to `10.8.1.0/24`, its fabric address is `10.99.0.1`.
@@ -59,7 +59,7 @@ no rule is **dropped** — nothing leaves unrouted. Each rule has:
   (transit from other nodes) or a source name;
 - **To** — `any`, inline CIDRs and domains, a named set, or the prefixes of one node;
 - **Via** — `local` (this server's uplink), `upstream:<profile>` (an external VPN from
-  Config → Upstream), `exit:<n>` (agent node `n` with the exit role), `fabric`, or `drop`;
+  Config → Upstream), `node:<n>` (agent node `n` with the gateway role), `fabric`, or `drop`;
 - **Kill switch** — when the chosen exit is down, reject the traffic instead of trying the
   next rule. On by default for everything except `local`; this is what keeps traffic
   meant for a tunnel from leaking through the uplink.
@@ -91,7 +91,7 @@ and NAT.
 ## Agents
 
 1. **Add agent** — a name, optionally a node ID, roles: `access` (serves its own VPN
-   clients) and/or `exit` (other nodes may send traffic through it). The result is a
+   clients) and/or `gateway` (other nodes may leave to the internet through it). The result is a
    one-time enrollment token; run the agent with it as described in the README.
 2. Pick the agent in **Registered agents**, then a part of it in **Agent section**:
    settings and enrollment, networks and sources, egress policy (the same rule editor as
@@ -134,8 +134,8 @@ The agent is a separate image, `kornode-agent` (`Dockerfile.agent`), published a
    `docker compose -f compose.agent.yaml exec agent kornode-agent status` (or `doctor`)
    works even without the hub.
 
-To send hub clients through the agent, give it the `exit` role and add a rule with
-`via exit:<its node ID>` in Network → Egress rules.
+To send hub clients through the agent, give it the `gateway` role and add a rule with
+`via node:<its node ID>` in Network → Egress rules.
 
 ## Fabric
 

@@ -34,13 +34,14 @@ from kornode.bundle.signing import (
 from kornode.bundle.validator import validate
 from kornode.config.models import AppConfig
 from kornode.net.addressing import derive_addresses
+from kornode.net.model import Via
 from kornode.registry.models import Node, StoredBundle
 from kornode.registry.repository import Registry, RegistryNotFound
 from kornode.tunnels.pin import certificate_file_pin
 
 HUB_NODE_ID = 1
 _FABRIC_RULE_ID = "to-fabric"
-_EXIT_RULE_ID = "exit-local"
+_GATEWAY_RULE_ID = "gateway-local"
 _SECRET_UPSTREAM_FIELDS = ("password", "key", "camouflage")
 
 
@@ -339,20 +340,22 @@ class BundleService:
         return plan
 
     def _policy(self, registry: Registry, node: Node) -> dict[str, Any]:
-        """The node's policy with the implicit rules; `exit:<n>` must name another active
-        agent with role `exit` (spec 07), whatever wrote the registry."""
+        """The node's policy with the implicit rules; `node:<n>` must name another active
+        agent with role `gateway` (spec 07), whatever wrote the registry."""
         policy = policy_with_implicit_rules(node.policy, node.roles)
         for rule in policy["egress"]:
             via = str(rule.get("via", ""))
-            if not via.startswith("exit:"):
+            if not via.startswith("node:"):
                 continue
-            target = int(via.removeprefix("exit:") or 0)
+            target = int(via.removeprefix("node:") or 0)
             try:
                 other = registry.get_node(target)
             except RegistryNotFound:
-                raise BundleError("invalid", f"exit:{target} is not a registered agent") from None
-            if target == node.id or other.state != "active" or "exit" not in other.roles:
-                raise BundleError("invalid", f"exit:{target} is not an active agent with role exit")
+                raise BundleError("invalid", f"node:{target} is not a registered agent") from None
+            if target == node.id or other.state != "active" or "gateway" not in other.roles:
+                raise BundleError(
+                    "invalid", f"node:{target} is not an active agent with role gateway"
+                )
         return policy
 
     def _access(self, registry: Registry, node: Node) -> dict[str, Any]:
@@ -441,6 +444,10 @@ def policy_with_implicit_rules(policy: dict[str, Any], roles: list[str]) -> dict
     result.setdefault("sources", [])
     result.setdefault("sets", {})
     rules = result.setdefault("egress", [])
+    for rule in rules:
+        # Policies stored before D-84 say `exit:<n>`; the bundle carries `node:<n>`.
+        with contextlib.suppress(ValueError):
+            rule["via"] = Via.parse(str(rule.get("via", ""))).name
     position = 0
     if not any(
         rule.get("via") == "fabric" and "host" in (rule.get("from") or []) for rule in rules
@@ -454,11 +461,11 @@ def policy_with_implicit_rules(policy: dict[str, Any], roles: list[str]) -> dict
             rule_id += "-hub"
         rules.insert(0, {"id": rule_id, "from": names, "to": "fabric", "via": "fabric"})
         position = 1
-    if "exit" in roles and not any("fabric" in (rule.get("from") or []) for rule in rules):
-        # An exit node (D-69) NATs what the hub sends it: anything from the fabric
+    if "gateway" in roles and not any("fabric" in (rule.get("from") or []) for rule in rules):
+        # A gateway node (D-69) NATs what the hub sends it: anything from the fabric
         # to a non-fabric destination leaves through this node's own uplink.
         taken = {rule.get("id") for rule in rules}
-        rule_id = _EXIT_RULE_ID
+        rule_id = _GATEWAY_RULE_ID
         while rule_id in taken:
             rule_id += "-hub"
         rules.insert(position, {"id": rule_id, "from": ["fabric"], "to": "any", "via": "local"})

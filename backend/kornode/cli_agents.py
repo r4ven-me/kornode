@@ -129,7 +129,7 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
     def create(
         name: str,
         id: int | None = None,
-        role: list[str] = typer.Option([], "--role"),
+        role: list[str] = typer.Option([], "--role", help="access and/or gateway"),
         description: str = "",
         force_reuse: bool = False,
         dry_run: bool = False,
@@ -156,7 +156,7 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
     def update(
         name: str,
         description: str | None = None,
-        role: list[str] | None = typer.Option(None, "--role"),
+        role: list[str] | None = typer.Option(None, "--role", help="access and/or gateway"),
         transport: str | None = None,
         dpd: int | None = None,
         keepalive: int | None = None,

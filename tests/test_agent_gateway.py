@@ -1,4 +1,4 @@
-"""P4-06 (D-69): `via: exit:<node>` — management validation, bundles, hub transit facts."""
+"""P4-06 (D-69): `via: node:<n>` — management validation, bundles, hub transit facts."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ from kornode.services.agent_models import AgentPatch, ManagementError
 from kornode.services.command import CommandResult
 from kornode.services.netinputs import HubNetInputs
 
-OUT = {"id": "out", "from": ["clients"], "to": "any", "via": "exit:3"}
+OUT = {"id": "out", "from": ["clients"], "to": "any", "via": "node:3"}
 
 
 def make(world: Any) -> Any:  # type: ignore[no-untyped-def]
     env, service, _, _ = world
     env.add(2)
-    env.add(3, roles=["exit"])
+    env.add(3, roles=["gateway"])
     for node in (2, 3):  # what AgentService.create registers for every agent
         env.registry.set_prefixes(
             node, [{"prefix": f"10.100.{node}.0/24", "kind": "pool", "export": True}]
@@ -41,7 +41,7 @@ def test_an_exit_rule_is_accepted_for_an_active_agent_with_the_exit_role(world: 
     service.set_policy("node2", {"egress": [OUT]})
     own = env.check(env.registry.latest_bundle(2)).bundle
     assert [rule.id for rule in own.policy.egress] == ["to-fabric", "out"]
-    assert own.policy.egress[1].via == "exit:3"
+    assert own.policy.egress[1].via == "node:3"
 
 
 def test_the_exit_node_gets_the_nat_rule_for_what_the_hub_sends_it(world: Any) -> None:  # type: ignore[no-untyped-def]
@@ -50,7 +50,7 @@ def test_the_exit_node_gets_the_nat_rule_for_what_the_hub_sends_it(world: Any) -
     rules = env.check(env.registry.latest_bundle(3)).bundle.policy.egress
     assert [(rule.id, rule.from_, rule.to, rule.via) for rule in rules] == [
         ("to-fabric", ("clients", "host"), "fabric", "fabric"),
-        ("exit-local", ("fabric",), "any", "local"),
+        ("gateway-local", ("fabric",), "any", "local"),
     ]
 
 
@@ -65,11 +65,11 @@ def test_an_operators_own_fabric_rule_is_not_duplicated(world: Any) -> None:  # 
 @pytest.mark.parametrize(
     ("rules", "code"),
     [
-        ([{"from": ["clients"], "to": "any", "via": "exit:9"}], "exit_node"),
-        ([{"from": ["clients"], "to": "any", "via": "exit:2"}], "exit_node"),
-        ([{"from": ["host"], "to": "any", "via": "exit:3"}], "runtime_unsupported"),
-        ([{"from": ["clients"], "to": "fabric", "via": "exit:3"}], "runtime_unsupported"),
-        ([{"from": ["clients"], "to": {"node": 3}, "via": "exit:3"}], "runtime_unsupported"),
+        ([{"from": ["clients"], "to": "any", "via": "node:9"}], "gateway_node"),
+        ([{"from": ["clients"], "to": "any", "via": "node:2"}], "gateway_node"),
+        ([{"from": ["host"], "to": "any", "via": "node:3"}], "runtime_unsupported"),
+        ([{"from": ["clients"], "to": "fabric", "via": "node:3"}], "runtime_unsupported"),
+        ([{"from": ["clients"], "to": {"node": 3}, "via": "node:3"}], "runtime_unsupported"),
     ],
 )
 def test_bad_exit_rules_are_refused(world: Any, rules: list[dict[str, Any]], code: str) -> None:  # type: ignore[no-untyped-def]
@@ -80,16 +80,16 @@ def test_bad_exit_rules_are_refused(world: Any, rules: list[dict[str, Any]], cod
 def test_a_node_without_the_exit_role_or_not_active_is_no_exit(world: Any) -> None:  # type: ignore[no-untyped-def]
     env, service = make(world)
     env.add(4)
-    env.add(5, active=False, roles=["exit"])
+    env.add(5, active=False, roles=["gateway"])
     rule = {"from": ["clients"], "to": "any"}
-    assert refused(service, "node2", [{**rule, "via": "exit:4"}]) == "role_required"
-    assert refused(service, "node2", [{**rule, "via": "exit:5"}]) == "exit_node"
+    assert refused(service, "node2", [{**rule, "via": "node:4"}]) == "role_required"
+    assert refused(service, "node2", [{**rule, "via": "node:5"}]) == "gateway_node"
 
 
 def test_a_source_must_be_exported_to_use_an_exit(world: Any) -> None:  # type: ignore[no-untyped-def]
     _, service = make(world)
     source = {"name": "wg", "interface": "wg0", "cidr": "10.8.2.0/24", "export": False}
-    rule = {"from": ["wg"], "to": "any", "via": "exit:3"}
+    rule = {"from": ["wg"], "to": "any", "via": "node:3"}
     assert refused(service, "node2", [rule], sources=[source]) == "source_export"
     service.set_policy("node2", {"sources": [{**source, "export": True}], "egress": [rule]})
 
@@ -99,8 +99,8 @@ def test_the_exit_role_cannot_be_dropped_while_an_agent_uses_it(world: Any) -> N
     service.set_policy("node2", {"egress": [OUT]})
     with pytest.raises(ManagementError) as raised:
         service.update("node3", AgentPatch(roles=[]))
-    assert raised.value.error == "exit_in_use" and "node2" in str(raised.value)
-    assert env.registry.get_node(3).roles == ["exit"]
+    assert raised.value.error == "gateway_in_use" and "node2" in str(raised.value)
+    assert env.registry.get_node(3).roles == ["gateway"]
     service.set_policy("node2", {"egress": []})
     service.update("node3", AgentPatch(roles=[]))
 
@@ -125,7 +125,7 @@ def test_the_hub_derives_transit_exits_from_the_agents_policies(
         {
             "sources": [{"name": "wg", "interface": "wg0", "cidr": "10.8.2.0/24"}],
             "egress": [
-                {"from": ["clients", "wg"], "to": "any", "via": "exit:3"},
+                {"from": ["clients", "wg"], "to": "any", "via": "node:3"},
             ],
         },
     )
@@ -186,8 +186,8 @@ def test_the_hub_marks_a_set_exit_by_the_static_routes_and_the_addresses_the_age
         {
             "sets": {"web": {"routes": ["198.51.100.0/24"], "domains": ["example.org"]}},
             "egress": [
-                {"from": ["clients"], "to": {"set": "web"}, "via": "exit:3"},
-                {"from": ["clients"], "to": "any", "via": "exit:3"},
+                {"from": ["clients"], "to": {"set": "web"}, "via": "node:3"},
+                {"from": ["clients"], "to": "any", "via": "node:3"},
             ],
         },
     )
@@ -198,7 +198,7 @@ def test_the_hub_marks_a_set_exit_by_the_static_routes_and_the_addresses_the_age
 
     env.registry.add_report(
         2,
-        {"applied_version": 1, "exit_sets": {"web": ["203.0.113.9", "not-an-address"]}},
+        {"applied_version": 1, "gateway_sets": {"web": ["203.0.113.9", "not-an-address"]}},
     )
     facts = HubNetInputs(env.config, runner=runner, proc_sys=tmp_path).facts()
     assert [t.dest for t in facts.transit_exits] == [
@@ -219,10 +219,10 @@ def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rul
         {
             "sets": {"web": {"domains": ["example.org"]}, "lan": {"routes": ["10.0.0.0/8"]}},
             "egress": [
-                {"from": ["clients"], "to": {"set": "web"}, "via": "exit:3"},
-                {"from": ["clients"], "to": {"domains": ["example.net"]}, "via": "exit:3"},
+                {"from": ["clients"], "to": {"set": "web"}, "via": "node:3"},
+                {"from": ["clients"], "to": {"domains": ["example.net"]}, "via": "node:3"},
                 {"from": ["clients"], "to": {"set": "lan"}, "via": "local"},
-                {"from": ["clients"], "to": "any", "via": "exit:3"},
+                {"from": ["clients"], "to": "any", "via": "node:3"},
             ],
         }
     )
@@ -237,13 +237,13 @@ def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rul
         ),
     )
 
-    assert Agent._exit_sets(stub) == {  # type: ignore[arg-type]
+    assert Agent._gateway_sets(stub) == {  # type: ignore[arg-type]
         "web": ["198.51.100.1", "203.0.113.9"],
         "rule1": ["192.0.2.5"],
     }
 
     stub.inputs.active = None
-    assert Agent._exit_sets(stub) == {}  # type: ignore[arg-type]
+    assert Agent._gateway_sets(stub) == {}  # type: ignore[arg-type]
 
 
 def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implicit_rules(
@@ -255,9 +255,9 @@ def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implic
     env, service = make(world)
     service.set_policy(
         "node2",
-        {"egress": [{"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "exit:3"}]},
+        {"egress": [{"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "node:3"}]},
     )
-    env.registry.add_report(2, {"applied_version": 1, "exit_sets": {"rule1": ["203.0.113.9"]}})
+    env.registry.add_report(2, {"applied_version": 1, "gateway_sets": {"rule1": ["203.0.113.9"]}})
 
     facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
 

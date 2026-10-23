@@ -159,30 +159,32 @@ def dynamic_sets(policy: EgressPolicy) -> dict[str, DynamicSet]:
     return found
 
 
-MAX_EXIT_SETS = 64
-MAX_EXIT_SET_ADDRESSES = 4096
+MAX_GATEWAY_SETS = 64
+MAX_GATEWAY_SET_ADDRESSES = 4096
 
 
-def parse_exit_sets(value: object, *, strict: bool = False) -> dict[str, frozenset[str]]:
-    """Addresses an agent reports for the destinations of its `exit:<n>` rules (D-79),
+def parse_gateway_sets(value: object, *, strict: bool = False) -> dict[str, frozenset[str]]:
+    """Addresses an agent reports for the destinations of its `node:<n>` rules (D-79),
     keyed like `NodeFacts.resolved`. Lenient reading drops what is not an IPv4 address or
     network (the hub must never fail a pass over an agent's report); strict reading, used
     when the report arrives, raises ValueError instead."""
     if value is None:
         return {}
-    if not isinstance(value, dict) or len(value) > MAX_EXIT_SETS:
+    if not isinstance(value, dict) or len(value) > MAX_GATEWAY_SETS:
         if strict:
-            raise ValueError("exit_sets must be an object with at most 64 entries")
+            raise ValueError("gateway_sets must be an object with at most 64 entries")
         return {}
     found: dict[str, frozenset[str]] = {}
     for key, items in value.items():
         if not isinstance(key, str) or not isinstance(items, list):
             if strict:
-                raise ValueError("exit_sets entries must map a name to a list")
+                raise ValueError("gateway_sets entries must map a name to a list")
             continue
-        if len(items) > MAX_EXIT_SET_ADDRESSES:
+        if len(items) > MAX_GATEWAY_SET_ADDRESSES:
             if strict:
-                raise ValueError(f"exit_sets[{key}] has more than {MAX_EXIT_SET_ADDRESSES} items")
+                raise ValueError(
+                    f"gateway_sets[{key}] has more than {MAX_GATEWAY_SET_ADDRESSES} items"
+                )
             continue
         addresses: set[str] = set()
         for item in items:
@@ -190,9 +192,14 @@ def parse_exit_sets(value: object, *, strict: bool = False) -> dict[str, frozens
                 network = ipaddress.ip_network(str(item), strict=False)
             except ValueError:
                 if strict:
-                    raise ValueError(f"exit_sets[{key}]: {item!r} is not an address") from None
+                    raise ValueError(f"gateway_sets[{key}]: {item!r} is not an address") from None
                 continue
             if network.version == 4:
                 addresses.add(str(network))
         found[key] = frozenset(addresses)
     return found
+
+
+def report_gateway_sets(body: dict[str, object]) -> object:
+    """The gateway sets of a stored report; reports sent before D-84 call them `exit_sets`."""
+    return body.get("gateway_sets", body.get("exit_sets"))

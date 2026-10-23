@@ -5,7 +5,7 @@ import { AgentPolicy } from "./AgentPolicy";
 const policy = {
   sets: { corp: { routes: ["10.60.0.0/16"] } },
   egress: [
-    { from: ["clients"], to: { set: "corp" }, via: "exit:3" },
+    { from: ["clients"], to: { set: "corp" }, via: "node:3" },
     { from: ["clients"], to: "any", via: "local" },
   ],
 };
@@ -23,8 +23,16 @@ describe("AgentPolicy", () => {
     expect(mutate).toHaveBeenCalledTimes(1);
     const [path, method, body] = mutate.mock.calls[0];
     expect([path, method]).toEqual(["/policy", "PUT"]);
-    expect(body.egress.map((rule: { via: string }) => rule.via)).toEqual(["local", "exit:3"]);
+    expect(body.egress.map((rule: { via: string }) => rule.via)).toEqual(["local", "node:3"]);
     expect(body.sets).toEqual(policy.sets);
+  });
+
+  it("shows a rule stored as exit:<n> (before D-84) as a node rule", () => {
+    const legacy = { egress: [{ from: ["clients"], to: "any", via: "exit:3" }] };
+    render(<AgentPolicy policy={legacy} busy={false} mutate={vi.fn()} />);
+
+    expect((screen.getByLabelText("Rule 1 via kind") as HTMLSelectElement).value).toBe("node");
+    expect((screen.getByLabelText("Rule 1 via target") as HTMLInputElement).value).toBe("3");
   });
 
   it("adds a rule and refuses invalid set JSON without calling the backend", () => {

@@ -25,7 +25,7 @@
 - **Source** — traffic origin class used in egress rules: `clients`, `host`,
   `fabric`, or a named source (an attached access server like wg-easy).
 - **Exit** — where an egress rule sends traffic: `local`, `fabric`,
-  `exit:<node>`, `upstream:<profile>`, `drop`.
+  `node:<n>`, `upstream:<profile>`, `drop`.
 - **Bundle** — the signed desired-state document the hub compiles per agent.
 - **Reconciler** — loop that converges kernel state to desired state.
 - **Apply-with-confirm** — apply bundle, verify health within a window, else

@@ -2742,3 +2742,9 @@ textarea.agent-code {
     flex-direction: column;
   }
 }
+
+.agent-checks .agent-roles-help {
+  flex-basis: 100%;
+  margin-top: 0;
+  max-width: none;
+}

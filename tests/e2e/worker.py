@@ -894,7 +894,7 @@ class Worker:
             path.unlink(missing_ok=True)
 
     def hub_source_policy(self) -> Any:
-        """The hub source leaves through agent-b (node 3, role exit) with a full tunnel."""
+        """The hub source leaves through agent-b (node 3, role gateway) with a full tunnel."""
         if self.role != "hub" or self.case != "routed":
             raise ValueError("routed case, hub only")
         interface = self.payload["interface"]
@@ -906,7 +906,7 @@ class Worker:
             {"name": "e2e-hub-source", "interface": interface, "cidr": HUB_SOURCE_CIDR,
              "export": True}
         ]  # fmt: skip
-        rules = [{"id": "src-out", "from": ["e2e-hub-source"], "to": "any", "via": "exit:3"}]
+        rules = [{"id": "src-out", "from": ["e2e-hub-source"], "to": "any", "via": "node:3"}]
         atomic(path, {"sources": sources, "egress": rules})
         try:
             return self.cli("egress", "set", "--file", str(path))
@@ -955,7 +955,7 @@ class Worker:
             raise ValueError("routed case, hub only")
         path = self.directory / "access-policy.json"
         via = self.payload.get("via", "local")
-        if via not in {"local", "exit:3"}:  # exit:3 is agent-b, the second enrolled agent
+        if via not in {"local", "node:3"}:  # node:3 is agent-b, the second enrolled agent
             raise ValueError("invalid exit")
         domain = self.payload.get("domain")
         to: Any = "any"
@@ -974,11 +974,11 @@ class Worker:
         finally:
             path.unlink(missing_ok=True)
 
-    def exit_role(self) -> Any:
+    def gateway_role(self) -> Any:
         """Agent-b becomes an exit node (hub only)."""
         if self.role != "hub" or self.case != "routed":
             raise ValueError("routed case, hub only")
-        return self.cli("agent", "set", "agent-b", "--role", "exit")
+        return self.cli("agent", "set", "agent-b", "--role", "gateway")
 
     def access_client(self) -> Any:
         if self.role != "agent-b" or self.case != "routed":
@@ -1530,7 +1530,7 @@ class Worker:
             "hub_source_add",
             "hub_source_policy",
             "client_route",
-            "exit_role",
+            "gateway_role",
             "access_setup",
             "access_policy",
             "access_client",

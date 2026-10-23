@@ -35,7 +35,7 @@ CREATE TABLE nodes (
   id            INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 254),
   name          TEXT NOT NULL UNIQUE CHECK (name GLOB '[a-z]*'),
   description   TEXT NOT NULL DEFAULT '',
-  roles         TEXT NOT NULL DEFAULT '[]',         -- JSON array: "access", "exit"
+  roles         TEXT NOT NULL DEFAULT '[]',         -- JSON array: "access", "gateway"
   state         TEXT NOT NULL CHECK (state IN ('pending','active','revoked')),
   cert_serial   TEXT, cert_not_after TEXT,
   seal_pubkey   BLOB,                               -- X25519 public key (32 bytes)
@@ -179,7 +179,7 @@ and no-clobber. The queue is not proof of execution or successful application.
 
 Domain and URL sets are resolved by the node itself (D-78); node-to-node exit routing is
 delivered for `to: any` (D-69) and for sets and inline destinations (D-79: the agent
-reports the addresses it resolved for them in `exit_sets`, the hub matches the same
+reports the addresses it resolved for them in `gateway_sets`, the hub matches the same
 ones). The P3 agent still lacks p12 upstreams and pushed routes. Operator validation refuses these inputs rather than
 silently delivering nonworking policies; exported
 prefixes report their runtime boundary; access roles/users are delivered since P4-04.

@@ -96,7 +96,7 @@ Notes:
 - The `local` exit also gets a mark (no ip rule needed: unmatched marks fall
   through to main). NAT is decided by the mark alone, never by source
   address, so traffic arriving from the fabric (`from: fabric`, exit-via-node)
-  is masqueraded on the exit node exactly like local clients.
+  is masqueraded on the gateway node exactly like local clients.
 - Replies destined to this node's client pool or sources are never marked
   (implicit rule 1/2 in 02).
 - The full ruleset is applied as one `nft -f` transaction starting with

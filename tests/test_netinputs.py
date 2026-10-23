@@ -190,14 +190,14 @@ def _exit_inputs(tmp_path: Path, connected: bool, **extra: Any) -> HubNetInputs:
     config = _config(
         tmp_path,
         sources=[{"name": "wg", "interface": "wg0", "cidr": "10.8.1.0/24"}],
-        egress=[{"from": ["clients", "wg"], "to": "any", "via": "exit:2"}],
+        egress=[{"from": ["clients", "wg"], "to": "any", "via": "node:2"}],
         **extra,
     )
     config.system.data_dir.mkdir(parents=True)
     registry = Registry(open_registry(config.system.data_dir / "registry.db"))
     migrate(registry.conn)
     registry.create_node(id=1, name="hub", state="active")
-    registry.create_node(id=2, name="out", state="active", roles=["exit"])
+    registry.create_node(id=2, name="out", state="active", roles=["gateway"])
 
     class Runner(FakeRunner):
         def run(self, argv: list[str], **kwargs: Any) -> CommandResult:
@@ -222,8 +222,8 @@ def test_hub_exit_goes_through_the_node_session_and_fails_closed_without_it(
     up = _exit_inputs(tmp_path / "up", connected=True).compiled()
     down = _exit_inputs(tmp_path / "down", connected=False).compiled()
 
-    (exit_up,) = [e for e in up.exits if e.name == "exit:2"]
-    (exit_down,) = [e for e in down.exits if e.name == "exit:2"]
+    (exit_up,) = [e for e in up.exits if e.name == "node:2"]
+    (exit_down,) = [e for e in down.exits if e.name == "node:2"]
     assert (exit_up.interface, exit_up.up, exit_up.nat) == ("vpns0", True, False)
     assert (exit_down.interface, exit_down.up) == (None, False)
     default = [r for r in down.desired.routes if r.table == exit_down.table and r.dst == "default"]
