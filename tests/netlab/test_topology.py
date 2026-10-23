@@ -38,6 +38,6 @@ def test_node3_resolves_monitoring_name_via_inet_dns(topology: Topology) -> None
 
 @pytest.mark.netlab
 def test_unknown_name_returns_none(topology: Topology) -> None:
-    answer = dns_query(topology.node3, "missing.kornode.internal", INET_HTTP_ADDR, timeout=2.0)
+    answer = dns_query(topology.node3, "missing.kornode.lan", INET_HTTP_ADDR, timeout=2.0)
 
     assert answer is None

@@ -230,14 +230,14 @@ def test_source_pool_and_interfaces_are_checked_before_enrollment(world) -> None
     assert exc.value.error == "interface_conflict"
 
 
-def test_fabric_camouflage_encrypted_at_rest_and_sealed_for_agent(world) -> None:  # type: ignore[no-untyped-def]
+def test_interlink_camouflage_encrypted_at_rest_and_sealed_for_agent(world) -> None:  # type: ignore[no-untyped-def]
     env, service, _, _ = world
     env.add(3)
     service.update("node3", AgentPatch(transport={"camouflage": "transport-secret"}))
     assert "transport-secret" not in json.dumps(env.registry.get_node(3).transport)
     assert "transport-secret" not in json.dumps(service.show("node3"))
     assert (
-        env.check(env.registry.latest_bundle(3)).secrets["/tunnels/fabric/camouflage"]
+        env.check(env.registry.latest_bundle(3)).secrets["/tunnels/interlink/camouflage"]
         == "transport-secret"
     )
     service.update("node3", AgentPatch(transport={"camouflage": None}))

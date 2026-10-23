@@ -1,4 +1,4 @@
-import { Activity, FileSliders, type LucideIcon, Network, PlugZap, Route, ScrollText, Server, ShieldCheck, Stethoscope, Terminal, Users } from "lucide-react";
+import { Activity, FileSliders, type LucideIcon, Network, PlugZap, Route, ScrollText, ShieldCheck, Stethoscope, Terminal, Users } from "lucide-react";
 import type { UpstreamProfile, UpstreamProfileDraft, UserConfig } from "../api";
 import type { AppState, Tab } from "./types";
 
@@ -121,8 +121,7 @@ export const tabs: Array<{ id: Tab; label: string; icon: LucideIcon; group: TabG
   { id: "groups", label: "Groups", icon: ShieldCheck, group: "access", description: "Shared ocserv settings for a set of users" },
   { id: "sessions", label: "Sessions", icon: PlugZap, group: "access", description: "Who is connected right now" },
   { id: "network", label: "Network", icon: Route, group: "routing", description: "Where client traffic goes: egress rules and attached networks" },
-  { id: "agents", label: "Agents", icon: Server, group: "routing", description: "Other servers joined to this hub" },
-  { id: "fabric", label: "Fabric", icon: Network, group: "routing", description: "Addressing and DNS of the network between the hub and agents" },
+  { id: "nodes", label: "Nodes", icon: Network, group: "routing", description: "Hub and agents: topology, enrollment, interlink addressing and DNS" },
   { id: "config", label: "Config", icon: FileSliders, group: "system", description: "Server, certificates, authentication, upstreams and backups" },
   { id: "diagnostics", label: "Diagnostics", icon: Stethoscope, group: "system", description: "Probe commands and the doctor's health checks" },
   { id: "logs", label: "Logs", icon: ScrollText, group: "system", description: "Log files and their rotation" },

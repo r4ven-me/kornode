@@ -70,6 +70,29 @@
 действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-79, S-07), `docs/spec/07-fabric.md`,
 `docs/runbooks/vm-e2e.md`. Активируй проект Serena `kornode` до поиска по коду.
 
+## Актуальная передача — 2026-10-23 (важнее исторических списков ниже)
+
+В рабочем дереве завершены D-85 (interlink, `kornode.lan`, bundle/v2,
+агент 2.1.0, совместимость YAML/env/.env/правил/agent.yaml/подписанного v1-кэша)
+и раздел Nodes (Overview/Settings/DNS, без Config → Interlink).
+NL-05 исправлен в `backend/kornode_agent/tunnels.py`: три последовательных
+провала существующего check_host останавливают зависший retrying openconnect,
+reconciler вызывается до нового дозвона. Два реальных abrupt-loss прогона прошли.
+
+Проверки: backend lint/mypy; pytest **1334 passed / 104 skipped**; render/parity;
+frontend **48 passed**, build, Playwright **44 passed**. Netlab — **83 unique passed**
+за несколько bounded-прогонов, не один полный запуск.
+
+**Осталось:** новый `test_e2e_06_upgrade_under_interlink_and_client_traffic_gap_at_most_30_seconds`
+падает на восстановлении клиентского трафика после upgrade. Флаг-день SNI
+не объясняет повторное падение на новой базе: совместимая отличающаяся база из
+`15b87a6` собрана под новыми тегами; digest refs и результаты зафиксированы в
+`tests/e2e/ACCEPTANCE-2026-10-23.md`. Старые registry refs и `~/.e2e/env.sh`
+не менялись. Финальный VM-прогон остановлен владельцем из-за длительности;
+run `3168f99d0b3d4658ce3519b0` очищен и закрыт. Новые длинные прогоны без
+отдельного запроса не запускать. Код не коммитился, ветки/push/PR не создавались.
+Сначала разобрать сохранённые diagnostics upgrade, а не повторять полный набор.
+
 ## Что уже сделано (не переделывай)
 - **P2 tails, P3-07…P3-10** (D-55…D-62): CLI агента, управление агентами на хабе (CLI/API/панель), backup/restore,
   E2E-harness на 4 VM. Подробности и ревью — `P3-0X-REVIEW.md`.

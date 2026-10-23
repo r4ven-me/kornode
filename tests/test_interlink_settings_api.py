@@ -27,7 +27,7 @@ auth:
     return TestClient(create_app(config_path=config_path))
 
 
-def test_config_patch_reports_fabric_overlap_conflict(tmp_path: Path) -> None:
+def test_config_patch_reports_interlink_overlap_conflict(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     client = _client(config_path, tmp_path)
 
@@ -37,7 +37,7 @@ def test_config_patch_reports_fabric_overlap_conflict(tmp_path: Path) -> None:
         json={
             "write_rendered": False,
             "patch": {
-                "fabric": {"reserved": ["10.120.0.0/16"]},
+                "interlink": {"reserved": ["10.120.0.0/16"]},
                 "server": {"ipv4_network": "10.120.1.0/24"},
                 "internal_dns": {"listen": "10.120.1.1"},
             },
@@ -52,7 +52,7 @@ def test_config_patch_reports_fabric_overlap_conflict(tmp_path: Path) -> None:
                 "prefix": "10.120.1.0/24",
                 "node": 1,
                 "with": "10.120.0.0/16",
-                "owner": "fabric.reserved",
+                "owner": "interlink.reserved",
             }
         ],
     }

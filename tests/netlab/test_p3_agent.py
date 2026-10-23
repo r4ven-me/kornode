@@ -1,6 +1,6 @@
 """P3-06: the real agent (`kornode-agent enroll` / `run`) against the real hub.
 
-Everything is real: token -> enroll session -> CSR -> certificate, the fabric
+Everything is real: token -> enroll session -> CSR -> certificate, the interlink
 tunnel, the control API over it, apply-with-confirm of the first bundle, boot
 from the cache while the control API is down.
 """
@@ -22,7 +22,7 @@ from tests.netlab.kornode_nodes import _popen_in_namespace, _terminate_process, 
 from tests.netlab.lab import Namespace
 from tests.netlab.test_p3_enrollment import NEW_ID, _decode, _hub_call
 from tests.netlab.test_p3_groups import (  # noqa: F401 - fixtures
-    HUB_FABRIC_ADDR,
+    HUB_INTERLINK_ADDR,
     RenderedHub,
     node_tmp,
     rendered_hub,
@@ -82,7 +82,7 @@ def test_agent_enrolls_confirms_its_bundle_and_boots_from_cache(
     ns = hub.agent.ns
     root = node_tmp / "agent-root"
     root.mkdir(mode=0o755)
-    # A real host has a default route; the fabric exit re-routes marked packets.
+    # A real host has a default route; the interlink exit re-routes marked packets.
     ns.run(["ip", "route", "add", "default", "via", hub.agent.hub_addr])
     # The bundle names the hub by its certificate CN ("hub"), as DNS would.
     hosts = Path("/etc/netns") / ns.full_name / "hosts"
@@ -121,8 +121,8 @@ def test_agent_enrolls_confirms_its_bundle_and_boots_from_cache(
         for args in (
             ("bundle", "show"),
             ("bundle", "history"),
-            ("explain", "host", HUB_FABRIC_ADDR),
-            ("reconnect", "fabric", "--dry-run"),
+            ("explain", "host", HUB_INTERLINK_ADDR),
+            ("reconnect", "interlink", "--dry-run"),
         ):
             result = ns.run(_agent_argv(root, *args, "--json"), check=False, timeout=120)
             assert result.ok, result.stdout + result.stderr

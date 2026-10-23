@@ -814,16 +814,16 @@ capabilities:
     cli: "egress check"
     api: "POST /api/egress/check"
     ui: egress.hub.check
-  - id: fabric.show
-    service: kornode.services.fabric.FabricService.show
-    cli: "fabric show"
-    api: "GET /api/fabric"
-    ui: fabric.show
-  - id: fabric.settings
-    service: kornode.services.fabric.FabricService.set
-    cli: "fabric set"
-    api: "PATCH /api/fabric"
-    ui: fabric.settings
+  - id: interlink.show
+    service: kornode.services.interlink.InterlinkService.show
+    cli: "interlink show"
+    api: "GET /api/interlink"
+    ui: interlink.show
+  - id: interlink.settings
+    service: kornode.services.interlink.InterlinkService.set
+    cli: "interlink set"
+    api: "PATCH /api/interlink"
+    ui: interlink.settings
   - id: sources.hub.list
     service: kornode.services.hub_egress.HubEgressService.sources
     cli: "source list"
@@ -950,17 +950,17 @@ capabilities:
     api: "DELETE /api/agents/{name}/users/{username}"
     ui: agent.user.delete
   - id: dns.record.list
-    service: kornode.services.fabric_dns.FabricDnsService.list
+    service: kornode.services.interlink_dns.InterlinkDnsService.list
     cli: "dns record list"
     api: "GET /api/dns/records"
     ui: dns.record.list
   - id: dns.record.add
-    service: kornode.services.fabric_dns.FabricDnsService.add
+    service: kornode.services.interlink_dns.InterlinkDnsService.add
     cli: "dns record add"
     api: "POST /api/dns/records"
     ui: dns.record.add
   - id: dns.record.delete
-    service: kornode.services.fabric_dns.FabricDnsService.delete
+    service: kornode.services.interlink_dns.InterlinkDnsService.delete
     cli: "dns record del"
     api: "DELETE /api/dns/records"
     ui: dns.record.delete

@@ -1,7 +1,7 @@
-"""P3-03/P3-05: enrollment, revocation, the control API over the fabric, spoofing.
+"""P3-03/P3-05: enrollment, revocation, the control API over the interlink, spoofing.
 
 Reuses the P3-02 hub fixture, which also runs the real control API on the hub
-fabric address. `enroll` and everything an agent does is real HTTP(S) from the
+interlink address. `enroll` and everything an agent does is real HTTP(S) from the
 peer's namespace. Admin-side calls that have no HTTP surface yet (P3-08:
 `issue_token`, `revoke_node`) run as small scripts in the hub namespace against
 the same registry/ocpasswd/CA ocserv uses.
@@ -30,10 +30,10 @@ from tests.netlab.test_p3_groups import (  # noqa: F401 - fixtures
     CONTROL_PORT,
     ENROLL_PASSWORD,
     ENROLL_USER,
-    FABRIC_CIDR,
-    HUB_FABRIC_ADDR,
+    HUB_INTERLINK_ADDR,
     HUB_LAN_ADDR,
     INET_ADDR,
+    INTERLINK_CIDR,
     RenderedHub,
     node_tmp,
     rendered_hub,
@@ -71,8 +71,8 @@ HUB_SCRIPT = textwrap.dedent(
         conn = open_registry(cfg.system.data_dir / "registry.db")
         migrate(conn)
         Registry(conn).delete_node(int(args[0]))
-        from kornode.services.fabric_groups import FabricGroupsService
-        FabricGroupsService(cfg).sync()
+        from kornode.services.interlink_groups import InterlinkGroupsService
+        InterlinkGroupsService(cfg).sync()
     """
 )
 
@@ -131,7 +131,7 @@ def _http(
         "-c",
         HTTP_CLIENT,
         str(hub.root.data_dir / "certs" / "ca.crt"),
-        HUB_FABRIC_ADDR,
+        HUB_INTERLINK_ADDR,
         str(CONTROL_PORT),
         method,
         path,
@@ -176,7 +176,7 @@ def _enroll_agent(hub: RenderedHub, node_tmp_dir: Path) -> tuple[Path, Path]:
     doc = _decode(_hub_call(hub, "token", str(NEW_ID)).strip())
     doc_path = node_tmp_dir / "token.json"
     doc_path.write_text(json.dumps(doc), encoding="utf-8")
-    assert hub.connect_fabric(hub.enroll, user=doc["user"], password=doc["secret"])
+    assert hub.connect_interlink(hub.enroll, user=doc["user"], password=doc["secret"])
     key, csr = _csr(node_tmp_dir, f"agent-{NEW_ID}")
     request = node_tmp_dir / "enroll-request.json"
     request.write_text(
@@ -212,18 +212,18 @@ def test_enroll_by_csr_then_certificate_joins_agents_group(
 
     # the one-shot enroll user is gone: the same credentials no longer log in
     assert hub.enroll.address() is None
-    assert hub.connect_fabric(hub.agent, cert=(crt, key))
+    assert hub.connect_interlink(hub.agent, cert=(crt, key))
     assert hub.agent.address() == f"10.99.0.{NEW_ID}"
-    assert hub.agent.pushed_routes() == [FABRIC_CIDR]
-    assert tcp_check(hub.agent.ns, HUB_FABRIC_ADDR, CONTROL_PORT)
+    assert hub.agent.pushed_routes() == [INTERLINK_CIDR]
+    assert tcp_check(hub.agent.ns, HUB_INTERLINK_ADDR, CONTROL_PORT)
 
 
-def test_agent_polls_its_bundle_over_the_fabric_and_revocation_gives_403(
+def test_agent_polls_its_bundle_over_the_interlink_and_revocation_gives_403(
     rendered_hub: RenderedHub, node_tmp: Path
 ) -> None:
     hub = rendered_hub
     crt, key = _enroll_agent(hub, node_tmp)
-    assert hub.connect_fabric(hub.agent, cert=(crt, key))
+    assert hub.connect_interlink(hub.agent, cert=(crt, key))
 
     status, body = _http(hub, hub.agent.ns, "GET", "/agent/v1/poll?since=0", cert=(crt, key))
     assert status == 200, body
@@ -243,7 +243,7 @@ def test_enroll_session_cannot_use_the_agent_api_without_a_certificate(
     rendered_hub: RenderedHub,
 ) -> None:
     hub = rendered_hub
-    assert hub.connect_fabric(hub.enroll, user=ENROLL_USER, password=ENROLL_PASSWORD)
+    assert hub.connect_interlink(hub.enroll, user=ENROLL_USER, password=ENROLL_PASSWORD)
 
     status, body = _http(hub, hub.enroll.ns, "GET", "/agent/v1/poll?since=0")
 
@@ -255,14 +255,14 @@ def test_revoked_certificate_cannot_connect_and_live_session_is_cut(
 ) -> None:
     hub = rendered_hub
     crt, key = _enroll_agent(hub, node_tmp)
-    assert hub.connect_fabric(hub.agent, cert=(crt, key))
+    assert hub.connect_interlink(hub.agent, cert=(crt, key))
     assert f"agent-{NEW_ID}" in _agent_sessions(hub)
 
     _hub_call(hub, "revoke", str(NEW_ID))
 
     _wait_until(lambda: f"agent-{NEW_ID}" not in _agent_sessions(hub), "session cut", timeout=15)
     hub.agent.stop()
-    assert not hub.connect_fabric(hub.agent, cert=(crt, key))
+    assert not hub.connect_interlink(hub.agent, cert=(crt, key))
     assert f"agent-{NEW_ID}" not in _agent_sessions(hub)
 
 
@@ -270,12 +270,12 @@ def test_agent_removed_from_registry_cannot_connect_with_a_live_certificate(
     rendered_hub: RenderedHub,
 ) -> None:
     hub = rendered_hub
-    assert hub.connect_fabric(hub.agent, cert=hub.agent_cert)  # registered, active
+    assert hub.connect_interlink(hub.agent, cert=hub.agent_cert)  # registered, active
     hub.agent.stop()
 
     _hub_call(hub, "delete", "3")
 
-    assert not hub.connect_fabric(hub.agent, cert=hub.agent_cert)
+    assert not hub.connect_interlink(hub.agent, cert=hub.agent_cert)
 
 
 def test_enroll_session_cannot_spoof_a_source_outside_its_pool(
@@ -289,7 +289,7 @@ def test_enroll_session_cannot_spoof_a_source_outside_its_pool(
     """
     hub = rendered_hub
     spoofed = "10.99.0.3"
-    probes = ((HUB_FABRIC_ADDR, 2222), (INET_ADDR, 80))
+    probes = ((HUB_INTERLINK_ADDR, 2222), (INET_ADDR, 80))
     hub.hub.run(
         ["nft", "-f", "-"],
         input_text=textwrap.dedent(
@@ -319,7 +319,7 @@ def test_enroll_session_cannot_spoof_a_source_outside_its_pool(
                 ["python3", "-c", SPOOFED_SYN, spoofed, host, str(port)], check=False, timeout=15
             )
 
-    assert hub.connect_fabric(hub.agent, cert=hub.agent_cert, extra_routes=(f"{INET_ADDR}/32",))
+    assert hub.connect_interlink(hub.agent, cert=hub.agent_cert, extra_routes=(f"{INET_ADDR}/32",))
     send(hub.agent)
     control = counters()
     assert control[0] > 0 and control[1] > 0, control
@@ -328,11 +328,11 @@ def test_enroll_session_cannot_spoof_a_source_outside_its_pool(
     # drop sources without any route).
     hub.hub.run(["nft", "reset", "rules", "table", "ip", "spoofprobe"])
 
-    assert hub.connect_fabric(
+    assert hub.connect_interlink(
         hub.enroll,
         user="enroll-3-k2f9",
         password="enroll-secret",
-        extra_routes=(f"{INET_ADDR}/32", f"{HUB_FABRIC_ADDR}/32"),
+        extra_routes=(f"{INET_ADDR}/32", f"{HUB_INTERLINK_ADDR}/32"),
     )
     hub.enroll.ns.run(["ip", "addr", "add", f"{spoofed}/32", "dev", hub.enroll.iface])
     send(hub.enroll)

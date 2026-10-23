@@ -40,7 +40,7 @@ def test_an_exit_rule_is_accepted_for_an_active_agent_with_the_exit_role(world: 
     env, service = make(world)
     service.set_policy("node2", {"egress": [OUT]})
     own = env.check(env.registry.latest_bundle(2)).bundle
-    assert [rule.id for rule in own.policy.egress] == ["to-fabric", "out"]
+    assert [rule.id for rule in own.policy.egress] == ["to-interlink", "out"]
     assert own.policy.egress[1].via == "node:3"
 
 
@@ -49,17 +49,20 @@ def test_the_exit_node_gets_the_nat_rule_for_what_the_hub_sends_it(world: Any) -
     env.compile(3)
     rules = env.check(env.registry.latest_bundle(3)).bundle.policy.egress
     assert [(rule.id, rule.from_, rule.to, rule.via) for rule in rules] == [
-        ("to-fabric", ("clients", "host"), "fabric", "fabric"),
-        ("gateway-local", ("fabric",), "any", "local"),
+        ("to-interlink", ("clients", "host"), "interlink", "interlink"),
+        ("gateway-local", ("interlink",), "any", "local"),
     ]
 
 
-def test_an_operators_own_fabric_rule_is_not_duplicated(world: Any) -> None:  # type: ignore[no-untyped-def]
+def test_an_operators_own_interlink_rule_is_not_duplicated(world: Any) -> None:  # type: ignore[no-untyped-def]
     env, service = make(world)
-    own = {"id": "mine", "from": ["fabric"], "to": {"routes": ["198.51.100.0/24"]}, "via": "local"}
+    own = {
+        "id": "mine", "from": ["interlink"],
+        "to": {"routes": ["198.51.100.0/24"]}, "via": "local",
+    }
     service.set_policy("node3", {"egress": [own]})
     rules = env.check(env.registry.latest_bundle(3)).bundle.policy.egress
-    assert [rule.id for rule in rules] == ["to-fabric", "mine"]
+    assert [rule.id for rule in rules] == ["to-interlink", "mine"]
 
 
 @pytest.mark.parametrize(
@@ -68,7 +71,7 @@ def test_an_operators_own_fabric_rule_is_not_duplicated(world: Any) -> None:  # 
         ([{"from": ["clients"], "to": "any", "via": "node:9"}], "gateway_node"),
         ([{"from": ["clients"], "to": "any", "via": "node:2"}], "gateway_node"),
         ([{"from": ["host"], "to": "any", "via": "node:3"}], "runtime_unsupported"),
-        ([{"from": ["clients"], "to": "fabric", "via": "node:3"}], "runtime_unsupported"),
+        ([{"from": ["clients"], "to": "interlink", "via": "node:3"}], "runtime_unsupported"),
         ([{"from": ["clients"], "to": {"node": 3}, "via": "node:3"}], "runtime_unsupported"),
     ],
 )
@@ -141,7 +144,7 @@ def test_the_hub_derives_transit_exits_from_the_agents_policies(
             return super().run(argv, **kwargs)
 
     facts = HubNetInputs(env.config, runner=Runner(), proc_sys=tmp_path).facts()
-    assert facts.fabric_guard and facts.fabric_ifaces == ("vpns0", "vpns1")
+    assert facts.interlink_guard and facts.interlink_ifaces == ("vpns0", "vpns1")
     (transit,) = facts.transit_exits
     assert transit.node == 3 and transit.exit_iface == "vpns1"
     assert set(transit.sources) == {
@@ -160,7 +163,7 @@ def test_the_hub_derives_transit_exits_from_the_agents_policies(
             return FakeRunner.run(self, argv, **kwargs)
 
     facts = HubNetInputs(env.config, runner=Offline(), proc_sys=tmp_path).facts()
-    assert facts.transit_exits[0].exit_iface is None and facts.fabric_ifaces == ("vpns0",)
+    assert facts.transit_exits[0].exit_iface is None and facts.interlink_ifaces == ("vpns0",)
 
 
 def test_the_hub_ignores_an_exit_whose_target_is_not_an_exit_node(
@@ -250,7 +253,7 @@ def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implic
     world: Any,  # type: ignore[no-untyped-def]
     tmp_path: Path,
 ) -> None:
-    """The bundle gets `to-fabric` in front of the operator's rules, so the agent reports its
+    """The bundle gets `to-interlink` in front of the operator's rules, so the agent reports its
     inline destination as `rule1`; the hub must read the same key (D-79)."""
     env, service = make(world)
     service.set_policy(

@@ -15,7 +15,7 @@ import { netDriftCount, netPlanLines } from "../lib/net";
 import { ActionButton, EmptyState, Pill } from "../components/ui";
 import { HubEgress } from "./network/HubEgress";
 
-export function NetworkView({ token }: { token: string }) {
+export function NetworkView({ token, focus }: { token: string; focus?: "sources" }) {
   const [plan, setPlan] = useState<NetPlan | null>(null);
   const [status, setStatus] = useState<NetStatus | null>(null);
   const [explain, setExplain] = useState<NetExplainResult | null>(null);
@@ -78,7 +78,7 @@ export function NetworkView({ token }: { token: string }) {
   return (
     <div className="view-stack">
       {error && <section className="panel notice-error">{error}</section>}
-      <HubEgress token={token} />
+      <HubEgress token={token} focus={focus} />
       <section className="panel" data-capability="net.status">
         <div className="panel-header">
           <div>

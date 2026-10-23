@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { agentGet, agentWrite, type Policy, type Rule, type Source } from "../../agentsApi";
 import type { NetExplainResult } from "../../api";
 import { EgressRules, NEW_RULE, type DeadRule, type ExplainState } from "./EgressRules";
@@ -9,7 +9,14 @@ type Mode = "rules" | "json";
 const EMPTY_SOURCE: Source = { name: "", interface: "", cidr: "", export: true };
 
 /** Hub egress rules and attached access-server sources (spec 02): two panels over one policy, the same service as `korctl egress`. */
-export function HubEgress({ token }: { token: string | null }) {
+export function HubEgress({ token, focus }: { token: string | null; focus?: "sources" }) {
+  const sourcesPanel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focus === "sources") {
+      sourcesPanel.current?.scrollIntoView({ block: "start" });
+      sourcesPanel.current?.focus({ preventScroll: true });
+    }
+  }, [focus]);
   const [shown, setShown] = useState<Shown | null>(null);
   const [policy, setPolicy] = useState<Policy>({});
   const [mode, setMode] = useState<Mode>("rules");
@@ -51,7 +58,7 @@ export function HubEgress({ token }: { token: string | null }) {
   };
   const warnings = dirty ? (live?.warnings ?? []) : (shown?.warnings ?? []);
   const deadRules = dirty ? (live?.dead ?? []) : (shown?.dead_rules ?? []);
-  const classes = ["clients", "host", "fabric", ...sources.map(s => s.name)];
+  const classes = ["clients", "host", "interlink", ...sources.map(s => s.name)];
   const notices = (scope: "rules" | "sources") => scope === noticeScope && <>{error && <p role="alert">{error}</p>}{note && <p role="status">{note}</p>}</>;
   return <>
     <section className="panel" data-capability="egress.hub.show">
@@ -84,7 +91,7 @@ export function HubEgress({ token }: { token: string | null }) {
         </div>
       </form>
     </section>
-    <section className="panel">
+    <section className="panel" ref={sourcesPanel} tabIndex={-1} aria-label="Hub sources editor">
       <div className="panel-header"><div><h2>Sources</h2><p className="muted-line">A network behind a third-party access server on this host, such as wg-easy or Amnezia. kornode routes and masquerades it; rules above refer to it by name. Export makes it reachable from the other nodes.</p></div><span className="pill muted">{sources.length || "none"}</span></div>
       {notices("sources")}
       <ul className="agent-items" data-capability="sources.hub.list">{sources.map(s => <li key={s.name}>
@@ -102,7 +109,7 @@ export function HubEgress({ token }: { token: string | null }) {
             <label>Source name<input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} required /></label>
             <label>Source interface<input value={draft.interface} onChange={e => setDraft({ ...draft, interface: e.target.value })} required /></label>
             <label>Source CIDR<input value={draft.cidr} onChange={e => setDraft({ ...draft, cidr: e.target.value })} required /></label>
-            <label className="agent-check"><input type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export to the fabric</label>
+            <label className="agent-check"><input type="checkbox" checked={draft.export} onChange={e => setDraft({ ...draft, export: e.target.checked })} /> Export to the interlink</label>
           </div>
           {dirty && <p className="field-help">Unsaved rule changes: save or discard them before editing sources.</p>}
           <div className="panel-footer"><button className="action-button primary" data-capability="sources.hub.set">Save source</button></div>

@@ -35,6 +35,12 @@ def interfaces(config: AppConfig) -> list[str]:
 
 def main() -> None:
     config = load(Path(sys.argv[1]))
+    if "--state-dir" in sys.argv:
+        root = Path(sys.argv[sys.argv.index("--state-dir") + 1])
+        config.system.data_dir = root / "data"
+        config.system.generated_dir = root / "generated"
+        config.system.secrets_dir = root / "secrets"
+        config.system.log_dir = root / "logs"
     if "--interfaces" in sys.argv:
         print(json.dumps(interfaces(config)))
         return

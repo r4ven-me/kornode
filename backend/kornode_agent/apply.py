@@ -47,7 +47,7 @@ class Runtime(Protocol):
 
 class Health(Protocol):
     def checks(self, active: Validated | None) -> dict[str, bool]:
-        """`fabric` and `upstream:<name>` checks for the bundle in force."""
+        """`interlink` and `upstream:<name>` checks for the bundle in force."""
 
 
 @dataclass(frozen=True)
@@ -235,7 +235,7 @@ class Applier:
     def _required(
         self, target: Validated, previous: Validated | None, baseline: dict[str, bool]
     ) -> set[str]:
-        required = {"fabric", "reconciler"}
+        required = {"interlink", "reconciler"}
         old = _upstream_signatures(previous) if previous else {}
         new_sigs = _upstream_signatures(target)
         by_name = {u.name: u for u in target.bundle.tunnels.upstreams if u.enabled}
@@ -325,13 +325,13 @@ class Applier:
         return Outcome("rolled_back", version, error=error, failed_checks=failed, warnings=warnings)
 
     def _blame(self, version: int, previous: Validated | None, error: str, *, retry: bool) -> None:
-        """Fabric healthy under `previous` -> the bundle broke it (failed);
+        """Interlink healthy under `previous` -> the bundle broke it (failed);
         still down -> the hub or the path is down (deferred, bounded)."""
         state = self.state
         deadline = self.clock() + BLAME_SECONDS
         healthy = False
         while True:
-            if self.health.checks(previous).get("fabric", False):
+            if self.health.checks(previous).get("interlink", False):
                 healthy = True
                 break
             if self.clock() >= deadline:

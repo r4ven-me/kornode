@@ -41,7 +41,10 @@ def _default_hub_rule() -> Rule:
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    # CLI/API errors can surface these exceptions; never include raw config values.
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, hide_input_in_errors=True
+    )
 
 
 IntervalUnit = Literal["hours", "days", "weeks", "months"]
@@ -150,11 +153,11 @@ class NodeConfig(StrictModel):
     id: int = Field(default=1, ge=1, le=254)
 
 
-class FabricConfig(StrictModel):
+class InterlinkConfig(StrictModel):
     cidr: str = "10.99.0.0/24"
     client_pool: str = "10.100.{id}.0/24"
     source_pool: str = "10.8.{id}.0/24"
-    domain: str = "kornode.internal"
+    domain: str = "kornode.lan"
     enroll_pool: str = "10.99.255.240/28"
     reserved: list[str] = Field(default_factory=list)
 
@@ -165,7 +168,7 @@ class FabricConfig(StrictModel):
         Selected by TLS SNI on the same 443/tcp as the client host; agents dial the hub
         address but present this name.
         """
-        return f"fabric.{self.domain}"
+        return f"interlink.{self.domain}"
 
     @field_validator("cidr", "enroll_pool")
     @classmethod
@@ -183,10 +186,10 @@ class FabricConfig(StrictModel):
         return [_validate_cidr(item) for item in value]
 
     @model_validator(mode="after")
-    def validate_address_templates(self) -> FabricConfig:
+    def validate_address_templates(self) -> InterlinkConfig:
         try:
             validate_templates(
-                fabric_cidr=self.cidr,
+                interlink_cidr=self.cidr,
                 client_pool=self.client_pool,
                 source_pool=self.source_pool,
                 reserved=self.reserved,
@@ -208,7 +211,7 @@ class ControlConfig(StrictModel):
     cert_lifetime_days: int = Field(default=90, ge=3, le=3650)
     enroll_token_ttl_minutes: int = Field(default=60, ge=1, le=1440)
     bundle_history: int = Field(default=20, ge=3, le=500)
-    min_agent_version: str = Field(default="2.0.0", pattern=r"^\d+\.\d+\.\d+$")
+    min_agent_version: str = Field(default="2.1.0", pattern=r"^\d+\.\d+\.\d+$")
     signing_key: Path | None = None
 
 
@@ -940,24 +943,24 @@ def _raw_section(data: dict[str, Any], name: str) -> dict[str, Any]:
 class AppConfig(StrictModel):
     @model_validator(mode="before")
     @classmethod
-    def derive_fabric_defaults(cls, data: Any, info: ValidationInfo) -> Any:
+    def derive_interlink_defaults(cls, data: Any, info: ValidationInfo) -> Any:
         if not isinstance(data, dict):
             return data
-        fabric_raw = _raw_section(data, "fabric")
+        interlink_raw = _raw_section(data, "interlink")
 
         node_raw = _raw_section(data, "node")
         node_id = int(node_raw.get("id", 1))
-        fabric_cidr = str(fabric_raw.get("cidr", "10.99.0.0/24"))
-        client_pool = str(fabric_raw.get("client_pool", "10.100.{id}.0/24"))
-        source_pool = str(fabric_raw.get("source_pool", "10.8.{id}.0/24"))
-        enroll_pool = str(fabric_raw.get("enroll_pool", "10.99.255.240/28"))
-        domain = str(fabric_raw.get("domain", "kornode.internal"))
-        reserved_raw = fabric_raw.get("reserved", [])
+        interlink_cidr = str(interlink_raw.get("cidr", "10.99.0.0/24"))
+        client_pool = str(interlink_raw.get("client_pool", "10.100.{id}.0/24"))
+        source_pool = str(interlink_raw.get("source_pool", "10.8.{id}.0/24"))
+        enroll_pool = str(interlink_raw.get("enroll_pool", "10.99.255.240/28"))
+        domain = str(interlink_raw.get("domain", "kornode.lan"))
+        reserved_raw = interlink_raw.get("reserved", [])
         reserved = [str(item) for item in reserved_raw] if isinstance(reserved_raw, list) else []
         try:
             derived = derive_addresses(
                 node_id,
-                fabric_cidr=fabric_cidr,
+                interlink_cidr=interlink_cidr,
                 client_pool=client_pool,
                 source_pool=source_pool,
                 domain=domain,
@@ -998,7 +1001,7 @@ class AppConfig(StrictModel):
         ]
         overlap_result = check_overlaps(
             owned,
-            fabric_cidr=fabric_cidr,
+            interlink_cidr=interlink_cidr,
             reserved=reserved,
             enroll_pool=enroll_pool,
         )
@@ -1075,7 +1078,7 @@ class AppConfig(StrictModel):
         return data
 
     node: NodeConfig = Field(default_factory=NodeConfig)
-    fabric: FabricConfig = Field(default_factory=FabricConfig)
+    interlink: InterlinkConfig = Field(default_factory=InterlinkConfig)
     control: ControlConfig = Field(default_factory=ControlConfig)
     system: SystemConfig = Field(default_factory=SystemConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -1109,16 +1112,16 @@ class AppConfig(StrictModel):
         policy = self.egress_policy()
         derived = derive_addresses(
             self.node.id,
-            fabric_cidr=self.fabric.cidr,
-            client_pool=self.fabric.client_pool,
-            source_pool=self.fabric.source_pool,
-            domain=self.fabric.domain,
+            interlink_cidr=self.interlink.cidr,
+            client_pool=self.interlink.client_pool,
+            source_pool=self.interlink.source_pool,
+            domain=self.interlink.domain,
         )
         client_pool = ipaddress.ip_network(self.server.ipv4_network, strict=False)
         fixed = {
             "the client pool": client_pool,
-            "fabric.cidr": ipaddress.ip_network(self.fabric.cidr, strict=False),
-            "fabric.enroll_pool": ipaddress.ip_network(self.fabric.enroll_pool, strict=False),
+            "interlink.cidr": ipaddress.ip_network(self.interlink.cidr, strict=False),
+            "interlink.enroll_pool": ipaddress.ip_network(self.interlink.enroll_pool, strict=False),
         }
         seen: dict[str, ipaddress.IPv4Network | ipaddress.IPv6Network] = {}
         interfaces: set[str] = set()
@@ -1206,9 +1209,9 @@ class AppConfig(StrictModel):
             reasons.append("local_records_enabled")
         if settings.forward_domains:
             reasons.append("forward_domains")
-        # The hub answers the fabric zone for agents and clients (D-66).
+        # The hub answers the interlink zone for agents and clients (D-66).
         if self.server.enabled:
-            reasons.append("fabric_dns")
+            reasons.append("interlink_dns")
         return reasons
 
     def dns_tunnel_active(self) -> bool:

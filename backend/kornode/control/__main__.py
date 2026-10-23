@@ -25,11 +25,11 @@ def main() -> int:
     address = str(
         derive_addresses(
             config.node.id,
-            fabric_cidr=config.fabric.cidr,
-            client_pool=config.fabric.client_pool,
-            source_pool=config.fabric.source_pool,
-            domain=config.fabric.domain,
-        ).fabric_address
+            interlink_cidr=config.interlink.cidr,
+            client_pool=config.interlink.client_pool,
+            source_pool=config.interlink.source_pool,
+            domain=config.interlink.domain,
+        ).interlink_address
     )
     ipaddress.ip_address(address)
     certificates = CertificateService(config)

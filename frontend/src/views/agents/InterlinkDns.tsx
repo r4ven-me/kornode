@@ -9,8 +9,8 @@ function relative(record: ZoneRecord, domain: string): string {
   return record.node && record.node !== "hub" ? record.fqdn.slice(0, record.fqdn.lastIndexOf(".node")) : record.fqdn.slice(0, -(domain.length + 1));
 }
 
-/** Fabric DNS zone (spec 07 "DNS"): the hub answers it, agents answer their node<id> part. */
-export function FabricDns({ token, agents }: { token: string | null; agents: Array<Pick<Agent, "id" | "name" | "state">> }) {
+/** Interlink DNS zone (spec 07 "DNS"): the hub answers it, agents answer their node<id> part. */
+export function InterlinkDns({ token, agents }: { token: string | null; agents: Array<Pick<Agent, "id" | "name" | "state">> }) {
   const [zone, setZone] = useState<Zone | null>(null);
   const [name, setName] = useState(""), [type, setType] = useState<ZoneRecord["type"]>("A"), [value, setValue] = useState(""), [node, setNode] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -24,7 +24,7 @@ export function FabricDns({ token, agents }: { token: string | null; agents: Arr
     finally { setBusy(false); }
   }
   const domain = zone?.domain ?? "";
-  return <section className="panel" data-capability="dns.record.list"><div className="panel-header"><div><h2>Fabric DNS</h2><p className="muted-line">The hub answers every name in the zone; each agent answers its own node zone even while the hub is unreachable.</p></div><span className="pill muted">{domain || "zone"}</span></div>
+  return <section className="panel" data-capability="dns.record.list"><div className="panel-header"><div><h2>Interlink DNS</h2><p className="muted-line">The hub answers every name in the zone; each agent answers its own node zone even while the hub is unreachable.</p></div><span className="pill muted">{domain || "zone"}</span></div>
     {error && <p role="alert">{error}</p>}
     <ul className="agent-items">{(zone?.records ?? []).map(r => <li key={`${r.fqdn}/${r.type}/${r.value}`}><span>{r.fqdn} · {r.type} · {r.value}{r.generated ? " · generated" : ` · ${r.node ?? "hub"}`}</span>
       {!r.generated && <div className="row-actions"><button className="action-button" type="button" disabled={busy} data-capability="dns.record.delete" onClick={() => {

@@ -6,7 +6,7 @@ export function AgentActivity({ reports, commands, bundles, busy, mutate, read, 
   mutate: Mutate; read: (suffix: string) => Promise<JsonObject | null>;
   download: (id: string) => Promise<void>; name: string;
 }) {
-  const [kind, setKind] = useState("reconnect"); const [tunnel, setTunnel] = useState("fabric");
+  const [kind, setKind] = useState("reconnect"); const [tunnel, setTunnel] = useState("interlink");
   const [src, setSrc] = useState("host"), [dst, setDst] = useState("");
   const [proto, setProto] = useState("tcp"), [port, setPort] = useState("");
   const [rollback, setRollback] = useState("");

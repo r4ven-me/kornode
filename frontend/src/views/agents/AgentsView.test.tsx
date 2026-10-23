@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentsView } from "./AgentsView";
@@ -13,11 +13,12 @@ vi.mock("../../agentsApi", () => ({
 const agent: Agent = { id: 2, name: "branch", description: "", roles: ["access"], state: "pending", online: false, desired_version: 0, applied_version: 0, last_seen: null, cert_not_after: null, transport: {} };
 const detail: Detail = { agent, prefixes: [], policy: {}, upstreams: [], users: [], bundles: [], reports: [], commands: [], access: { configured: false } };
 const status = { enabled: true, agents: 0, active: 0, rotation: null, signing_key_id: "public-id" };
+const interlink = { interlink: { cidr: "10.99.0.0/24" }, hub: { interlink_address: "10.99.0.1", server_name: "hub.example", prefixes: [] }, nodes: [], sources: [] };
 
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear();
-  mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : { agents: [] }));
+  mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/interlink" ? interlink : { agents: [] }));
   mocks.detail.mockResolvedValue(detail);
   mocks.write.mockResolvedValue({ agent, token: "sensitive-one-time-token" });
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
@@ -25,7 +26,7 @@ beforeEach(() => {
 
 describe("Agent management", () => {
   it("configures the access listener of an access agent", async () => {
-    mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/agents" ? { agents: [agent] } : { records: [] }));
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/interlink" ? interlink : path === "/api/agents" ? { agents: [agent] } : { records: [] }));
     render(<AgentsView token="session" />);
     await userEvent.click(await screen.findByRole("button", { name: /branch · node 2/ }));
     await userEvent.selectOptions(await screen.findByLabelText("Agent section"), "users");
@@ -75,6 +76,25 @@ describe("Agent management", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     await userEvent.click(screen.getByRole("button", { name: "Rotate signing key" }));
     expect(mocks.write.mock.calls.filter(call => call[0].includes("rotate-signing-key"))).toHaveLength(0);
+  });
+
+  it("refreshes an unselected fleet and pauses polling outside Overview", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<AgentsView token="session" />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText("No agents registered yet.")).toBeTruthy();
+      const fleetCalls = () => mocks.get.mock.calls.filter(call => call[0] === "/api/agents").length;
+      const initial = fleetCalls();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(fleetCalls()).toBe(initial + 1);
+      rerender(<AgentsView token="session" active={false} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+      expect(fleetCalls()).toBe(initial + 1);
+      rerender(<AgentsView token="session" active />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(fleetCalls()).toBe(initial + 2);
+    } finally { vi.useRealTimers(); }
   });
 
   it("shows queue lifecycle and exposes archive download only after a completed result", async () => {

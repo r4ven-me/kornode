@@ -43,7 +43,7 @@ class Request(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535)
     version: int | None = Field(default=None, ge=1, le=2**31 - 1)
     dry_run: bool = False
-    tunnel: str | None = Field(default=None, pattern=r"^(fabric|upstream:[a-zA-Z0-9_-]+)$")
+    tunnel: str | None = Field(default=None, pattern=r"^(interlink|upstream:[a-zA-Z0-9_-]+)$")
 
     @model_validator(mode="after")
     def check_args(self) -> Self:

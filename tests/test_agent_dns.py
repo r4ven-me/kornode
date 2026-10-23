@@ -26,18 +26,18 @@ class Control:
         return self.ok
 
 
-def test_render_answers_own_zone_and_forwards_the_fabric_zone(tmp_path: Path) -> None:
+def test_render_answers_own_zone_and_forwards_the_interlink_zone(tmp_path: Path) -> None:
     bundle = _validated(tmp_path).bundle
     conf = render(bundle)
     assert conf is not None
     lines = conf.splitlines()
     assert "listen-address=10.100.3.1" in lines
     assert "bind-dynamic" in lines and "bind-interfaces" not in lines
-    assert "local=/node3.kornode.internal/" in lines
-    assert "host-record=node3.kornode.internal,10.100.3.1" in lines
-    assert "host-record=nas.node3.kornode.internal,192.168.3.10" in lines
-    # Over the fabric with the fabric address as source (strict RPF on the hub).
-    assert "server=/kornode.internal/10.100.1.1@10.99.0.3" in lines
+    assert "local=/node3.kornode.lan/" in lines
+    assert "host-record=node3.kornode.lan,10.100.3.1" in lines
+    assert "host-record=nas.node3.kornode.lan,192.168.3.10" in lines
+    # Over the interlink with the interlink address as source (strict RPF on the hub).
+    assert "server=/kornode.lan/10.100.1.1@10.99.0.3" in lines
     assert "server=/corp.example.com/10.60.0.53@10.99.0.3" in lines
     plain = [
         line

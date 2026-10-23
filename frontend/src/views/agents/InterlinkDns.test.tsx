@@ -1,25 +1,25 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FabricDns, type ZoneRecord } from "./FabricDns";
+import { InterlinkDns, type ZoneRecord } from "./InterlinkDns";
 import type { Agent } from "../../agentsApi";
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), write: vi.fn() }));
 vi.mock("../../agentsApi", () => ({ agentGet: mocks.get, agentWrite: mocks.write }));
 const agent: Agent = { id: 3, name: "branch", description: "", roles: [], state: "active", online: true, desired_version: 1, applied_version: 1, last_seen: null, cert_not_after: null, transport: {} };
 const records: ZoneRecord[] = [
-  { fqdn: "hub.kornode.internal", type: "A", value: "10.100.1.1", node: "hub", generated: true },
-  { fqdn: "cam.node3.kornode.internal", type: "A", value: "192.168.3.7", node: "branch", generated: false }
+  { fqdn: "hub.kornode.lan", type: "A", value: "10.100.1.1", node: "hub", generated: true },
+  { fqdn: "cam.node3.kornode.lan", type: "A", value: "192.168.3.7", node: "branch", generated: false }
 ];
-const zone = { enabled: true, domain: "kornode.internal", records };
+const zone = { enabled: true, domain: "kornode.lan", records };
 
 afterEach(cleanup);
 beforeEach(() => { vi.clearAllMocks(); mocks.get.mockResolvedValue(zone); mocks.write.mockResolvedValue(zone); });
 
-describe("Fabric DNS", () => {
+describe("Interlink DNS", () => {
   it("lists generated and stored records; only stored ones can be deleted", async () => {
-    render(<FabricDns token="session" agents={[agent]} />);
-    await screen.findByText(/cam\.node3\.kornode\.internal/);
+    render(<InterlinkDns token="session" agents={[agent]} />);
+    await screen.findByText(/cam\.node3\.kornode\.lan/);
     expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -27,8 +27,8 @@ describe("Fabric DNS", () => {
   });
 
   it("adds a node-scoped record and shows backend refusals", async () => {
-    render(<FabricDns token="session" agents={[agent]} />);
-    await screen.findByText(/hub\.kornode\.internal/);
+    render(<InterlinkDns token="session" agents={[agent]} />);
+    await screen.findByText(/hub\.kornode\.lan/);
     await userEvent.type(screen.getByLabelText("Record name (relative to the zone)"), "nas");
     await userEvent.type(screen.getByLabelText("Record value"), "192.168.3.10");
     await userEvent.selectOptions(screen.getByLabelText("Record scope"), "branch");

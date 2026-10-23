@@ -11,7 +11,7 @@ sources:                      # named sources, besides the built-in classes
   - name: amnezia             # [a-z][a-z0-9-]{0,30}
     interface: awg0           # must exist on this node; may appear later
     cidr: 10.8.3.0/24         # must be inside this node's allowed ranges
-    export: true              # announce cidr into the fabric
+    export: true              # announce cidr into the interlink
     description: wg-easy Amnezia
 
 sets:                         # reusable destination sets
@@ -22,14 +22,14 @@ sets:                         # reusable destination sets
     domain_urls: []
 
 egress:
-  - id: fabric                # optional stable id, else index-based
+  - id: interlink                # optional stable id, else index-based
     from: [clients, host, amnezia]
-    to: fabric
-    via: fabric
+    to: interlink
+    via: interlink
   - from: [clients, amnezia]
     to: { set: corp }
     via: upstream:office
-    kill_switch: true         # default true for upstream/exit/fabric
+    kill_switch: true         # default true for upstream/exit/interlink
   - from: [clients, amnezia]
     to: any
     via: local
@@ -40,20 +40,20 @@ egress:
 - `from`: non-empty list of
   - `clients` — this node's ocserv client pool;
   - `host` — locally originated traffic of this node (`ct direction original`);
-  - `fabric` — traffic arriving from the fabric interface(s) and not destined
+  - `interlink` — traffic arriving from the interlink interface(s) and not destined
     to this node (transit on the hub, exit-via-node on agents);
   - `<source name>`.
 - `to`:
   - `any`;
-  - `fabric` — union of all fabric prefixes except this node's own;
+  - `interlink` — union of all interlink prefixes except this node's own;
   - `{ set: <name> }`;
   - inline `{ routes: [...], domains: [...] }`;
-  - `{ node: <id> }` — fabric prefixes of that node.
+  - `{ node: <id> }` — interlink prefixes of that node.
 - `via`:
   - `local` — main routing table (uplink), masquerade to uplink;
-  - `fabric` — the fabric exit (agent: tun to hub; hub: per-session routes);
-  - `node:<n>` — send through the fabric to node `<node>`, which applies
-    its own `from: fabric` rules to it;
+  - `interlink` — the interlink exit (agent: tun to hub; hub: per-session routes);
+  - `node:<n>` — send through the interlink to node `<node>`, which applies
+    its own `from: interlink` rules to it;
   - `upstream:<profile>` — the named external upstream, masquerade to it;
   - `drop` — explicit reject (ICMP admin-prohibited).
 - `kill_switch` (bool): when the exit is unavailable, traffic is rejected
@@ -78,13 +78,13 @@ egress:
 
 - Every name referenced in `from`, `to.set`, `via` exists.
 - `node:<n>` refers to an existing node ≠ self; the target node must have a
-  rule accepting `from: fabric` traffic to `any` or the destination (checked
+  rule accepting `from: interlink` traffic to `any` or the destination (checked
   on the hub at bundle compile; warning only on agents).
 - **Dead rules**: a rule fully shadowed by earlier rules (every `from` source
   and the whole `to` set already matched earlier) → warning with the shadowing
   rule index. Domain-only sets are never considered fully shadowed.
 - Source `cidr` must not overlap other prefixes (01) and must be inside
-  `fabric.source_pool` for the node unless explicitly allowed with
+  `interlink.source_pool` for the node unless explicitly allowed with
   `allow_outside_pool: true`.
 
 ## Compilation (see 03 for the kernel layout)
@@ -100,13 +100,13 @@ egress:
   them.
 - Each `from` becomes a match: `clients` → `ip saddr <pool>`; source →
   `iifname "<if>" ip saddr <cidr>` (both required); `host` → output hook,
-  `ct direction original`; `fabric` → `iifname @fabric_ifaces`.
+  `ct direction original`; `interlink` → `iifname @interlink_ifaces`.
 - The rule list compiles to a single chain `egress_classify` of
   `<from-match> <to-match> meta mark set <mark> accept` in order, so the
   first match wins by construction. `drop` compiles to `reject with icmpx
   admin-prohibited`.
 - NAT: one masquerade rule per (`via` that needs NAT, outgoing interface),
-  matched on `meta mark` and `oifname`. No NAT is emitted for `fabric` or
+  matched on `meta mark` and `oifname`. No NAT is emitted for `interlink` or
   `node:<n>`.
 
 ## Domain-based sets
@@ -116,22 +116,22 @@ per set (`NodeFacts.resolved`, D-25; no nft element timeouts). On the hub
 `DomainResolverService` does it (internal DNS upstreams, `domain_urls` /
 `route_urls` downloaded hourly and cached, D-75); on an agent `kornode_agent.resolver`
 does it from the bundle's policy (D-78): it queries the hub resolver the node's
-dnsmasq forwards the fabric zone to (else `/etc/resolv.conf`) and downloads the
+dnsmasq forwards the interlink zone to (else `/etc/resolv.conf`) and downloads the
 lists itself. Interval: TTL-aware, 30 s to 1 h. An unresolved set is empty
 (traffic assigned to it matches nothing).
 
 `node:<n>` with a set or inline destination (D-79): a hub rule needs nothing extra, the
 hub's own resolver feeds its classification. For an agent rule the agent classifies by the
-addresses it resolved itself, marks the flow and sends it into the fabric tunnel; the hub
+addresses it resolved itself, marks the flow and sends it into the interlink tunnel; the hub
 cannot see the mark, so it steers the transit traffic by source prefix **and** destination.
 To make both sides agree the agent reports the addresses behind each such destination
 (`gateway_sets` in its report, keyed like `NodeFacts.resolved`) and the hub matches those plus
 the static routes of the set. The hub emits its transit rules in the order of the agent's
 policy (first match wins, like on the agent). Until the hub has seen a new address the
-flow matches no transit rule and falls to the fabric guard (dropped): it fails closed,
-it never leaves through the hub's uplink. `to: fabric` and `to: {node: n}` with `node:<n>` stay
-refused. A set that resolves into a fabric prefix is routed inside the fabric (the hub
-passes fabric destinations before the transit rules), not exited.
+flow matches no transit rule and falls to the interlink guard (dropped): it fails closed,
+it never leaves through the hub's uplink. `to: interlink` and `to: {node: n}` with `node:<n>` stay
+refused. A set that resolves into an interlink prefix is routed inside the interlink (the hub
+passes interlink destinations before the transit rules), not exited.
 
 Consistency rule: when a source or client class is routed by domain sets,
 its clients should use the node's dnsmasq (service address) as their DNS, so
@@ -155,7 +155,7 @@ service address; documentation states it as a requirement.
   `route <cidr>` to other agents (07).
 - Recommended wg-easy settings (documented in `docs/sources.md` during P4):
   empty PostUp/PostDown hooks, client address range inside the node's source
-  range, allowed IPs `0.0.0.0/0`, MTU 1280 when the node's exit is the fabric
+  range, allowed IPs `0.0.0.0/0`, MTU 1280 when the node's exit is the interlink
   over TCP. Setting names differ between wg-easy versions (v14 and the Amnezia
   fork use `WG_POST_UP`/`WG_POST_DOWN`/`WG_DEFAULT_ADDRESS`/`WG_MTU`
   environment variables; v15 moved them into its UI) — verify against the

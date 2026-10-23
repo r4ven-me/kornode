@@ -1,4 +1,4 @@
-"""P4-05: sources attached to agents — export into the fabric, hub routes, validation (D-68)."""
+"""P4-05: sources attached to agents — export into the interlink, hub routes, validation (D-68)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from tests.test_agent_management import world as world  # noqa: F401
 from kornode.registry.db import migrate, open_registry
 from kornode.registry.repository import Registry
 from kornode.services.agent_models import ManagementError
-from kornode.services.fabric_groups import FabricGroupsService
+from kornode.services.interlink_groups import InterlinkGroupsService
 
 SOURCE = {"interface": "awg0", "cidr": "10.8.3.0/24"}
 
@@ -21,7 +21,7 @@ def _user_files(world: Any) -> dict[str, str]:
     try:
         migrate(conn)
         registry = Registry(conn)
-        groups = FabricGroupsService(env.config)
+        groups = InterlinkGroupsService(env.config)
         files = groups.render_files(registry.list_nodes(), registry.list_prefixes())
     finally:
         conn.close()
@@ -29,11 +29,11 @@ def _user_files(world: Any) -> dict[str, str]:
 
 
 def _prefixes_of(world: Any, node: int) -> dict[str, str]:
-    """Prefixes other nodes' bundles carry for `node` (what the agent routes into the fabric)."""
+    """Prefixes other nodes' bundles carry for `node` (what the agent routes into the interlink)."""
     env = world[0]
     other = 2 if node == 3 else 3
     bundle = env.check(env.registry.latest_bundle(other)).bundle
-    return {p.prefix: p.kind for p in bundle.fabric.prefixes if p.node_id == node}
+    return {p.prefix: p.kind for p in bundle.interlink.prefixes if p.node_id == node}
 
 
 def test_an_exported_source_reaches_the_other_nodes_and_the_hub_routes(world: Any) -> None:  # type: ignore[no-untyped-def]
@@ -50,7 +50,7 @@ def test_an_exported_source_reaches_the_other_nodes_and_the_hub_routes(world: An
     # The node's own bundle still compiles the source class; its own prefix is not "other".
     own = env.check(env.registry.latest_bundle(3)).bundle
     assert [s.name for s in own.policy.sources] == ["amnezia"]
-    assert "10.8.3.0/24" not in {p.prefix for p in own.fabric.prefixes}
+    assert "10.8.3.0/24" not in {p.prefix for p in own.interlink.prefixes}
 
 
 def test_a_source_with_export_false_stays_local(world: Any) -> None:  # type: ignore[no-untyped-def]

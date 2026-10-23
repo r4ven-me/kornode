@@ -1,4 +1,4 @@
-"""Fabric and upstream openconnect sessions of the agent (spec 06 "Tunnels").
+"""Interlink and upstream openconnect sessions of the agent (spec 06 "Tunnels").
 
 Dialing pieces (argv, carrier, vpnc-script) are the shared ``kornode.tunnels``;
 this module owns the lifecycle: ordering (carrier exemption and a reconciler
@@ -26,6 +26,7 @@ from kornode.tunnels import vpnc_script_source
 from kornode.tunnels.argv import DialSpec, config_lines, openconnect_argv
 from kornode.tunnels.carrier import resolve_carrier_addresses
 from kornode_agent.config import AgentConfig
+from kornode_agent.health import ping_through
 from kornode_agent.store import atomic_write
 
 BACKOFF_START = 1.0
@@ -33,6 +34,8 @@ BACKOFF_MAX = 60.0
 DIAL_TIMEOUT = 60
 BACKGROUND_GRACE = 5.0
 DISCONNECT_GRACE = 5.0
+UPSTREAM_HEALTH_INTERVAL = 5.0
+UPSTREAM_HEALTH_FAILURES = 3
 
 
 def _locked[F: Callable[..., Any]](method: F) -> F:
@@ -71,8 +74,8 @@ class SubprocessRunner:
 
 @dataclass(frozen=True)
 class TunnelSpec:
-    exit_name: str  # "fabric" or "upstream:<name>"
-    dials: tuple[DialSpec, ...]  # failover order; fabric: the bundle's hubs
+    exit_name: str  # "interlink" or "upstream:<name>"
+    dials: tuple[DialSpec, ...]  # failover order; interlink: the bundle's hubs
     password: str | None = field(default=None, repr=False)
     check_host: str | None = None
     files: tuple[tuple[Path, bytes], ...] = field(
@@ -91,25 +94,25 @@ def specs_for(
     run = root / "run"
     script = run / "vpnc-script-kornode"
     tls = root / "tls"
-    fabric = config.fabric
+    interlink = config.interlink
     camouflage = config.hub.camouflage
-    interface = fabric.interface
+    interface = interlink.interface
     if validated:
         bundle = validated.bundle
-        fabric_cfg = bundle.tunnels.fabric
-        interface = fabric_cfg.interface
-        camouflage = validated.secrets.get("/tunnels/fabric/camouflage", camouflage)
-        transport = fabric_cfg.transport
+        interlink_cfg = bundle.tunnels.interlink
+        interface = interlink_cfg.interface
+        camouflage = validated.secrets.get("/tunnels/interlink/camouflage", camouflage)
+        transport = interlink_cfg.transport
         pins = [(hub.host, hub.port, hub.pin, hub.server_name) for hub in bundle.hubs]
     else:
-        transport = fabric.transport
+        transport = interlink.transport
         pins = [(config.hub.host, config.hub.port, config.hub.pin, config.hub.server_name)]
     dials = tuple(
         DialSpec(
             server=host,
             port=port,
             interface=interface,
-            pid_file=run / "oc-fabric.pid",
+            pid_file=run / "oc-interlink.pid",
             script=script,
             auth_type="cert",
             cert_path=tls / "cert.pem",
@@ -122,7 +125,7 @@ def specs_for(
         )
         for host, port, pin, server_name in pins
     )
-    specs = {"fabric": TunnelSpec("fabric", dials)}
+    specs = {"interlink": TunnelSpec("interlink", dials)}
     if validated:
         for index, upstream in enumerate(validated.bundle.tunnels.upstreams):
             if not upstream.enabled or upstream.auth_type == "p12":
@@ -176,6 +179,7 @@ class TunnelManager:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         jitter: Callable[[], float] = random.random,
+        probe: Callable[[str, str], bool] = ping_through,
     ) -> None:
         self.root = root
         self.converge = converge
@@ -185,6 +189,9 @@ class TunnelManager:
         self.clock = clock
         self.sleep = sleep
         self.jitter = jitter
+        self.probe = probe
+        self._health_next: dict[str, float] = {}
+        self._health_failures: dict[str, int] = {}
         self._specs: dict[str, TunnelSpec] = {}
         self._carriers: dict[str, tuple[str, ...]] = {}
         self._next_attempt: dict[str, float] = {}
@@ -268,11 +275,34 @@ class TunnelManager:
                 continue
             pid = self._pid(spec)
             if pid is not None and self._alive(pid):
+                if not self._upstream_healthy(name, spec):
+                    # Openconnect can retain an UP TUN while retrying a dead
+                    # server. Stop it and reconcile before redialing so the
+                    # stale unicast default cannot hide the unreachable guard.
+                    self.errors[name] = "upstream health check failed"
+                    self._stop(name, spec)
+                    self.converge()
+                    self._next_attempt[name] = self.clock() + BACKOFF_START
+                    continue
                 self._backoff.pop(name, None)
                 continue
             if self.clock() < self._next_attempt.get(name, 0.0):
                 continue
             self._connect(name, spec)
+
+    def _upstream_healthy(self, name: str, spec: TunnelSpec) -> bool:
+        if not name.startswith("upstream:") or not spec.check_host:
+            return True
+        if self.clock() < self._health_next.get(name, 0.0):
+            return True
+        reachable = self.link_up(spec.interface) and self.probe(spec.interface, spec.check_host)
+        self._health_next[name] = self.clock() + UPSTREAM_HEALTH_INTERVAL
+        if reachable:
+            self._health_failures.pop(name, None)
+            return True
+        failures = self._health_failures.get(name, 0) + 1
+        self._health_failures[name] = failures
+        return failures < UPSTREAM_HEALTH_FAILURES
 
     @_locked
     def reconnect(self, exit_name: str) -> bool:
@@ -331,6 +361,8 @@ class TunnelManager:
             return
         self.errors.pop(name, None)
         self.attached[name] = self.clock()
+        self._health_next[name] = self.clock() + UPSTREAM_HEALTH_INTERVAL
+        self._health_failures.pop(name, None)
         self._backoff.pop(name, None)
         with contextlib.suppress(Exception):
             self.converge()  # routes via the new interface
@@ -369,6 +401,8 @@ class TunnelManager:
                 with contextlib.suppress(ProcessLookupError):
                     os.kill(pid, signal.SIGKILL)
         self.attached.pop(name, None)
+        self._health_next.pop(name, None)
+        self._health_failures.pop(name, None)
 
 
 __all__ = ["Runner", "SubprocessRunner", "TunnelManager", "TunnelSpec", "specs_for"]

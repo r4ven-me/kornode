@@ -26,8 +26,8 @@ from kornode.services.audit import AuditService
 from kornode.services.bundle import BundleService
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandRunner
-from kornode.services.fabric_groups import FabricGroupsService
 from kornode.services.files import FileManager
+from kornode.services.interlink_groups import InterlinkGroupsService
 from kornode.services.sessions import SessionService
 from kornode.services.users import UserService
 from kornode.tunnels.pin import certificate_file_pin
@@ -84,7 +84,7 @@ class EnrollmentService:
         self.files = files or FileManager()
         self.certificates = CertificateService(config, runner=self.runner, files=self.files)
         self.users = UserService(config, runner=self.runner, files=self.files)
-        self.groups = FabricGroupsService(config, self.files)
+        self.groups = InterlinkGroupsService(config, self.files)
         self.sessions = SessionService(config, runner=self.runner)
         self.audit = AuditService(config)
         self._reload_ocserv = reload_ocserv
@@ -123,12 +123,12 @@ class EnrollmentService:
                 raise
             for item in old:
                 self._drop_enroll_user_quietly(item.ocserv_user)
-        pin = certificate_file_pin(self.config.cert_path("fabric.crt")).pin
+        pin = certificate_file_pin(self.config.cert_path("interlink.crt")).pin
         document: dict[str, Any] = {
             "v": 1,
             "hub": self.hub,
             "pin": pin,
-            "sni": self.config.fabric.server_name,
+            "sni": self.config.interlink.server_name,
             "id": token_id,
             "user": username,
             "secret": secret,
@@ -425,9 +425,9 @@ class EnrollmentService:
             raise EnrollmentError(500, "internal", "failed to create the enrollment user")
 
     def _sync_dns(self) -> None:
-        from kornode.services.fabric_dns import FabricDnsService
+        from kornode.services.interlink_dns import InterlinkDnsService
 
-        FabricDnsService(self.config).sync()
+        InterlinkDnsService(self.config).sync()
 
     @staticmethod
     def _attempt(action: Callable[[], object]) -> bool:

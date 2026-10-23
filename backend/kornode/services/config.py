@@ -65,10 +65,12 @@ class ConfigService:
                     self.ocserv_renderer.render_group_policy(group),
                 )
             )
-        from kornode.services.fabric_groups import FabricGroupsService
+        from kornode.services.interlink_groups import InterlinkGroupsService
 
-        fabric_groups = FabricGroupsService(config, self.file_manager)
-        files.extend(fabric_groups.render_files(fabric_groups.nodes(), fabric_groups.prefixes()))
+        interlink_groups = InterlinkGroupsService(config, self.file_manager)
+        files.extend(
+            interlink_groups.render_files(interlink_groups.nodes(), interlink_groups.prefixes())
+        )
         return files
 
     def write_rendered_files(self, config: AppConfig) -> list[Path]:
@@ -85,11 +87,11 @@ class ConfigService:
         from kornode.services.users import UserService
 
         UserService(config, files=self.file_manager).ensure_default_group()
-        self._ensure_fabric_crl(config)
+        self._ensure_interlink_crl(config)
         written: list[Path] = []
-        from kornode.services.fabric_groups import FabricGroupsService
+        from kornode.services.interlink_groups import InterlinkGroupsService
 
-        groups = FabricGroupsService(config, self.file_manager)
+        groups = InterlinkGroupsService(config, self.file_manager)
         with groups.locked():
             rendered_files = self.render_files(config)
             for rendered in rendered_files:
@@ -102,7 +104,7 @@ class ConfigService:
         return written
 
     def _recompile_bundles(self, config: AppConfig) -> None:
-        """Hub host/port/pin and fabric settings live in the bundles: every
+        """Hub host/port/pin and interlink settings live in the bundles: every
         saved configuration recompiles them. The control API repeats this at
         start, so a failure here is logged, not fatal to the save."""
         if not config.control.enabled:
@@ -123,7 +125,7 @@ class ConfigService:
         except (BundleError, RegistryError, OSError, sqlite3.Error) as exc:
             LOGGER.warning("bundle recompilation after config save failed: %s", exc)
 
-    def _ensure_fabric_crl(self, config: AppConfig) -> None:
+    def _ensure_interlink_crl(self, config: AppConfig) -> None:
         # ocserv refuses to start with `crl =` pointing at a missing file.
         if not config.cert_path("ca.key").exists():
             return

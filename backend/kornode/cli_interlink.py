@@ -1,4 +1,4 @@
-"""Thin Typer adapter for the fabric overview: `korctl fabric`."""
+"""Thin Typer adapter for the interlink overview: `korctl interlink`."""
 
 from __future__ import annotations
 
@@ -11,23 +11,23 @@ import typer
 from kornode.cli_agents import Json, invoke
 from kornode.config.loader import DEFAULT_CONFIG_PATH
 from kornode.config.models import AppConfig
-from kornode.services.fabric import FabricService
+from kornode.services.interlink import InterlinkService
 
 
 def register(
     app: typer.Typer, config: Callable[[], AppConfig], path: Callable[[], Path | None]
 ) -> None:
-    fabric = typer.Typer(help="Fabric overview: addressing, nodes, prefixes, DNS and sources")
+    interlink = typer.Typer(help="Interlink overview: addressing, nodes, prefixes, DNS and sources")
 
-    def service() -> FabricService:
-        return FabricService(config(), path() or DEFAULT_CONFIG_PATH)
+    def service() -> InterlinkService:
+        return InterlinkService(config(), path() or DEFAULT_CONFIG_PATH)
 
-    @fabric.command("show")
-    def fabric_show(json: Json = False) -> None:
+    @interlink.command("show")
+    def interlink_show(json: Json = False) -> None:
         invoke(lambda: service().show(), json)
 
-    @fabric.command("set")
-    def fabric_set(
+    @interlink.command("set")
+    def interlink_set(
         node_id: int | None = typer.Option(None, "--node-id"),
         cidr: str | None = typer.Option(None, "--cidr"),
         client_pool: str | None = typer.Option(None, "--client-pool"),
@@ -49,4 +49,4 @@ def register(
         data = {key: value for key, value in values.items() if value is not None}
         invoke(lambda: service().set(data), json)
 
-    app.add_typer(fabric, name="fabric")
+    app.add_typer(interlink, name="interlink")

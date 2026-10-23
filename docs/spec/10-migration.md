@@ -9,7 +9,61 @@ and no deprecation period.
 
 Compatibility that **does** stay: hub ⇄ agent version skew within v2 — the
 bundle `format` version, `control.min_agent_version` and the E2E-06 upgrade
-test (spec 09). That is about upgrading v2, not about v1.
+test (spec 09). That is about upgrading v2, not about v1. In particular, the
+wire label `kornode.bundle/v1` is the earlier **v2-platform** bundle format;
+it is not the removed v1 routing/configuration model.
+
+## v2 rename compatibility (D-84/D-85)
+
+For one minor release, readers accept these old spellings; writers emit the
+new spelling. Loading alone does not rewrite YAML or cached signed bytes.
+
+| Existing state | Read behavior / new output |
+| --- | --- |
+| Hub YAML `fabric:` | Warn, normalize to `interlink:` before merging defaults; explicit domains, pools and reserved prefixes remain unchanged. A settings save writes the new section name. |
+| `KORNODE_FABRIC__*` in process env or `.env` | Warn and normalize to `KORNODE_INTERLINK__*` semantics. Explicit and discovered `.env` files both work. |
+| Rule `fabric` in `from`, `to`, `via` | Normalize to `interlink`, including stored registry policy. Both class aliases in one `from` list are a duplicate, not two classes. |
+| Rule `via: exit:<n>`, role `exit` | D-84 behavior stays: normalize to `node:<n>` / `gateway`; registry migration 0004 and old `exit_sets` reports remain supported. |
+| Agent `agent.yaml` section `fabric:` | Read as `interlink:`; save uses the new name. Existing hub SNI/pin values are not guessed or rewritten. |
+| Signed `kornode.bundle/v1` | Verify the exact original bytes first, then normalize `fabric`, `fabric_address`, tunnel names and prefix kind in memory. Unseal against original pointer AAD before translating runtime secret lookup paths. Keep cache bytes/signatures unchanged. |
+| Hub `certs/fabric.key` | If `interlink.key` is absent, atomically copy with mode 0600 and issue the renamed certificate using the same private key, preserving the public-key pin. Legacy key/certificate files remain available for recovery. An existing new key takes precedence and is never overwritten. |
+| Stored encrypted transport camouflage | Keep the original storage AAD label `fabric-transport`; UI/wire renaming does not invalidate registry ciphertext. |
+
+Conflicts are fail-closed: old and new section names in the same YAML mapping
+are an error, even with equal or disjoint fields. Both env name families in the
+combined process/`.env` environment are also an error (including an old name in
+`.env` plus a new name in process env). Across independent YAML and env sources,
+normal precedence applies after normalization: CLI overrides YAML, YAML overrides
+env, process env overrides `.env` for the same variable, env overrides defaults.
+Remove the old env family before switching names. Legacy bundle aliases are
+likewise mutually exclusive at each object level; they cannot silently replace
+new fields.
+
+### Operational limits
+
+- **SNI flag day:** the hub vhost becomes `interlink.<configured-domain>`.
+  Existing enrolled agents/tokens and cached hub entries still naming
+  `fabric.<domain>` are not transparently upgraded. Re-enroll agents against the
+  updated hub and regenerate outstanding enrollment tokens. A preserved pin does
+  not make the old vhost name valid. Upgrade agent images to 2.1.0 first; new
+  bundles are v2 and impose at least that version regardless of a lower configured
+  minimum. Higher configured minimum versions remain effective.
+- The default DNS zone is now `kornode.lan`. An explicit `kornode.internal`
+  remains explicit: change it deliberately if desired, updating dependent DNS
+  names and clients. No mass DNS or bootstrap SNI rewrite is performed.
+- Cached bundles are authenticated and normalized, not re-signed or rewritten.
+  Replay protection stays enabled for newly received bundles. Cached revalidation
+  skips only the high-water comparison and retains trust, identity, minimum
+  version, unsealing and policy checks. The runtime currently accepts signed v1
+  input on receipt as well as from cache; only the writer is v2-only.
+- Existing `interlink.key` wins over a leftover `fabric.key`; if these are different
+  identities, operators must reconcile pins explicitly. Legacy files are retained
+  rather than deleted automatically. Certificate issuance still requires the
+  runtime CA and `certtool`; unit tests simulate issuance and do not prove a live
+  hub/agent cutover.
+- This compatibility does not restore removed v1 routing keys, old Python module
+  imports, or old `fabric` CLI/API paths. Use `korctl interlink` and `/api/interlink`.
+  Historical documents under `docs/redesign/` intentionally keep their vocabulary.
 
 ## Removed config keys and their v2 replacement
 
@@ -26,7 +80,7 @@ translation performed by code.
 | `profiles[].routes/domains/*_urls` (`route_clients_enabled`) | set + `clients → {set: …} via upstream:<name>` placed before the default rules |
 | `profiles[].route_host_enabled/host_routes/host_domains` | set + `host → {set: …} via upstream:<name>` |
 | `profiles[].accept_server_routes` | stays (third-party upstreams); pushed routes/domains extend the profile's pushed set |
-| `profiles[].sync_url` between own nodes | the fabric; kept only for third-party kornode upstreams |
+| `profiles[].sync_url` between own nodes | the interlink; kept only for third-party kornode upstreams |
 | `routing.fwmark`, `routing.table_id`, `routing_offset` | nothing: marks/tables are allocated by the compiler (03) |
 | `routing.main_interface` | exit `local` interface hint |
 | `upstream.active_profile` + switch/failover | alias `upstream:active` resolved by the compiler; `switch` changes the alias target and wakes the reconciler |
@@ -56,10 +110,10 @@ New nodes are deployed with `compose.agent.yaml` and enrolled with
 `kornode-agent enroll <token>` (spec 05/06). There is no export/import path
 from a v1 node.
 
-## Fabric toggle
+## Interlink toggle
 
-There is none. `fabric.enabled` existed only because D-43 could not combine client
+There is none. `interlink.enabled` existed only because D-43 could not combine client
 certificate or OIDC login with agents on one listener. Spike S-07 showed ocserv virtual
-hosts do (D-71): the hub always runs the fabric, a hub without agents is a plain client
+hosts do (D-71): the hub always runs the interlink, a hub without agents is a plain client
 server, and the key is rejected as unknown. Addresses are always derived (client pool
 `10.100.<id>.0/24`, spec 01).

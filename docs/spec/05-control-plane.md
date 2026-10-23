@@ -4,15 +4,15 @@
 
 ```yaml
 control:
-  enabled: true                 # the fabric itself is always part of the hub (D-71)
-  port: 8444                    # bound to the hub fabric address 10.99.0.1 only
+  enabled: true                 # the interlink itself is always part of the hub (D-71)
+  port: 8444                    # bound to the hub interlink address 10.99.0.1 only
   long_poll_seconds: 60
   report_interval_seconds: 30
   offline_after_seconds: 90
   cert_lifetime_days: 90
   enroll_token_ttl_minutes: 60
   bundle_history: 20            # versions kept per agent in the registry
-  min_agent_version: 2.0.0      # carried in every bundle
+  min_agent_version: 2.1.0      # carried in every bundle; v2 format has this floor
   signing_key: ${data_dir}/control/signing.ed25519   # created on first start, 0600
 ```
 
@@ -20,10 +20,10 @@ Supervisor program `control-api` runs `python -m kornode.control` on
 `10.99.0.1:8444`. TLS is `CERT_OPTIONAL` against the kornode CA and the app
 requires the certificate per request except on `POST /agent/v1/enroll` (D-49):
 CN `agent-<id>`, OU `agents`, CRL (fail closed), `nodes.state`. The listener
-uses its own certificate `certs/control.crt` (IP SAN = fabric address).
+uses its own certificate `certs/control.crt` (IP SAN = interlink address).
 Independent of `web.enabled`.
 
-The hub's fabric address `10.99.0.1/32` is bound to `lo` by the reconciler.
+The hub's interlink address `10.99.0.1/32` is bound to `lo` by the reconciler.
 
 ## Registry (SQLite, `data_dir/registry.db`)
 
@@ -148,7 +148,7 @@ return `details.committed: true`, not a fictitious rollback. Recovery: registry
 maintenance for sync, explicit token reissue for failed issuance.
 
 `transport.camouflage_enc` is base64 ciphertext encrypted with the same hub
-master key as external credentials (AAD distinguishes the node/fabric transport).
+master key as external credentials (AAD distinguishes the node/interlink transport).
 The compiler decrypts and seals it for that agent. Normal management views
 only return `camouflage_set`/`credentials_set`/`password_set`, never credentials,
 hashes or ciphertext. Access users are delivered with the bundle as ocpasswd hashes (P4-04, D-67).
@@ -190,12 +190,12 @@ prefixes report their runtime boundary; access roles/users are delivered since P
    `pending` + token. Panel: "Add agent" dialog, same service.
 2. Token (shown once), base64url of:
    ```json
-   {"v":1,"hub":"vpn.example.com:443","pin":"pin-sha256:…","sni":"fabric.kornode.internal","id":"k2f9a1b0",
+   {"v":1,"hub":"vpn.example.com:443","pin":"pin-sha256:…","sni":"interlink.kornode.lan","id":"k2f9a1b0",
     "user":"enroll-3-k2f9a1b0","secret":"<32 random bytes b64>",
     "control":"https://10.99.0.1:8444","camouflage":"<optional>","exp":"2026-10-11T16:41:00Z"}
    ```
-   `pin` is the pin of the fabric vhost certificate and `sni` its name (D-71): the agent
-   dials `hub` but presents `sni` (07-fabric). `id` is the token id (also the suffix of `user`); a node has one live token,
+   `pin` is the pin of the interlink vhost certificate and `sni` its name (D-71): the agent
+   dials `hub` but presents `sni` (07-interlink). `id` is the token id (also the suffix of `user`); a node has one live token,
    issuing a new one revokes the previous one. Hub stores `sha256(secret)` and
    creates an ocserv user `enroll-3-k2f9a1b0` with the
    same password in group `enroll` (restricted to `10.99.0.1/32` tcp/8444 by
@@ -237,13 +237,23 @@ sign/verify, seal/unseal). It imports only stdlib, `pydantic`,
 
 ### Body
 
-- JSON per `schemas/bundle.v1.schema.json`, encoded as
+- New bundles use `format: kornode.bundle/v2`, require agent **2.1.0** or newer,
+  and follow `schemas/bundle.v2.schema.json`, encoded as
   `json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()`.
   No floats anywhere in the body. Maximum size 1 MiB; the agent refuses a
   larger body before verifying it.
 - The canonical form matters only to the hub (stable `sha256`, dedup). The
   agent never re-encodes: it verifies, caches and parses the exact bytes it
   received.
+- The runtime reader also accepts `kornode.bundle/v1` for version skew and cached
+  state. `schemas/bundle.runtime.schema.json` covers both accepted wire formats;
+  `schemas/bundle.v1.schema.json` describes the legacy reader, including alias
+  conflicts. These structural schemas do not replace signature, identity, replay,
+  version, unsealing or policy-compilation checks. The hub never emits v1.
+- The effective minimum of a new bundle is `max(control.min_agent_version, 2.1.0)`
+  using numeric version components; an old explicitly configured `2.0.0` does not
+  make a v2 bundle usable by a pre-rename agent. The validator enforces the v2
+  format floor even if its `min_agent_version` is omitted or lower.
 - `generated_at` is informational. Nothing on the agent depends on time
   (bundles never expire, D-08).
 
@@ -295,8 +305,8 @@ Plaintext is UTF-8 text; binary material (keys) is PEM.
 
 `BundleService.compile(node_id, reason)` is a pure function of the registry
 (read inside the caller's transaction) plus the hub's YAML settings (hub
-host/port/pin, fabric). It runs synchronously in the same transaction as
-every registry mutation that can affect a bundle (a fabric-wide change, such
+host/port/pin, interlink). It runs synchronously in the same transaction as
+every registry mutation that can affect a bundle (an interlink-wide change, such
 as a new node's prefixes, recompiles every active agent; that is at most 253
 small JSON documents), on hub YAML save, and once at control API startup.
 No queue, no debounce: content-hash dedup makes recompiling unchanged nodes
@@ -312,14 +322,18 @@ A bundle is valid only if, in this order:
 
 1. the body is ≤ 1 MiB and the signature verifies with a trusted key (before
    any JSON parsing);
-2. it parses into the pydantic `Bundle` model (mirror of the JSON schema;
-   a unit test checks every example against both);
+2. it parses into the pydantic `Bundle` model (structural reader schemas above;
+   unit tests check examples and compatibility cases against both). A v1 body is
+   normalized in memory only after its original bytes pass signature verification;
+   old/new aliases in the same object are rejected, not overwritten;
 3. `format`, `node_id` match; `version > high_water_version`;
    `min_agent_version ≤` the running agent version;
-4. every sealed value unseals;
+4. every sealed value unseals against its **original wire JSON pointer**. Only
+   after authentication does a v1 `/tunnels/fabric/camouflage` lookup become
+   `/tunnels/interlink/camouflage` for runtime consumers;
 5. `kornode.net` compiles `policy` with the bundle's addresses and the
    validator reports no errors;
-6. the fabric tunnel and the `fabric` exit are present (a bundle cannot
+6. the interlink tunnel and the `interlink` exit are present (a bundle cannot
    remove the agent's path to the hub, 11).
 
 ## Control API (agent-facing, mTLS, `/agent/v1`)
@@ -330,7 +344,7 @@ against `nodes.state == 'active'` and CRL.
 | Method & path | Request | Response |
 | --- | --- | --- |
 | `POST /agent/v1/enroll` | see Enrollment (no client cert) | 200 enrollment result |
-| `GET /agent/v1/ping` | — | 204; the agent's `fabric` health check (06) |
+| `GET /agent/v1/ping` | — | 204; the agent's `interlink` health check (06) |
 | `GET /agent/v1/bundle?since=<v>&wait=<s>` | — | 200 raw body bytes + `X-Kornode-Signature` + `X-Kornode-Version`; 304 if no newer version within `wait` (≤ `long_poll_seconds`) |
 | `POST /agent/v1/report` | report JSON (below) | 204 |
 | `GET /agent/v1/commands?wait=<s>` | — | 200 list of commands (marks delivered); 204 none |
@@ -356,11 +370,11 @@ Errors: JSON `{"error": "<code>", "message": "..."}`; codes: `unauthorized`,
 
 ```json
 {
-  "node_id": 3, "agent_version": "2.0.0", "time": "2026-10-11T12:00:00Z",
+  "node_id": 3, "agent_version": "2.1.0", "time": "2026-10-11T12:00:00Z",
   "applied_version": 42, "pending_version": null, "high_water_version": 43,
   "last_apply": {"version": 42, "result": "confirmed", "at": "...", "error": null},
   "rollbacks": [{"from": 43, "to": 42, "at": "...", "reason": "health: hub unreachable"}],
-  "tunnels": [{"name": "fabric", "iface": "oc-hub0", "up": true, "since": "...",
+  "tunnels": [{"name": "interlink", "iface": "oc-hub0", "up": true, "since": "...",
                "carrier": "203.0.113.10:443", "transport": "tcp", "mtu": 1399,
                "rx_bytes": 0, "tx_bytes": 0}],
   "sources": [{"name": "amnezia", "iface": "awg0", "present": true}],

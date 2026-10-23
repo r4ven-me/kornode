@@ -40,7 +40,7 @@ def test_example_parses_into_model() -> None:
 def test_example_matches_json_schema() -> None:
     jsonschema = pytest.importorskip("jsonschema")  # declared in the dev extras
     schemas = EXAMPLE.parents[1] / "schemas"
-    bundle_schema = json.loads((schemas / "bundle.v1.schema.json").read_text(encoding="utf-8"))
+    bundle_schema = json.loads((schemas / "bundle.v2.schema.json").read_text(encoding="utf-8"))
     egress_schema = json.loads((schemas / "egress.v1.schema.json").read_text(encoding="utf-8"))
     from referencing import Registry, Resource
 
@@ -146,7 +146,7 @@ def test_validator_accepts_example_without_unsealing() -> None:
         envelope,
         trusted=trusted,
         high_water_version=41,
-        agent_version="2.0.0",
+        agent_version="2.1.0",
         expected_node_id=3,
     )
 
@@ -160,7 +160,7 @@ def test_validator_accepts_example_without_unsealing() -> None:
         (lambda d: d.update(version=5), "replay"),
         (lambda d: d.update(min_agent_version="9.0.0"), "too_old"),
         (lambda d: d.update(unknown=1), "malformed"),
-        (lambda d: d["policy"].update(egress=[]), "no_fabric"),
+        (lambda d: d["policy"].update(egress=[]), "no_interlink"),
         (lambda d: d["policy"]["egress"][1].update(via="upstream:nope"), "policy"),
     ],
 )
@@ -177,7 +177,7 @@ def test_validator_rejections(mutate: Any, code: str) -> None:
             envelope,
             trusted=trusted,
             high_water_version=10,
-            agent_version="2.0.0",
+            agent_version="2.1.0",
             expected_node_id=3,
         )
     assert bad.value.code == code
@@ -201,7 +201,7 @@ def test_validator_unseals_with_agent_key() -> None:
         envelope,
         trusted=trusted,
         high_water_version=0,
-        agent_version="2.0.0",
+        agent_version="2.1.0",
         expected_node_id=3,
         seal_private_key=private,
     )
@@ -215,7 +215,7 @@ def test_validator_unseals_with_agent_key() -> None:
             envelope,
             trusted=trusted,
             high_water_version=0,
-            agent_version="2.0.0",
+            agent_version="2.1.0",
             expected_node_id=3,
             seal_private_key=private,
         )
@@ -233,7 +233,7 @@ def test_validator_rejects_bundle_for_another_node() -> None:
             envelope,
             trusted=trusted,
             high_water_version=0,
-            agent_version="2.0.0",
+            agent_version="2.1.0",
             expected_node_id=4,
         )
     assert bad.value.code == "wrong_node"
@@ -250,7 +250,7 @@ def test_bad_signature_wins_over_malformed_body() -> None:
             envelope,
             trusted=trusted,
             high_water_version=0,
-            agent_version="2.0.0",
+            agent_version="2.1.0",
             expected_node_id=3,
         )
     assert bad.value.code == "bad_signature"
@@ -276,7 +276,7 @@ def test_validator_revalidate_skips_only_the_replay_check() -> None:
     common = {
         "trusted": trusted,
         "high_water_version": doc["version"],
-        "agent_version": "2.0.0",
+        "agent_version": "2.1.0",
         "expected_node_id": 3,
     }
     with pytest.raises(BundleError) as replay:

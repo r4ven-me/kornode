@@ -240,7 +240,7 @@ export type GeneralSettingsDraft = {
   cliEnabled: boolean;
 };
 
-export type FabricSettingsDraft = {
+export type InterlinkSettingsDraft = {
   nodeId: number;
   cidr: string;
   clientPool: string;
@@ -250,17 +250,17 @@ export type FabricSettingsDraft = {
   reserved: string;
 };
 
-export function readFabricSettingsDraft(config: Record<string, unknown>): FabricSettingsDraft {
+export function readInterlinkSettingsDraft(config: Record<string, unknown>): InterlinkSettingsDraft {
   const node = readRecord(config.node);
-  const fabric = readRecord(config.fabric);
+  const interlink = readRecord(config.interlink);
   return {
     nodeId: readNumber(node.id, 1),
-    cidr: readString(fabric.cidr, "10.99.0.0/24"),
-    clientPool: readString(fabric.client_pool, "10.100.{id}.0/24"),
-    sourcePool: readString(fabric.source_pool, "10.8.{id}.0/24"),
-    enrollPool: readString(fabric.enroll_pool, "10.99.255.240/28"),
-    domain: readString(fabric.domain, "kornode.internal"),
-    reserved: readStringArray(fabric.reserved).join("\n")
+    cidr: readString(interlink.cidr, "10.99.0.0/24"),
+    clientPool: readString(interlink.client_pool, "10.100.{id}.0/24"),
+    sourcePool: readString(interlink.source_pool, "10.8.{id}.0/24"),
+    enrollPool: readString(interlink.enroll_pool, "10.99.255.240/28"),
+    domain: readString(interlink.domain, "kornode.lan"),
+    reserved: readStringArray(interlink.reserved).join("\n")
   };
 }
 

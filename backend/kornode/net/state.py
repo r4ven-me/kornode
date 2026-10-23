@@ -49,7 +49,7 @@ class Sysctl:
 
 @dataclass(frozen=True, slots=True)
 class Address:
-    """An address kornode adds to an interface (the hub fabric address on `lo`).
+    """An address kornode adds to an interface (the hub interlink address on `lo`).
     Add-only: kornode cannot prove it owns a foreign address, so it never
     removes one."""
 

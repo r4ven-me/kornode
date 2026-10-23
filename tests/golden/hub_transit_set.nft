@@ -1,5 +1,5 @@
 table inet kornode {
-  set fabric_ifaces {
+  set interlink_ifaces {
     type ifname;
   }
   set transit_ifaces {
@@ -25,12 +25,12 @@ table inet kornode {
     flags interval;
     auto-merge;
   }
-  set fabric_v4 {
+  set interlink_v4 {
     type ipv4_addr;
     flags interval;
     auto-merge;
   }
-  set fabric_v6 {
+  set interlink_v6 {
     type ipv6_addr;
     flags interval;
     auto-merge;
@@ -64,12 +64,12 @@ table inet kornode {
     ip6 daddr @local_v6 return
     ip daddr @carrier_v4 return
     ip6 daddr @carrier_v6 return
-    iifname @fabric_ifaces ip daddr @fabric_v4 return comment "agents: fabric destinations are routed"
-    iifname @fabric_ifaces ip6 daddr @fabric_v6 return comment "agents: fabric destinations are routed"
-    iifname @fabric_ifaces ip saddr @transit3_v4 ip daddr @transit3_0_d4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
-    iifname @fabric_ifaces ip saddr @transit3_1_v4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
+    iifname @interlink_ifaces ip daddr @interlink_v4 return comment "agents: interlink destinations are routed"
+    iifname @interlink_ifaces ip6 daddr @interlink_v6 return comment "agents: interlink destinations are routed"
+    iifname @interlink_ifaces ip saddr @transit3_v4 ip daddr @transit3_0_d4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
+    iifname @interlink_ifaces ip saddr @transit3_1_v4 meta mark set 0x0c000100 ct mark set meta mark accept comment "transit node:3"
     ip saddr 10.100.1.0/24 reject with icmpx admin-prohibited comment "egress rule 0"
-    iifname @fabric_ifaces reject with icmpx admin-prohibited comment "agents: no exit declared"
+    iifname @interlink_ifaces reject with icmpx admin-prohibited comment "agents: no exit declared"
   }
   chain output {
     type route hook output priority mangle; policy accept;

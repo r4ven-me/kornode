@@ -59,7 +59,7 @@ def validate_hub_policy(
             raise HubEgressError(
                 "runtime_unsupported",
                 f"egress[{index}]: leaving through another node supports `to: any`, a set or an "
-                "inline destination, not `fabric` or a node",
+                "inline destination, not `interlink` or a node",
             )
 
 

@@ -110,7 +110,7 @@ class Agent:
         self._doctor_cache: tuple[float, int | None, list[dict[str, str]]] | None = None
         self._report_now = asyncio.Event()
         self._apply_lock = asyncio.Lock()
-        self._fabric_healthy_since: float | None = None
+        self._interlink_healthy_since: float | None = None
         self._thread_stop = threading.Event()
         self._versions: dict[str, str] = {}
 
@@ -141,7 +141,7 @@ class Agent:
         self.loop = asyncio.get_running_loop()
         self.config: AgentConfig = load_config(self.root)
         self.client = ControlClient.enrolled(
-            self.config.hub.control_url, self.root / "tls", self._fabric_address
+            self.config.hub.control_url, self.root / "tls", self._interlink_address
         )
         self.reconciler: Reconciler
         self.tunnels = TunnelManager(
@@ -153,7 +153,7 @@ class Agent:
             self.root,
             nameservers=self._hub_nameservers,
             policy=lambda: self.inputs.active.bundle.policy if self.inputs.active else None,
-            source=self._fabric_source,
+            source=self._interlink_source,
         )
         self.inputs = AgentNetInputs(
             self.config,
@@ -208,22 +208,24 @@ class Agent:
         self.reconciler.wake()
         self.set_resolver.changed.set()  # re-resolve the sets of the new policy now
 
-    def _fabric_source(self) -> str | None:
-        """The node's fabric address: queries to the hub resolver must come from it (D-66)."""
+    def _interlink_source(self) -> str | None:
+        """The node's interlink address: queries to the hub resolver must come from it (D-66)."""
         active = self.inputs.active
-        return str(active.bundle.node.fabric_address) if active else None
+        return str(active.bundle.node.interlink_address) if active else None
 
     def _hub_nameservers(self) -> list[str]:
-        """The hub resolver the node's dnsmasq forwards the fabric zone to (D-66, D-78)."""
+        """The hub resolver the node's dnsmasq forwards the interlink zone to (D-66, D-78)."""
         active = self.inputs.active
         dns = active.bundle.dns if active else None
         zones = dns.forward_zones if dns is not None and dns.forward_zones else ()
         return hub_nameservers([server for zone in zones for server in zone.servers])
 
-    def _fabric_address(self) -> str | None:
+    def _interlink_address(self) -> str | None:
         inputs = getattr(self, "inputs", None)
         active = inputs.active if inputs else None
-        iface = active.bundle.tunnels.fabric.interface if active else self.config.fabric.interface
+        iface = (
+            active.bundle.tunnels.interlink.interface if active else self.config.interlink.interface
+        )
         return self.probes.address(iface)
 
     def _converge_or_raise(self) -> None:
@@ -258,7 +260,7 @@ class Agent:
         if not self.revoked:
             self.revoked = True
             log.error("the hub reports this node as revoked: tunnels are not redialled")
-            self.loop.run_in_executor(None, self.tunnels.suspend, "fabric")
+            self.loop.run_in_executor(None, self.tunnels.suspend, "interlink")
 
     def _on_event(self, event: dict[str, Any]) -> None:
         if event["type"] == "rolled_back":
@@ -339,22 +341,22 @@ class Agent:
 
     async def _deferred_loop(self) -> None:
         """A version rolled back while the hub path was down is retried once the
-        fabric has been healthy for 30 s (at most 3 attempts)."""
+        interlink has been healthy for 30 s (at most 3 attempts)."""
         while True:
             await asyncio.sleep(5)
             if self.applier.state.deferred is None or self.applier.state.pending is not None:
-                self._fabric_healthy_since = None
+                self._interlink_healthy_since = None
                 continue
             healthy = await asyncio.to_thread(
-                lambda: self.health.checks(self.applier.active).get("fabric", False)
+                lambda: self.health.checks(self.applier.active).get("interlink", False)
             )
             now = time.monotonic()
             if not healthy:
-                self._fabric_healthy_since = None
-            elif self._fabric_healthy_since is None:
-                self._fabric_healthy_since = now
-            elif now - self._fabric_healthy_since >= DEFERRED_STABLE_SECONDS:
-                self._fabric_healthy_since = None
+                self._interlink_healthy_since = None
+            elif self._interlink_healthy_since is None:
+                self._interlink_healthy_since = now
+            elif now - self._interlink_healthy_since >= DEFERRED_STABLE_SECONDS:
+                self._interlink_healthy_since = None
                 async with self._apply_lock:
                     outcome = await _worker(self.applier.retry_deferred)
                 if outcome is not None:
@@ -394,7 +396,7 @@ class Agent:
         atomic_write(self.root / "tls" / "cert.pem", cert_pem.encode(), 0o644)
         old = self.client
         self.client = ControlClient.enrolled(
-            self.config.hub.control_url, self.root / "tls", self._fabric_address
+            self.config.hub.control_url, self.root / "tls", self._interlink_address
         )
         await old.aclose()
         return True

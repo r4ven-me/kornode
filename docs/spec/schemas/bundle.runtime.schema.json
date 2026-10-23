@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kornode.r4ven.me/schemas/bundle.runtime.schema.json",
+  "title": "kornode accepted bundle wire formats",
+  "description": "Structural reader schema. The hub emits only v2. Readers also accept legacy v1, including cached signed bodies. Signature, replay, node identity, minimum agent version, unsealing and policy compilation are runtime checks, not JSON Schema checks.",
+  "oneOf": [
+    { "$ref": "bundle.v2.schema.json" },
+    { "$ref": "bundle.v1.schema.json" }
+  ]
+}

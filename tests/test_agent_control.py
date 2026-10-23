@@ -28,14 +28,14 @@ pytestmark = pytest.mark.usefixtures("hub")
 def _token(hub: Hub, node_id: int = 3):  # type: ignore[no-untyped-def]
     raw = hub.env.service.issue_token(node_id)
     token = parse_token(raw)
-    # The hub's fabric address is not routable in the test: use the loopback listener.
+    # The hub's interlink address is not routable in the test: use the loopback listener.
     return dataclasses.replace(token, control_url=f"https://{HOST}:{hub.port}")
 
 
-def test_the_token_carries_the_fabric_vhost_name_into_the_agent_config(hub: Hub) -> None:
+def test_the_token_carries_the_interlink_vhost_name_into_the_agent_config(hub: Hub) -> None:
     token = _token(hub)
 
-    assert token.server_name == "fabric.kornode.internal"
+    assert token.server_name == "interlink.kornode.lan"
 
 
 def test_parse_token_rejects_garbage_and_missing_control_url() -> None:

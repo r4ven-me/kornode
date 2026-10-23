@@ -29,7 +29,7 @@ LISTED_HOST = "198.51.100.7"
 OTHER_HOST = "192.0.2.5"
 HUB_UPLINK = "203.0.113.1"
 NODE2_UPLINK = "198.18.0.2"
-NODE2_FABRIC = "10.99.0.2"
+NODE2_INTERLINK = "10.99.0.2"
 
 SERVER = textwrap.dedent(
     """
@@ -98,12 +98,12 @@ def _wire(
 def exit_lab(lab: Lab, tmp_path: Path) -> Iterator[ExitLab]:
     src, hub, node2, inet = (lab.add_namespace(x) for x in ("src", "hub", "node2", "inet"))
     _wire(lab, src, hub, "eth0", "wg0", "10.8.1.2/24", "10.8.1.1/24")
-    # The fabric session is a layer-3 tunnel like ocserv's tun device: a veth would need ARP
+    # The interlink session is a layer-3 tunnel like ocserv's tun device: a veth would need ARP
     # answers for every internet address behind it.
     _wire(lab, hub, node2, "c0", "c0", "172.31.0.1/30", "172.31.0.2/30")
     for ns, name, local, remote, address in (
         (hub, "vpns1", "172.31.0.1", "172.31.0.2", "10.99.0.1/24"),
-        (node2, "oc-hub0", "172.31.0.2", "172.31.0.1", f"{NODE2_FABRIC}/24"),
+        (node2, "oc-hub0", "172.31.0.2", "172.31.0.1", f"{NODE2_INTERLINK}/24"),
     ):
         ns.run(["ip", "tunnel", "add", name, "mode", "ipip", "local", local, "remote", remote])
         ns.run(["ip", "addr", "add", address, "dev", name])
@@ -159,7 +159,7 @@ def test_nl17_node2_offline_listed_destinations_fail_closed_never_on_the_hub_upl
     assert exit_lab.fetch(exit_lab.src, OTHER_HOST) == HUB_UPLINK  # unlisted stay local
 
 
-def test_nl18_full_tunnel_exits_node2_and_the_hub_reaches_node2_by_its_fabric_address(
+def test_nl18_full_tunnel_exits_node2_and_the_hub_reaches_node2_by_its_interlink_address(
     exit_lab: ExitLab,
 ) -> None:
     exit_lab.drive(exit_lab.node2, "node2", "full")
@@ -169,18 +169,18 @@ def test_nl18_full_tunnel_exits_node2_and_the_hub_reaches_node2_by_its_fabric_ad
     assert exit_lab.fetch(exit_lab.src, OTHER_HOST) == NODE2_UPLINK
     assert not exit_lab.reached_from(HUB_UPLINK, LISTED_HOST)
     assert not exit_lab.reached_from(HUB_UPLINK, OTHER_HOST)
-    # The "scrape": the hub talks to the agent by its real fabric address (no NAT in the fabric).
+    # The "scrape": the hub uses the agent's real interlink address, without NAT.
     agent = subprocess.Popen(  # noqa: S603 - explicit argv
         [
             "ip", "netns", "exec", exit_lab.node2.full_name, sys.executable, "-c", SERVER,
-            str(exit_lab.log.with_name("node2.log")), f"{NODE2_FABRIC}:9100",
+            str(exit_lab.log.with_name("node2.log")), f"{NODE2_INTERLINK}:9100",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )  # fmt: skip
     try:
         time.sleep(0.5)
-        assert exit_lab.fetch(exit_lab.hub, NODE2_FABRIC, port=9100) == "10.99.0.1"
+        assert exit_lab.fetch(exit_lab.hub, NODE2_INTERLINK, port=9100) == "10.99.0.1"
     finally:
         agent.terminate()
         agent.wait(timeout=10)

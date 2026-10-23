@@ -1,4 +1,4 @@
-"""P4-03: fabric DNS zone in the registry, hub dnsmasq and the bundle (D-66)."""
+"""P4-03: interlink DNS zone in the registry, hub dnsmasq and the bundle (D-66)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from kornode.bundle.models import Dns, LocalRecord
 from kornode.renderers import DnsmasqConfigRenderer
 from kornode.services.agent_models import ManagementError
 from kornode.services.agents import AgentService
-from kornode.services.fabric_dns import DnsRecordInput, FabricDnsService, dnsmasq_lines
+from kornode.services.interlink_dns import DnsRecordInput, InterlinkDnsService, dnsmasq_lines
 
 
 class World:
@@ -30,7 +30,7 @@ class World:
             sync=lambda: None,
             clock=lambda: datetime(2026, 10, 20, tzinfo=UTC),
         )
-        self.dns = FabricDnsService(
+        self.dns = InterlinkDnsService(
             self.env.config, agents=self.agents, restart_dnsmasq=self._restart
         )
 
@@ -61,10 +61,10 @@ def test_generated_names_cover_hub_and_every_registered_node(world: World) -> No
 
     records = world.fqdns()
 
-    assert records["hub.kornode.internal"]["value"] == "10.100.1.1"
-    assert records["node1.kornode.internal"]["value"] == "10.100.1.1"
-    assert records["node3.kornode.internal"]["value"] == "10.100.3.1"
-    assert records["node4.kornode.internal"]["node"] == "node4"
+    assert records["hub.kornode.lan"]["value"] == "10.100.1.1"
+    assert records["node1.kornode.lan"]["value"] == "10.100.1.1"
+    assert records["node3.kornode.lan"]["value"] == "10.100.3.1"
+    assert records["node4.kornode.lan"]["node"] == "node4"
     assert all(item["generated"] for item in records.values())
 
 
@@ -72,9 +72,9 @@ def test_hub_record_is_rendered_into_local_zone_and_restarts_once(world: World) 
     world.dns.add(record(name="monitoring", type="A", value="10.100.1.20"))
 
     conf = world.conf()
-    assert "local=/kornode.internal/" in conf
-    assert "host-record=monitoring.kornode.internal,10.100.1.20" in conf
-    assert "host-record=hub.kornode.internal,10.100.1.1" in conf
+    assert "local=/kornode.lan/" in conf
+    assert "host-record=monitoring.kornode.lan,10.100.1.20" in conf
+    assert "host-record=hub.kornode.lan,10.100.1.1" in conf
     assert world.restarts == 1
     # Unchanged zone: no rewrite, no restart.
     assert world.dns.sync() is False
@@ -87,19 +87,19 @@ def test_node_record_lives_in_node_zone_and_reaches_only_its_bundle(world: World
     world.dns.add(record(name="cam", type="A", value="192.168.3.7", node="node3"))
     world.dns.add(record(name="monitoring", type="A", value="10.100.1.20"))
 
-    assert world.fqdns()["cam.node3.kornode.internal"]["node"] == "node3"
+    assert world.fqdns()["cam.node3.kornode.lan"]["node"] == "node3"
     dns3 = world.env.check(world.env.registry.latest_bundle(3)).bundle.dns
     dns2 = world.env.check(world.env.registry.latest_bundle(2)).bundle.dns
     assert dns3 is not None and dns2 is not None
     names3 = {(item.name, item.value) for item in dns3.local_records or ()}
     assert names3 == {
-        ("node3.kornode.internal", "10.100.3.1"),
-        ("cam.node3.kornode.internal", "192.168.3.7"),
+        ("node3.kornode.lan", "10.100.3.1"),
+        ("cam.node3.kornode.lan", "192.168.3.7"),
     }
-    assert {item.name for item in dns2.local_records or ()} == {"node2.kornode.internal"}
+    assert {item.name for item in dns2.local_records or ()} == {"node2.kornode.lan"}
     assert dns3.forward_zones is not None
     assert [(z.zone, z.servers) for z in dns3.forward_zones] == [
-        ("kornode.internal", ("10.100.1.1",))
+        ("kornode.lan", ("10.100.1.1",))
     ]
     # Hub-wide records are answered by the hub, never copied into bundles.
     assert "monitoring" not in str(dns2) + str(dns3)
@@ -110,7 +110,7 @@ def test_several_addresses_share_one_host_record_line(world: World) -> None:
     world.dns.add(record(name="ha", type="AAAA", value="fd00::21"))
     world.dns.add(record(name="ha", type="A", value="10.100.1.22"))
 
-    assert "host-record=ha.kornode.internal,10.100.1.21,10.100.1.22,fd00::21" in world.conf()
+    assert "host-record=ha.kornode.lan,10.100.1.21,10.100.1.22,fd00::21" in world.conf()
 
 
 @pytest.mark.parametrize(
@@ -141,9 +141,9 @@ def test_names_are_validated_before_the_service(world: World) -> None:
 def test_cname_rules(world: World) -> None:
     world.env.add(3)
     world.dns.add(record(name="grafana", type="A", value="10.100.1.30"))
-    world.dns.add(record(name="dash", type="CNAME", value="grafana.kornode.internal."))
-    assert world.fqdns()["dash.kornode.internal"]["value"] == "grafana.kornode.internal"
-    assert "cname=dash.kornode.internal,grafana.kornode.internal" in world.conf()
+    world.dns.add(record(name="dash", type="CNAME", value="grafana.kornode.lan."))
+    assert world.fqdns()["dash.kornode.lan"]["value"] == "grafana.kornode.lan"
+    assert "cname=dash.kornode.lan,grafana.kornode.lan" in world.conf()
 
     with pytest.raises(ManagementError) as raised:
         world.dns.add(record(name="dash", type="A", value="10.100.1.31"))
@@ -161,8 +161,8 @@ def test_cname_rules(world: World) -> None:
 def test_delete_and_missing_record(world: World) -> None:
     world.dns.add(record(name="web", type="A", value="10.100.1.40"))
     world.dns.delete(record(name="web", type="A", value="10.100.1.40"))
-    assert "web.kornode.internal" not in world.fqdns()
-    assert "web.kornode.internal" not in world.conf()
+    assert "web.kornode.lan" not in world.fqdns()
+    assert "web.kornode.lan" not in world.conf()
     with pytest.raises(ManagementError) as raised:
         world.dns.delete(record(name="web", type="A", value="10.100.1.40"))
     assert raised.value.status == 404
@@ -212,12 +212,12 @@ def test_node_records_go_with_the_node(world: World) -> None:
     assert world.env.registry.dns_records() == []
 
 
-def test_fabric_enables_hub_dnsmasq(world: World) -> None:
-    assert "fabric_dns" in world.env.config.dnsmasq_active_reasons()
+def test_interlink_enables_hub_dnsmasq(world: World) -> None:
+    assert "interlink_dns" in world.env.config.dnsmasq_active_reasons()
 
 
 def test_orphaned_cname_is_not_rendered() -> None:
-    from kornode.services.fabric_dns import ZoneRecord
+    from kornode.services.interlink_dns import ZoneRecord
 
     lines = dnsmasq_lines(
         [
@@ -232,9 +232,9 @@ def test_orphaned_cname_is_not_rendered() -> None:
 @pytest.mark.parametrize(
     "data",
     [
-        {"name": "x.kornode.internal\nlog-queries", "type": "A", "value": "10.0.0.1"},
-        {"name": "x.kornode.internal", "type": "A", "value": "fd00::1"},
-        {"name": "x.kornode.internal", "type": "CNAME", "value": "y,z"},
+        {"name": "x.kornode.lan\nlog-queries", "type": "A", "value": "10.0.0.1"},
+        {"name": "x.kornode.lan", "type": "A", "value": "fd00::1"},
+        {"name": "x.kornode.lan", "type": "CNAME", "value": "y,z"},
     ],
 )
 def test_bundle_dns_records_are_strict(data: dict[str, str]) -> None:
@@ -258,7 +258,7 @@ def test_api_requires_auth_and_shares_the_service(world: World) -> None:
     data = world.env.config.model_dump(mode="json")
     data["web"]["admin_password"] = "admin-secret"
     application = create_app(AppConfig.model_validate(data))
-    application.state.fabric_dns = world.dns
+    application.state.interlink_dns = world.dns
     client = TestClient(application, base_url="https://testserver")
     for method in ("GET", "POST", "DELETE"):
         assert client.request(method, "/api/dns/records").status_code == 401
@@ -266,7 +266,7 @@ def test_api_requires_auth_and_shares_the_service(world: World) -> None:
     body = {"name": "monitoring", "type": "A", "value": "10.100.1.20"}
     added = client.post("/api/dns/records", auth=auth, json=body)
     assert added.status_code == 200
-    assert "monitoring.kornode.internal" in {r["fqdn"] for r in added.json()["records"]}
+    assert "monitoring.kornode.lan" in {r["fqdn"] for r in added.json()["records"]}
     refused = client.post("/api/dns/records", auth=auth, json={**body, "extra": 1})
     assert refused.status_code == 422
     deleted = client.request("DELETE", "/api/dns/records", auth=auth, json=body)
@@ -283,14 +283,14 @@ def test_cli_adds_lists_and_deletes(world: World, monkeypatch: pytest.MonkeyPatc
     from kornode.cli import app
 
     world.env.add(3)
-    monkeypatch.setattr("kornode.cli_agents.FabricDnsService", lambda config: world.dns)
+    monkeypatch.setattr("kornode.cli_agents.InterlinkDnsService", lambda config: world.dns)
     runner = CliRunner()
     added = runner.invoke(
         app, ["dns", "record", "add", "cam", "a", "192.168.3.7", "--node", "node3", "--json"]
     )
     assert added.exit_code == 0, added.output
     listed = json.loads(runner.invoke(app, ["dns", "record", "list", "--json"]).output)
-    assert "cam.node3.kornode.internal" in {r["fqdn"] for r in listed["records"]}
+    assert "cam.node3.kornode.lan" in {r["fqdn"] for r in listed["records"]}
     reserved = runner.invoke(app, ["dns", "record", "add", "hub", "A", "10.0.0.1", "--json"])
     assert reserved.exit_code == 2 and json.loads(reserved.output)["error"] == "reserved"
     deleted = runner.invoke(
@@ -311,10 +311,10 @@ def test_unsupervised_hub_has_no_resolver_to_restart(
         return CommandResult(("supervisor-rpc", action, process), 1, "", "no supervisor")
 
     monkeypatch.setattr("kornode.services.server.ServerService.process_action", process_action)
-    service = FabricDnsService(world.env.config, agents=world.agents)
+    service = InterlinkDnsService(world.env.config, agents=world.agents)
     service.add(record(name="web", type="A", value="10.100.1.40"))
     assert actions == ["status"]
-    assert "web.kornode.internal" in world.conf()
+    assert "web.kornode.lan" in world.conf()
 
 
 def test_supervised_restart_failure_is_reported(
@@ -330,7 +330,7 @@ def test_supervised_restart_failure_is_reported(
         "kornode.services.internal_dns.InternalDnsService.ensure_listen_address",
         lambda self: None,
     )
-    service = FabricDnsService(world.env.config, agents=world.agents)
+    service = InterlinkDnsService(world.env.config, agents=world.agents)
     with pytest.raises(ManagementError) as raised:
         service.add(record(name="web", type="A", value="10.100.1.40"))
     assert raised.value.error == "dns_sync_failed"
@@ -342,9 +342,12 @@ def test_bundle_node_addresses_must_be_ipv4() -> None:
     base = {"name": "n", "roles": [], "client_pool": "10.100.3.0/24"}
     with pytest.raises(ValidationError):
         NodeInfo.model_validate(
-            {**base, "fabric_address": "10.99.0.3\nserver=1.1.1.1", "service_address": "10.100.3.1"}
+            {
+                **base, "interlink_address": "10.99.0.3\nserver=1.1.1.1",
+                "service_address": "10.100.3.1",
+            }
         )
     with pytest.raises(ValidationError):
         NodeInfo.model_validate(
-            {**base, "fabric_address": "10.99.0.3", "service_address": "fd00::1"}
+            {**base, "interlink_address": "10.99.0.3", "service_address": "fd00::1"}
         )

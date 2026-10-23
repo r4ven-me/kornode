@@ -10,7 +10,12 @@ from pydantic import BaseModel
 from kornode.api.auth import require_admin
 from kornode.config.defaults import DEFAULT_CONFIG
 from kornode.config.env import combined_environment, env_overrides_from_mapping
-from kornode.config.loader import deep_merge, load_config, resolve_secret_refs
+from kornode.config.loader import (
+    deep_merge,
+    load_config,
+    rename_legacy_sections,
+    resolve_secret_refs,
+)
 from kornode.config.models import AppConfig
 from kornode.services.config import ConfigService
 from kornode.services.files import FileManager
@@ -59,7 +64,7 @@ def validate_current_config(request: Request) -> dict[str, Any]:
 
 @router.post("/validate")
 def validate_config(payload: dict[str, Any]) -> dict[str, Any]:
-    config = AppConfig.model_validate(payload)
+    config = AppConfig.model_validate(rename_legacy_sections(payload, "request"))
     return config.model_dump_safe()
 
 
@@ -208,7 +213,7 @@ def _parse_yaml_mapping(content: str, path: Path) -> dict[str, Any]:
         return {}
     if not isinstance(loaded, dict):
         raise ValueError(f"configuration root must be a mapping: {path}")
-    return loaded
+    return rename_legacy_sections(loaded, str(path))
 
 
 def _load_existing_mapping(path: Path) -> dict[str, Any]:
@@ -219,7 +224,8 @@ def _load_existing_mapping(path: Path) -> dict[str, Any]:
 
 def _validate_yaml_config(data: dict[str, Any], path: Path) -> AppConfig:
     environment = combined_environment(path, environ=None)
-    env_overrides = env_overrides_from_mapping(environment)
+    env_overrides = rename_legacy_sections(env_overrides_from_mapping(environment), "environment")
+    data = rename_legacy_sections(data, str(path))
     explicit_paths = _leaf_paths(env_overrides) | _leaf_paths(data)
     merged = deep_merge(DEFAULT_CONFIG, env_overrides)
     merged = deep_merge(merged, data)

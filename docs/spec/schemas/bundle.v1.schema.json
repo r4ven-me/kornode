@@ -1,13 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kornode.r4ven.me/schemas/bundle.v1.schema.json",
-  "title": "kornode agent bundle v1",
-  "description": "Signed desired state compiled by the hub for one agent. Canonical form: UTF-8 JSON, sorted keys, no insignificant whitespace. Signature is detached (Ed25519 over the exact bytes).",
+  "title": "kornode legacy agent bundle v1 reader",
+  "$comment": "D-85 compatibility input only. Original signed bytes and sealed-value AAD are verified before in-memory normalization. Writers emit v2.",
+  "description": "Legacy signed desired state accepted for compatibility, never emitted by current hubs. Each renamed field accepts either spelling, but not both. Signature is detached Ed25519 over the exact original bytes, including non-canonical whitespace.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format", "node_id", "version", "generated_at", "hubs", "node", "fabric", "tunnels", "policy"],
+  "required": ["format", "node_id", "version", "generated_at", "hubs", "node", "tunnels", "policy"],
+  "oneOf": [{ "required": ["fabric"] }, { "required": ["interlink"] }],
   "properties": {
     "format": { "const": "kornode.bundle/v1" },
+    "fabric": { "$ref": "#/properties/interlink" },
     "node_id": { "type": "integer", "minimum": 2, "maximum": 254 },
     "version": { "type": "integer", "minimum": 1 },
     "generated_at": { "type": "string", "format": "date-time" },
@@ -23,16 +26,23 @@
           "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
           "pin": { "type": "string", "pattern": "^pin-sha256:" },
           "control_url": { "type": "string", "pattern": "^https://" },
-          "server_name": { "type": "string", "description": "TLS SNI of the fabric vhost (S-07, D-71); the agent dials `host` but presents this name" }
+          "server_name": { "type": "string", "description": "TLS SNI of the interlink vhost (S-07, D-71); the agent dials `host` but presents this name" }
         }
       }
     },
     "node": {
       "type": "object", "additionalProperties": false,
-      "required": ["name", "roles", "fabric_address", "service_address", "client_pool"],
+      "required": ["name", "roles", "service_address", "client_pool"],
+      "oneOf": [{ "required": ["fabric_address"] }, { "required": ["interlink_address"] }],
       "properties": {
         "name": { "type": "string" },
-        "roles": { "type": "array", "items": { "enum": ["access", "gateway"] }, "uniqueItems": true },
+        "roles": {
+          "type": "array", "items": { "enum": ["access", "gateway", "exit"] },
+          "uniqueItems": true,
+          "not": { "allOf": [{ "contains": { "const": "exit" } }, { "contains": { "const": "gateway" } }] },
+          "description": "Readers accept the D-84 alias exit; writers emit gateway. Aliases cannot duplicate a role."
+        },
+        "interlink_address": { "type": "string" },
         "fabric_address": { "type": "string" },
         "service_address": { "type": "string" },
         "client_pool": { "type": "string" },
@@ -40,7 +50,7 @@
         "uplink_hint": { "type": "string", "description": "interface name for exit 'local', or 'auto'" }
       }
     },
-    "fabric": {
+    "interlink": {
       "type": "object", "additionalProperties": false,
       "required": ["cidr", "domain", "prefixes"],
       "properties": {
@@ -48,14 +58,14 @@
         "domain": { "type": "string" },
         "prefixes": {
           "type": "array",
-          "description": "Every fabric prefix of OTHER nodes (routed via the fabric exit)",
+          "description": "Every interlink prefix of OTHER nodes (routed via the interlink exit)",
           "items": {
             "type": "object", "additionalProperties": false,
             "required": ["prefix", "node_id"],
             "properties": {
               "prefix": { "type": "string" },
               "node_id": { "type": "integer" },
-              "kind": { "enum": ["pool", "source", "lan", "fabric"] }
+              "kind": { "enum": ["pool", "source", "lan", "interlink", "fabric"] }
             }
           }
         }
@@ -63,9 +73,10 @@
     },
     "tunnels": {
       "type": "object", "additionalProperties": false,
-      "required": ["fabric"],
+      "oneOf": [{ "required": ["fabric"] }, { "required": ["interlink"] }],
       "properties": {
-        "fabric": { "$ref": "#/$defs/fabricTunnel" },
+        "interlink": { "$ref": "#/$defs/interlinkTunnel" },
+        "fabric": { "$ref": "#/$defs/interlinkTunnel" },
         "upstreams": { "type": "array", "items": { "$ref": "#/$defs/upstreamTunnel" }, "default": [] }
       }
     },
@@ -146,7 +157,7 @@
         "ct": { "type": "string" }
       }
     },
-    "fabricTunnel": {
+    "interlinkTunnel": {
       "type": "object", "additionalProperties": false,
       "required": ["interface", "transport"],
       "properties": {

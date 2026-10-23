@@ -1,11 +1,12 @@
-"""Pydantic mirror of docs/spec/schemas/bundle.v1.schema.json."""
+"""Bundle reader (spec schemas/bundle.runtime.schema.json); writers emit v2."""
 
 from __future__ import annotations
 
+import copy
 import ipaddress
 import re
 from datetime import datetime
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -21,8 +22,38 @@ from pydantic import (
 from kornode.bundle.sealing import SEAL_ALG
 from kornode.net.model import NAME_PATTERN, EgressPolicy
 
-BUNDLE_FORMAT = "kornode.bundle/v1"
+BUNDLE_FORMAT = "kornode.bundle/v2"
+# v1 is what an agent may still have cached from before D-85: the same body with `fabric`
+# where v2 says `interlink`. It is read (an agent boots from its cache), never written.
+LEGACY_BUNDLE_FORMAT = "kornode.bundle/v1"
+MIN_AGENT_VERSION = "2.1.0"
 VERSION_RE = r"^[0-9]+\.[0-9]+\.[0-9]+$"
+
+
+def _rename_field(data: dict[str, Any], old: str, new: str) -> None:
+    if old not in data:
+        return
+    if new in data:
+        raise ValueError(f"both `{old}` and `{new}` are set; keep only `{new}`")
+    data[new] = data.pop(old)
+
+
+def upgrade_v1(data: dict[str, Any]) -> dict[str, Any]:
+    body = copy.deepcopy(data)
+    body["format"] = BUNDLE_FORMAT
+    _rename_field(body, "fabric", "interlink")
+    node = body.get("node")
+    if isinstance(node, dict):
+        _rename_field(node, "fabric_address", "interlink_address")
+    tunnels = body.get("tunnels")
+    if isinstance(tunnels, dict):
+        _rename_field(tunnels, "fabric", "interlink")
+    interlink = body.get("interlink")
+    if isinstance(interlink, dict) and isinstance(interlink.get("prefixes"), list | tuple):
+        for prefix in interlink["prefixes"]:
+            if isinstance(prefix, dict) and prefix.get("kind") == "fabric":
+                prefix["kind"] = "interlink"
+    return body
 
 
 class _Model(BaseModel):
@@ -50,14 +81,14 @@ class Hub(_Model):
 class NodeInfo(_Model):
     name: StrictStr
     roles: tuple[Literal["access", "gateway"], ...]
-    fabric_address: StrictStr
+    interlink_address: StrictStr
     service_address: StrictStr
     client_pool: StrictStr
     source_range: StrictStr | None = None
     uplink_hint: StrictStr | None = None
 
     # Both end up in the node resolver's configuration (D-66).
-    @field_validator("fabric_address", "service_address")
+    @field_validator("interlink_address", "service_address")
     @classmethod
     def _ipv4(cls, value: str) -> str:
         return str(ipaddress.IPv4Address(value))
@@ -78,19 +109,19 @@ class NodeInfo(_Model):
         return value
 
 
-class FabricPrefix(_Model):
+class InterlinkPrefix(_Model):
     prefix: StrictStr
     node_id: StrictInt
-    kind: Literal["pool", "source", "lan", "fabric"] | None = None
+    kind: Literal["pool", "source", "lan", "interlink"] | None = None
 
 
-class FabricInfo(_Model):
+class InterlinkInfo(_Model):
     cidr: StrictStr
     domain: StrictStr
-    prefixes: tuple[FabricPrefix, ...]
+    prefixes: tuple[InterlinkPrefix, ...]
 
 
-class FabricTunnel(_Model):
+class InterlinkTunnel(_Model):
     interface: StrictStr = "oc-hub0"
     transport: Literal["tcp", "auto"]
     dpd: Annotated[StrictInt, Field(ge=5)] | None = None
@@ -118,7 +149,7 @@ class UpstreamTunnel(_Model):
 
 
 class Tunnels(_Model):
-    fabric: FabricTunnel
+    interlink: InterlinkTunnel
     upstreams: tuple[UpstreamTunnel, ...] = ()
 
 
@@ -218,7 +249,15 @@ class Settings(_Model):
 
 
 class Bundle(_Model):
-    format: Literal["kornode.bundle/v1"]
+    format: Literal["kornode.bundle/v2"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_v1(cls, data: object) -> object:
+        if isinstance(data, dict) and data.get("format") == LEGACY_BUNDLE_FORMAT:
+            return upgrade_v1(data)
+        return data
+
     node_id: Annotated[StrictInt, Field(ge=2, le=254)]
     version: Annotated[StrictInt, Field(ge=1)]
     generated_at: StrictStr
@@ -233,7 +272,7 @@ class Bundle(_Model):
         return value
 
     node: NodeInfo
-    fabric: FabricInfo
+    interlink: InterlinkInfo
     tunnels: Tunnels
     policy: EgressPolicy
     dns: Dns | None = None

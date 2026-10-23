@@ -136,7 +136,7 @@ def _session_rpf(facts: NodeFacts) -> list[str]:
 
 def _access_input(facts: NodeFacts) -> list[str]:
     """VPN clients of an access node reach the node's own services only for DNS and
-    ping (D-67); forwarded traffic (LAN, fabric, exits) is governed by the egress
+    ping (D-67); forwarded traffic (LAN, interlink, exits) is governed by the egress
     policy as usual. Anything else addressed to the host is dropped."""
     lines: list[str] = []
     for glob in facts.access_ifaces:
@@ -160,7 +160,7 @@ def render_script(
     policy: EgressPolicy,
 ) -> str:
     lines: list[str] = ["table inet kornode {"]
-    lines += _set_decl("fabric_ifaces", "ifname")
+    lines += _set_decl("interlink_ifaces", "ifname")
     if facts.transit_exits:
         lines += _set_decl("transit_ifaces", "ifname")
     for name, kind in (
@@ -204,14 +204,14 @@ def render_script(
         "    type filter hook input priority mangle; policy accept;",
     ]
     # Connections arriving through a tunnel are answered through it too. One mark per
-    # interface (the first exit wins: on an agent `fabric` precedes `node:<n>`, which
+    # interface (the first exit wins: on an agent `interlink` precedes `node:<n>`, which
     # shares the hub tunnel); a hub transit exit's session device changes with every
     # connect and its main-table routes already answer the node.
     answered: set[str] = set()
     for exit_ in exits:
         if exit_.kind == "local" or not exit_.interface or exit_.interface in answered:
             continue
-        if exit_.kind == "node" and facts.fabric_guard:
+        if exit_.kind == "node" and facts.interlink_guard:
             continue
         answered.add(exit_.interface)
         lines.append(

@@ -5,7 +5,7 @@ import {
   applyNetPlan,
   login,
   saveAuthMethodsSettings,
-  saveFabricSettings,
+  saveInterlinkSettings,
   saveInternalDnsSettings,
   saveRoutingSettings,
   saveUpstreamProfile,
@@ -131,8 +131,8 @@ describe("OTP delivery settings API", () => {
   });
 });
 
-describe("saveFabricSettings", () => {
-  it("sends the structured fabric payload", async () => {
+describe("saveInterlinkSettings", () => {
+  it("sends the structured interlink payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "saved" }), {
         status: 200,
@@ -141,18 +141,18 @@ describe("saveFabricSettings", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await saveFabricSettings("session", {
+    await saveInterlinkSettings("session", {
       node_id: 3,
       cidr: "10.99.0.0/24",
       client_pool: "10.100.{id}.0/24",
       source_pool: "10.8.{id}.0/24",
       enroll_pool: "10.99.255.240/28",
-      domain: "kornode.internal",
+      domain: "kornode.lan",
       reserved: ["10.200.0.0/16"]
     });
 
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(path).toBe("/api/fabric");
+    expect(path).toBe("/api/interlink");
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(String(init.body))).toEqual({
       node_id: 3,
@@ -160,7 +160,7 @@ describe("saveFabricSettings", () => {
       client_pool: "10.100.{id}.0/24",
       source_pool: "10.8.{id}.0/24",
       enroll_pool: "10.99.255.240/28",
-      domain: "kornode.internal",
+      domain: "kornode.lan",
       reserved: ["10.200.0.0/16"]
     });
   });

@@ -80,15 +80,15 @@ def _classify_source(
         for prefix in prefixes
     )
     if _within(address, others):
-        return "fabric", address
+        return "interlink", address
     return "host", address
 
 
 def _rule_dest(rule: Rule, index: int) -> str | None:
     if rule.to == "any":
         return None
-    if rule.to == "fabric":
-        return "fabric"
+    if rule.to == "interlink":
+        return "interlink"
     if isinstance(rule.to, SetRef):
         return rule.to.set
     if isinstance(rule.to, NodeRef):

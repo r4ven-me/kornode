@@ -67,7 +67,7 @@ def test_unix_protocol_permissions_limits_and_shutdown(tmp_path: Path) -> None:
         assert path.stat().st_mode & 0o777 == 0o600
         assert await asyncio.to_thread(request, tmp_path, Request(op="status")) == {"running": True}
         with pytest.raises(LocalError) as exc:
-            await asyncio.to_thread(request, tmp_path, Request(op="reconnect", tunnel="fabric"))
+            await asyncio.to_thread(request, tmp_path, Request(op="reconnect", tunnel="interlink"))
         assert exc.value.exit_code == 3
         for payload in (b"{}\n", b'{"op":"shell"}\n', b"x" * (MAX_REQUEST + 1) + b"\n"):
             reader, writer = await asyncio.open_unix_connection(str(path))

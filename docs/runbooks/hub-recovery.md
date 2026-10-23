@@ -10,7 +10,7 @@
 `BackupService` is shared by `korctl hub backup|restore`, authenticated admin
 `POST /api/hub/backup|restore`, and **Config → Backup / Restore**. The CLI works
 with `web.enabled: false`; restore does not require the control API or ocserv.
-Backup requires an initialized fabric hub with all three trust anchors present.
+Backup requires an initialized interlink hub with all three trust anchors present.
 No new `AppConfig` fields, automatic retention policy or scheduler are introduced.
 The existing nightly registry snapshots remain separate and unencrypted/DB-only.
 

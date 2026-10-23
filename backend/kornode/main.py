@@ -44,7 +44,7 @@ def initialize_runtime(config_path: Path | None = None) -> None:
     certs = CertificateService(config, files=files)
     if not config.cert_path("ca.key").exists() or not config.cert_path("ca.crt").exists():
         certs.init_ca()
-    certs.ensure_fabric_certificate()
+    certs.ensure_interlink_certificate()
     # ocserv refuses to start with `crl =` pointing at a missing file; the CA only exists now.
     certs.ensure_crl()
 

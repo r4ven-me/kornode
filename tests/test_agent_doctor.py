@@ -15,13 +15,13 @@ def test_doctor_reports_real_mismatches_and_missing_source() -> None:
     policy = EgressPolicy.model_validate(
         {
             "sources": [{"name": "lan", "interface": "br-lan", "cidr": "10.8.3.0/24"}],
-            "egress": [{"from": ["host"], "to": "any", "via": "fabric"}],
+            "egress": [{"from": ["host"], "to": "any", "via": "interlink"}],
         }
     )
     facts = NodeFacts(
         node_id=3,
         client_pool=None,
-        tunnels={"fabric": TunnelFact(interface="oc-hub0", up=False)},
+        tunnels={"interlink": TunnelFact(interface="oc-hub0", up=False)},
         sources={"lan": SourceFact(present=False)},
     )
     compiled = compile_policy(policy, facts)
@@ -40,10 +40,10 @@ def test_doctor_reports_real_mismatches_and_missing_source() -> None:
 
 def test_matching_kernel_is_not_reported_as_broken() -> None:
     policy = EgressPolicy.model_validate(
-        {"egress": [{"from": ["host"], "to": "any", "via": "fabric"}]}
+        {"egress": [{"from": ["host"], "to": "any", "via": "interlink"}]}
     )
     facts = NodeFacts(
-        node_id=3, client_pool=None, tunnels={"fabric": TunnelFact(interface="oc-hub0", up=True)}
+        node_id=3, client_pool=None, tunnels={"interlink": TunnelFact(interface="oc-hub0", up=True)}
     )
     c = compile_policy(policy, facts)
     d = c.desired
@@ -113,13 +113,13 @@ def test_per_session_routes_of_access_clients_are_not_overlaps() -> None:
     """P4-04: ocserv puts a /32 per connected client on vpns*; they sit inside
     the node's own client pool and are expected."""
     policy = EgressPolicy.model_validate(
-        {"egress": [{"from": ["host"], "to": "any", "via": "fabric"}]}
+        {"egress": [{"from": ["host"], "to": "any", "via": "interlink"}]}
     )
     pool = ipaddress.IPv4Network("10.100.3.0/24")
     facts = NodeFacts(
         node_id=3,
         client_pool=pool,
-        tunnels={"fabric": TunnelFact(interface="oc-hub0", up=True)},
+        tunnels={"interlink": TunnelFact(interface="oc-hub0", up=True)},
         local_networks=(
             ipaddress.IPv4Network("10.100.3.15/32"),
             ipaddress.IPv4Network("10.100.3.0/24"),
@@ -131,7 +131,7 @@ def test_per_session_routes_of_access_clients_are_not_overlaps() -> None:
     foreign = NodeFacts(
         node_id=3,
         client_pool=pool,
-        tunnels={"fabric": TunnelFact(interface="oc-hub0", up=True)},
+        tunnels={"interlink": TunnelFact(interface="oc-hub0", up=True)},
         local_networks=(ipaddress.IPv4Network("10.100.3.0/25"),),
     )
     codes = {
@@ -213,13 +213,13 @@ def test_an_absent_source_interface_is_one_warning() -> None:
     policy = EgressPolicy.model_validate(
         {
             "sources": [{"name": "lan", "interface": "br-lan", "cidr": "10.8.3.0/24"}],
-            "egress": [{"from": ["host"], "to": "any", "via": "fabric"}],
+            "egress": [{"from": ["host"], "to": "any", "via": "interlink"}],
         }
     )
     facts = NodeFacts(
         node_id=3,
         client_pool=None,
-        tunnels={"fabric": TunnelFact(interface="oc-hub0", up=True)},
+        tunnels={"interlink": TunnelFact(interface="oc-hub0", up=True)},
         sources={"lan": SourceFact(present=False)},
     )
     findings = inspect_state(compile_policy(policy, facts), policy, facts, ActualState(), {})

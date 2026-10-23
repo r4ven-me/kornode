@@ -5,7 +5,7 @@ writes its files from the active bundle and starts, restarts or stops it. A
 `Converger` applies the desired state off the bundle activation path and
 retries failures, so a slow or broken supervisor never delays a switch and a
 failure is never final. Failures are surfaced as doctor findings, never as a
-rollback: these programs serve clients, they are not the fabric.
+rollback: these programs serve clients, they are not the interlink.
 """
 
 from __future__ import annotations

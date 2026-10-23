@@ -17,7 +17,7 @@ from kornode.config.models import AppConfig
 from kornode.services.agent_models import AgentCreate, AgentPatch, ManagementError, PrefixInput
 from kornode.services.agents import AgentService, parse
 from kornode.services.control_management import ControlManagement
-from kornode.services.fabric_dns import DnsRecordInput, FabricDnsService
+from kornode.services.interlink_dns import DnsRecordInput, InterlinkDnsService
 
 Json = Annotated[bool, typer.Option("--json", help="Machine-readable output")]
 
@@ -459,11 +459,11 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
 
 
 def register_dns(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
-    dns = typer.Typer(help="Fabric DNS zone (fabric.domain)")
+    dns = typer.Typer(help="Interlink DNS zone (interlink.domain)")
     record = typer.Typer(help="Zone records; --node scopes a name to node<id>.<domain>")
 
-    def service() -> FabricDnsService:
-        return FabricDnsService(config())
+    def service() -> InterlinkDnsService:
+        return InterlinkDnsService(config())
 
     def entry(name: str, type_: str, value: str, node: str | None) -> DnsRecordInput:
         return parse(

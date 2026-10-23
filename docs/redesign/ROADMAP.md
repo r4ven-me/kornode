@@ -1,5 +1,24 @@
 # Roadmap
 
+## Current working-tree status — 2026-10-23
+
+D-85 implementation and Nodes consolidation are complete locally (not committed or
+published). Legacy config/env/cache readers and schema tests are included; signed
+v1 secrets retain their original AAD. NL-05 abrupt upstream loss now passes twice
+with ICMP rejection, no leakage and automatic recovery (D-87).
+
+Validation: backend Ruff/strict mypy clean; **1334 passed / 104 opt-in skipped**;
+render/parity passed; frontend **48 passed**, build passed, Playwright **44 passed**.
+Netlab: **83 unique passed** across bounded runs, not one uninterrupted green run.
+
+Final acceptance is **not complete**: the new continuous access-client E2E-06
+fails even on the distinct compatible post-D85 baseline `15b87a6` (`upgrade
+access-client forwarding did not recover automatically`). The last full VM run
+was stopped at the owner's request; owned cleanup completed. GitHub publication
+and workflow acceptance remain pending. See `tests/e2e/ACCEPTANCE-2026-10-23.md`.
+Historical phase snapshots below are retained, not current acceptance claims.
+
+
 Six phases. Each phase ships as its own release (`v2.0.0-pN` pre-releases, then
 `v2.0.0`). Task IDs (`P<phase>-<nn>`) are referenced in PRs and commits.
 "Done when" items are acceptance criteria and must be covered by automated

@@ -26,7 +26,7 @@ Rootless Docker and non-host networking are unsupported for hub and agents.
 
 ## Observability
 
-- Hub `/metrics` (Prometheus, admin-auth or bound to fabric address):
+- Hub `/metrics` (Prometheus, admin-auth or bound to interlink address):
   agents online/offline, applied vs desired lag, rollbacks, reconciler drift
   events, tunnel up/down, bundle compile duration.
 - Agents expose the same reconciler/tunnel metrics only via reports (no

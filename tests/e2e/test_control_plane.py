@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import time
 
 import pytest
@@ -18,7 +19,7 @@ def test_nl_10_running_reconciler_repairs_deleted_route_within_2_seconds(cluster
 
 
 @pytest.mark.e2e_case("rollback")
-def test_nl_11_fabric_cutting_signed_bundle_rolls_back_and_reports(cluster: Cluster) -> None:
+def test_nl_11_interlink_cutting_signed_bundle_rolls_back_and_reports(cluster: Cluster) -> None:
     previous = cluster.status("agent-a")["applied_version"]
     started = time.monotonic()
     version = cluster.call("hub", "inject_bundle")["version"]
@@ -36,7 +37,7 @@ def test_nl_11_fabric_cutting_signed_bundle_rolls_back_and_reports(cluster: Clus
     wait_for(
         recovered,
         max(0.01, 70 - (time.monotonic() - started)),
-        "fabric-cutting bundle did not roll back within 70 seconds",
+        "interlink-cutting bundle did not roll back within 70 seconds",
     )
     assert time.monotonic() - started <= 70
     wait_for(
@@ -85,7 +86,7 @@ def test_e2e_03_60_second_container_uplink_blackhole_recovers(cluster: Cluster) 
     version = cluster.status("agent-b")["applied_version"]
     started = time.monotonic()
     assert cluster.call("agent-b", "fault")["seconds"] == 60
-    wait_for(lambda: cluster.ping("agent-b") == 0, 20, "blackhole did not interrupt fabric")
+    wait_for(lambda: cluster.ping("agent-b") == 0, 20, "blackhole did not interrupt interlink")
     # The worker arms an independent 60-second watchdog before nft insertion.
     time.sleep(max(0, 61 - (time.monotonic() - started)))
     wait_for(lambda: cluster.ping("agent-b") == 204, 120, "agent failed to recover after blackhole")
@@ -93,7 +94,7 @@ def test_e2e_03_60_second_container_uplink_blackhole_recovers(cluster: Cluster) 
 
 
 @pytest.mark.e2e_case("revoke")
-def test_e2e_04_revoke_cuts_fabric_and_mtls_api_returns_403(cluster: Cluster) -> None:
+def test_e2e_04_revoke_cuts_interlink_and_mtls_api_returns_403(cluster: Cluster) -> None:
     # Test-only TCP relay changes reachability, not TLS identity/authentication.
     # It lets an already-disconnected cert holder prove the actual HTTP 403.
     assert cluster.ping("agent-b", relay=True) == 204
@@ -103,7 +104,7 @@ def test_e2e_04_revoke_cuts_fabric_and_mtls_api_returns_403(cluster: Cluster) ->
         30,
         "revoked agent was not denied by the mTLS control API",
     )
-    wait_for(lambda: cluster.ping("agent-b") == 0, 30, "revoked fabric session remained usable")
+    wait_for(lambda: cluster.ping("agent-b") == 0, 30, "revoked interlink session remained usable")
 
 
 @pytest.mark.e2e_case("restore")
@@ -138,12 +139,46 @@ def test_e2e_05_rotating_hub_wipe_restore_preserves_agents(cluster: Cluster) -> 
 
 
 @pytest.mark.e2e_case("upgrade")
-def test_e2e_06_upgrade_under_fabric_traffic_gap_at_most_30_seconds(cluster: Cluster) -> None:
+def test_e2e_06_upgrade_under_interlink_and_client_traffic_gap_at_most_30_seconds(
+    cluster: Cluster,
+) -> None:
+    """One deployment: previous images -> current, same access client reconnects itself.
+
+    The external peer verifies the exit address; the observer also requires the
+    client's route to use its VPN device, so direct Docker fallback cannot pass.
+    """
     identities = {role: cluster.call(role, "identity") for role in ("agent-a", "agent-b")}
-    gap = cluster.upgrade()
-    assert gap <= 30, "upgrade interrupted real fabric mTLS probes for more than 30 seconds"
-    for role in identities:
-        assert cluster.call(role, "identity") == identities[role]
+    agent_a = cluster.fleet.inventory.host("agent-a").address
+    ext = cluster.fleet.inventory.host("ext").address
+    password = secrets.token_hex(12)
+    before = cluster.status("agent-a")["applied_version"]
+    access = cluster.call(
+        "hub", "access_setup", name="agent-a", host=agent_a, port=8443,
+        user="alice", password=password,
+    )
+    cluster.call("hub", "access_policy")
+    wait_for(
+        lambda: cluster.status("agent-a")["applied_version"] > before,
+        60,
+        "previous agent did not apply the access-client policy",
+    )
+
+    def login() -> bool:
+        cluster.call(
+            "agent-b", "access_client", host=agent_a, port=8443,
+            pin=access["certificate"]["pin"], user="alice", password=password,
+            routes=[f"{ext}/32"],
+        )
+        return True
+
+    try:
+        wait_for(login, 90, "previous agent access-client login failed")
+        gap = cluster.upgrade()
+        assert gap <= 30, "upgrade interrupted interlink or client forwarding for more than 30 s"
+        for role in identities:
+            assert cluster.call(role, "identity") == identities[role]
+    finally:
+        cluster.call("agent-b", "access_client_stop")
 
 
 @pytest.mark.e2e_case("cache")

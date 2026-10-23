@@ -83,8 +83,8 @@ class ControlClient:
         self._http = self._build(None)
 
     def _build(self, address: str | None) -> httpx.AsyncClient:
-        # Traffic to the hub is marked into the fabric exit, which does not
-        # NAT: it must leave with the agent's fabric address as its source.
+        # Traffic to the hub is marked into the interlink exit, which does not
+        # NAT: it must leave with the agent's interlink address as its source.
         transport = httpx.AsyncHTTPTransport(verify=self._ssl, local_address=address)
         return httpx.AsyncClient(base_url=self._base, transport=transport, timeout=self._timeout)
 

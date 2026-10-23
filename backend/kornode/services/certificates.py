@@ -196,7 +196,7 @@ class CertificateService:
         ]
 
     def ensure_control_certificate(self, address: str, *, dry_run: bool = False) -> bool:
-        """Server certificate of the control API listener, IP SAN = the hub fabric
+        """Server certificate of the control API listener, IP SAN = the hub interlink
         address (agents pin the kornode CA and verify this address). Renewed
         when it has under 30 days left. True when a certificate was issued."""
         crt = self.config.cert_path("control.crt")
@@ -251,21 +251,27 @@ class CertificateService:
             template.unlink(missing_ok=True)
         return True
 
-    def ensure_fabric_certificate(self, *, dry_run: bool = False) -> bool:
-        """Server certificate of the fabric virtual host (S-07, D-71), signed by the hub
+    def ensure_interlink_certificate(self, *, dry_run: bool = False) -> bool:
+        """Server certificate of the interlink virtual host (S-07, D-71), signed by the hub
         CA with the vhost name as SAN. Agents pin its public key, so an existing key is
         kept when the certificate is renewed (under 30 days left). True when issued."""
-        crt = self.config.cert_path("fabric.crt")
-        key = self.config.cert_path("fabric.key")
-        name = self.config.fabric.server_name
-        if crt.exists() and key.exists() and not dry_run:
+        crt = self.config.cert_path("interlink.crt")
+        key = self.config.cert_path("interlink.key")
+        name = self.config.interlink.server_name
+        legacy_key = self.config.cert_path("fabric.key")
+        migrated_key = not dry_run and not key.exists() and legacy_key.exists()
+        if migrated_key:
+            # Keep the pinned identity and leave the legacy files available for
+            # recovery. The renamed certificate is reissued for the new SNI below.
+            self.files.atomic_write_bytes(key, legacy_key.read_bytes(), mode=0o600)
+        if crt.exists() and key.exists() and not dry_run and not migrated_key:
             parsed = x509.load_pem_x509_certificate(crt.read_bytes())
             left = parsed.not_valid_after_utc - datetime.now(UTC)
             if left > timedelta(days=30) and name in _certificate_dns_names(parsed):
                 return False
         self.files.ensure_dir(self.cert_dir, mode=0o700)
         template = self._write_template(
-            self._template_path("fabric.tmpl"),
+            self._template_path("interlink.tmpl"),
             "\n".join(
                 [
                     f"cn = {name}",
@@ -279,7 +285,7 @@ class CertificateService:
             ),
         )
         try:
-            if not key.exists():
+            if not key.exists() and not legacy_key.exists():
                 self.runner.run(
                     ["certtool", "--generate-privkey", "--ecc", "--outfile", str(key)],
                     timeout=60,

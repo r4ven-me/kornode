@@ -13,8 +13,8 @@ import yaml
 
 from kornode.cli_agents import register as register_agent_commands
 from kornode.cli_egress import register as register_egress_commands
-from kornode.cli_fabric import register as register_fabric_commands
 from kornode.cli_hub import register as register_hub_commands
+from kornode.cli_interlink import register as register_interlink_commands
 from kornode.config.defaults import DEFAULT_CONFIG
 from kornode.config.env import combined_environment, env_overrides_from_mapping
 from kornode.config.loader import (
@@ -22,6 +22,7 @@ from kornode.config.loader import (
     deep_merge,
     load_config,
     load_yaml_file,
+    rename_legacy_sections,
     resolve_secret_refs,
 )
 from kornode.config.models import AppConfig, GroupPolicyConfig, OidcProviderConfig
@@ -160,7 +161,8 @@ def save_config_patch(patch: dict[str, Any], *, write_rendered: bool = True) -> 
 
 def _validate_config_data(data: dict[str, Any], path: Path) -> AppConfig:
     environment = combined_environment(path, STATE.get("env_file"), None)
-    env_overrides = env_overrides_from_mapping(environment)
+    env_overrides = rename_legacy_sections(env_overrides_from_mapping(environment), "environment")
+    data = rename_legacy_sections(data, str(path))
     merged = deep_merge(DEFAULT_CONFIG, env_overrides)
     merged = deep_merge(merged, data)
     merged = resolve_secret_refs(merged, environment)
@@ -1269,7 +1271,7 @@ app.add_typer(registry_app, name="registry")
 register_agent_commands(app, get_config)
 register_hub_commands(app, get_config)
 register_egress_commands(app, get_config, lambda: STATE.get("config_path"))
-register_fabric_commands(app, get_config, lambda: STATE.get("config_path"))
+register_interlink_commands(app, get_config, lambda: STATE.get("config_path"))
 
 
 if __name__ == "__main__":

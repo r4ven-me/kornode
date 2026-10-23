@@ -54,7 +54,7 @@ from kornode.services.audit import AuditService
 from kornode.services.bundle import BundleService
 from kornode.services.command import CommandRunner
 from kornode.services.enrollment import EnrollmentError, EnrollmentService
-from kornode.services.fabric_groups import FabricGroupsService
+from kornode.services.interlink_groups import InterlinkGroupsService
 from kornode.services.sessions import SessionService
 from kornode.tunnels.pin import certificate_pin, pem_to_der
 
@@ -167,10 +167,10 @@ class AgentService:
 
     def _sync_hub(self) -> None:
         """ocserv group/user files, then the hub zone (`node<N>` names, D-66)."""
-        from kornode.services.fabric_dns import FabricDnsService
+        from kornode.services.interlink_dns import InterlinkDnsService
 
-        FabricGroupsService(self.config, reload_ocserv=self._reload_ocserv).sync()
-        FabricDnsService(self.config, agents=self).sync()
+        InterlinkGroupsService(self.config, reload_ocserv=self._reload_ocserv).sync()
+        InterlinkDnsService(self.config, agents=self).sync()
 
     def _synced(self) -> None:
         try:
@@ -272,10 +272,10 @@ class AgentService:
             return {"agent": self.show(node.name), "token": token}
 
     def addresses(self, node_id: int) -> Any:
-        f = self.config.fabric
+        f = self.config.interlink
         return derive_addresses(
             node_id,
-            fabric_cidr=f.cidr,
+            interlink_cidr=f.cidr,
             client_pool=f.client_pool,
             source_pool=f.source_pool,
             domain=f.domain,
@@ -801,7 +801,7 @@ class AgentService:
 
     def _validate(self, r: Registry, *, changed: int) -> None:
         # Only the prefixes of the node being mutated are "adding": a conflict
-        # elsewhere in the fabric must not block unrelated mutations.
+        # elsewhere in the interlink must not block unrelated mutations.
         owned: list[OwnedPrefix] = []
         local: list[LocalNetwork] = []
         for node in r.list_nodes():
@@ -858,7 +858,7 @@ class AgentService:
                 raise ManagementError(
                     409, "interface_conflict", "sources and tunnels must have distinct interfaces"
                 )
-            tunnels = {"fabric": TunnelFact("oc-hub0", False)}
+            tunnels = {"interlink": TunnelFact("oc-hub0", False)}
             tunnels.update(gateway_tunnels(policy, "oc-hub0", False))
             tunnels.update(
                 {
@@ -883,10 +883,10 @@ class AgentService:
                 ),
             )
         self._check_gateway_role_kept(r, changed)
-        f = self.config.fabric
+        f = self.config.interlink
         conflicts = check_overlaps(
             owned,
-            fabric_cidr=f.cidr,
+            interlink_cidr=f.cidr,
             reserved=f.reserved,
             enroll_pool=f.enroll_pool,
             local_networks=local,
@@ -926,7 +926,7 @@ class AgentService:
                     409,
                     "runtime_unsupported",
                     "leaving through another node supports `to: any`, a set or an inline "
-                    "destination, not `fabric` or a node",
+                    "destination, not `interlink` or a node",
                 )
             if "host" in rule.from_:
                 raise ManagementError(
@@ -1026,7 +1026,7 @@ def validate_command(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
             ):
                 raise ValueError()
         elif kind == "reconnect" and args.get("tunnel") is not None:
-            if not re.fullmatch(r"fabric|upstream:[a-z][a-z0-9_-]{0,30}", args["tunnel"]):
+            if not re.fullmatch(r"interlink|upstream:[a-z][a-z0-9_-]{0,30}", args["tunnel"]):
                 raise ValueError()
         elif kind == "rollback":
             if type(args.get("to_version")) is not int or not 1 <= args["to_version"] <= 2**31 - 1:

@@ -6,7 +6,7 @@
 backend/kornode/net/
   __init__.py
   model.py        # EgressPolicy, Source, DestSet, Rule (pydantic, shared with bundle schema)
-  addressing.py   # derive addresses from node id + fabric config; overlap validator
+  addressing.py   # derive addresses from node id + interlink config; overlap validator
   state.py        # DesiredState: Sysctl, IpRule, Route, RouteTable, NftRuleset, NftElements (frozen dataclasses)
   compile.py      # (EgressPolicy, NodeFacts) -> DesiredState ; dead-rule analysis
   nftgen.py       # DesiredState.nft -> nft script text (Jinja-free, deterministic ordering)

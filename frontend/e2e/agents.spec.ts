@@ -5,13 +5,18 @@ const agent = { id: 2, name: "branch-with-a-long-name", description: "Branch off
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   for (const theme of ["light", "dark"]) {
-    test(`Agents ${viewport.width}px ${theme}: controls, overflow, focus and contrast`, async ({ page }, info) => {
+    test(`Nodes agent detail ${viewport.width}px ${theme}: controls, overflow, focus and contrast`, async ({ page }, info) => {
       const pageErrors: string[] = [];
       page.on("pageerror", error => pageErrors.push(error.message));
       await page.setViewportSize(viewport);
       await page.addInitScript(value => localStorage.setItem("kornode.theme", value), theme);
       await mockApi(page);
-      await page.route("**/api/control", route => route.fulfill({ json: { enabled: true, fabric_enabled: true, agents: 1, active: 1, signing_key_id: "public-key-id", rotation: null } }));
+      await page.route("**/api/control", route => route.fulfill({ json: { enabled: true, interlink_enabled: true, agents: 1, active: 1, signing_key_id: "public-key-id", rotation: null } }));
+      await page.route("**/api/interlink", route => route.fulfill({ json: {
+        interlink: { cidr: "10.99.0.0/24" },
+        hub: { interlink_address: "10.99.0.1", server_name: "interlink.kornode.lan", prefixes: [] },
+        nodes: [{ ...agent, interlink_address: "10.99.0.2", prefixes: [{ prefix: "10.100.2.0/24", kind: "pool", export: true }] }], sources: []
+      } }));
       await page.route("**/api/agents**", route => {
         const path = new URL(route.request().url()).pathname;
         const base = "/api/agents/" + agent.name;
@@ -27,7 +32,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
       await signIn(page);
       if (viewport.width < 760) await page.getByRole("button", { name: "Menu", exact: true }).click();
-      await page.getByRole("button", { name: "Agents", exact: true }).click();
+      await page.getByRole("button", { name: "Nodes", exact: true }).click();
       await page.getByRole("button", { name: new RegExp(agent.name + " · node 2") }).click();
       await page.getByLabel("Agent section").selectOption("upstreams");
       await expect(page.getByRole("heading", { name: "External upstreams" })).toBeVisible();

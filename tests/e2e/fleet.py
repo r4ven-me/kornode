@@ -227,15 +227,16 @@ class Fleet:
     def summary(self) -> None:
         if self.artifacts.exists():
             path = self.artifacts / "summary.json"
-            from tests.e2e.test_routed_fabric import BLOCKED
+            from tests.e2e.test_routed_interlink import BLOCKED, NETLAB_COVERAGE
 
             atomic(
                 path,
                 {
                     "run_id": self.run_id,
                     "results": self.results,
-                    "scope": "P3 container-isolated VM tests; not host-network/P4 acceptance",
+                    "scope": "Container-isolated VM tests; not host-network acceptance",
                     "blocked_contracts": BLOCKED,
+                    "netlab_coverage": NETLAB_COVERAGE,
                     "upgrade_baseline_available": bool(
                         self.inventory.previous_hub and self.inventory.previous_agent
                     ),
@@ -294,7 +295,7 @@ class Cluster:
             wait_for(
                 connected,
                 30,
-                "agent enrollment/fabric exceeded deadline",
+                "agent enrollment/interlink exceeded deadline",
             )
             self.enrollment_seconds[role] = time.monotonic() - started
         self.fleet.results[f"{self.case}.enrollment_seconds"] = dict(self.enrollment_seconds)
@@ -326,7 +327,7 @@ class Cluster:
 
         def listen() -> None:
             try:
-                result["peer"] = self.call(listener, "fabric_listen", seconds=seconds)["peer"]
+                result["peer"] = self.call(listener, "interlink_listen", seconds=seconds)["peer"]
             except E2EError as exc:
                 result["error"] = exc
 
@@ -334,10 +335,12 @@ class Cluster:
         thread.start()
         deadline = time.monotonic() + seconds - 3
         reached = False
+        attempts = 0
         while thread.is_alive() and time.monotonic() < deadline:
+            attempts += 1
             reached = bool(
                 self.call(
-                    connector, "fabric_connect", host=host, source=source, client=client, awg=awg
+                    connector, "interlink_connect", host=host, source=source, client=client, awg=awg
                 )["ok"]
             )
             if reached:
@@ -346,6 +349,8 @@ class Cluster:
         thread.join(seconds + 30)
         if "error" in result:
             raise result["error"]
+        if not attempts or thread.is_alive() or "peer" not in result:
+            raise E2EError("fail-closed listener did not complete its observation window")
         if reached or result.get("peer") is not None:
             lines = [f"{connector} -> {host} reached {listener} (peer {result.get('peer')})"]
             for role in ("hub", listener):
@@ -375,7 +380,7 @@ class Cluster:
         def listen() -> None:
             try:
                 result["peer"] = self.call(
-                    listener, "fabric_listen", seconds=seconds, client=listener_client
+                    listener, "interlink_listen", seconds=seconds, client=listener_client
                 )["peer"]
             except E2EError as exc:
                 result["error"] = exc
@@ -385,7 +390,7 @@ class Cluster:
         deadline = time.monotonic() + seconds
         while thread.is_alive() and time.monotonic() < deadline:
             if self.call(
-                connector, "fabric_connect", host=host, source=source, client=client, awg=awg
+                connector, "interlink_connect", host=host, source=source, client=client, awg=awg
             )["ok"]:
                 break
             time.sleep(2)
@@ -458,6 +463,19 @@ class Cluster:
         )
 
     def upgrade(self) -> float:
+        self.call("ext", "upgrade_traffic_start")
+        self.call(
+            "agent-b", "upgrade_traffic_start",
+            host=self.fleet.inventory.host("ext").address,
+            expected=self.fleet.inventory.host("agent-a").address,
+        )
+        traffic: dict[str, Any] = {}
+
+        def client_ready(after: int = 1) -> bool:
+            traffic.update(self.call("agent-b", "upgrade_traffic_status"))
+            return bool(traffic["healthy"] and traffic["successes"] > after)
+
+        wait_for(client_ready, 30, "upgrade access-client baseline forwarding failed")
         stop = threading.Event()
         samples: list[tuple[float, bool]] = []
 
@@ -490,6 +508,14 @@ class Cluster:
                 120,
                 "upgrade did not reconnect agents",
             )
+            # Read after all image replacements; cached pre-upgrade successes cannot
+            # satisfy recovery. The observer lives in the independent client container.
+            previous_successes = int(self.call("agent-b", "upgrade_traffic_status")["successes"])
+            wait_for(
+                lambda: client_ready(previous_successes),
+                40,
+                "upgrade access-client forwarding did not recover automatically",
+            )
             completed = time.monotonic()
             wait_for(
                 lambda: any(timestamp > completed and healthy for timestamp, healthy in samples),
@@ -506,4 +532,9 @@ class Cluster:
             raise E2EError("upgrade has insufficient traffic samples")
         gap = max((b - a for a, b in zip(good, good[1:], strict=False)), default=0)
         self.fleet.results[f"{self.case}.max_probe_gap_seconds"] = gap
-        return gap
+        client_gap = float(traffic["max_gap_seconds"])
+        self.fleet.results[f"{self.case}.client_traffic"] = dict(traffic)
+        self.fleet.results[f"{self.case}.max_client_gap_seconds"] = client_gap
+        if traffic["wrong_peer"]:
+            raise E2EError("upgrade client traffic bypassed the access node")
+        return max(gap, client_gap)

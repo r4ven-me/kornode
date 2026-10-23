@@ -6,7 +6,7 @@ VPN in Docker. It is a hub plus agents:
 - the hub (this image) is an `ocserv` VPN server for users, the registry and control plane for agents, and the
   admin CLI/API/panel;
 - agents (`kornode-agent` image) join the hub over ocserv/openconnect on 443/tcp and form a routed overlay (the
-  fabric); each node decides where its traffic goes with one declarative egress policy and one reconciler;
+  interlink); each node decides where its traffic goes with one declarative egress policy and one reconciler;
 - a single node also works on its own as a plain VPN server, optionally dialing external OpenConnect upstreams.
 
 The CLI is the primary interface and always works. The Web API/GUI are optional and
@@ -26,7 +26,7 @@ disabled by default.
 - manages users, passwords, certificates, PKCS#12, OTP;
 - encrypted hub backup and non-destructive staged restore through CLI/API/panel
   (P3-09, awaiting review/runtime acceptance): [recovery runbook](docs/runbooks/hub-recovery.md);
-- commands for sessions, agents, fabric, egress policy, sources, upstream profiles, DNS records and
+- commands for sessions, agents, interlink, egress policy, sources, upstream profiles, DNS records and
   diagnostics;
 - multi-stage Dockerfile with frontend/backend test stages;
 - compose file with `/dev/net/tun`, `NET_ADMIN`, `NET_RAW` and persistent volumes.
@@ -306,8 +306,8 @@ Every top-level field `AppConfig` knows about is in `examples/config.full.yaml` 
 `tests/test_examples.py`); `config.example.yaml` is the annotated hub config. Values are illustrative, not
 defaults; anything you omit falls back to the real default in `backend/kornode/config/models.py`. Other examples:
 `config.minimal.yaml` (plain VPN server), `config.middle-server.yaml` (hub with an external upstream) and
-`config.client.yaml` (client-only node). Addressing, `fabric`, `control`, `egress`, `sources` and `sets` are
-described in "Fabric, Agents and Egress"; legacy v1 routing keys are rejected as unknown.
+`config.client.yaml` (client-only node). Addressing, `interlink`, `control`, `egress`, `sources` and `sets` are
+described in "Interlink, Agents and Egress"; legacy v1 routing keys are rejected as unknown.
 Section by section, beyond what's already covered in depth elsewhere in this README:
 
 - `system` - runtime paths and log level/rotation; `project_name` feeds the ocserv
@@ -324,8 +324,8 @@ Section by section, beyond what's already covered in depth elsewhere in this REA
 - `upstream` - external OpenConnect profiles, covered in "Upstreams";
   `cert_file_base64`/`key_file_base64` let a profile's client certificate/key travel
   as a `.env` secret instead of a mounted file, the same pattern Korvus Client uses.
-- `fabric`, `control`, `egress`, `sources`, `sets` - the fabric, agent control plane and egress policy, covered in
-  "Fabric, Agents and Egress"; `routing` only keeps host-level settings (`host_dns`, `main_interface`).
+- `interlink`, `control`, `egress`, `sources`, `sets` - the interlink, agent control plane and egress policy, covered in
+  "Interlink, Agents and Egress"; `routing` only keeps host-level settings (`host_dns`, `main_interface`).
 - `internal_dns` - the built-in blocking resolver; unlisted here beyond the minimal
   example, but every field is self-explanatory from its name (domains/files/URLs to
   block, DNS cache size, query logging, local A-record overrides).
@@ -695,22 +695,22 @@ Dry-run:
 docker compose exec kornode korctl sessions kick alice --dry-run
 ```
 
-## Fabric, Agents and Egress
+## Interlink, Agents and Egress
 
 Kornode v2 is a hub plus agents. This server is the **hub** (node 1). Other machines run the `kornode-agent`
 image (agents, nodes 2..254) and join the hub over ocserv/openconnect on 443/tcp, forming a routed overlay (the
-fabric). Nothing else carries traffic between nodes. The data plane does not depend on the hub being up: an agent
+interlink). Nothing else carries traffic between nodes. The data plane does not depend on the hub being up: an agent
 with a cached bundle keeps forwarding and boots from cache. Addressing, the egress compiler and the kernel layout
 are described in [docs/networking.md](docs/networking.md) and [docs/architecture.md](docs/architecture.md); the
 contracts are in `docs/spec/`.
 
-With default settings, node `<id>` gets fabric address `10.99.0.<id>`, client pool `10.100.<id>.0/24`, service
-address `10.100.<id>.1` and DNS zone `node<id>.kornode.internal`. Overlapping prefixes are rejected
+With default settings, node `<id>` gets interlink address `10.99.0.<id>`, client pool `10.100.<id>.0/24`, service
+address `10.100.<id>.1` and DNS zone `node<id>.kornode.lan`. Overlapping prefixes are rejected
 (`409 address_overlap`, `korctl` exit code 3).
 
 ### Adding an agent
 
-The hub needs three things first: `control.enabled: true` in its config (the control plane listens on the fabric
+The hub needs three things first: `control.enabled: true` in its config (the control plane listens on the interlink
 address `10.99.0.1:8444`, reached from inside the tunnel); `server.cn` set to a name or address the new node can
 reach, because the enroll token carries `server.cn:server.port` as the hub address; and that port (443/tcp by
 default) open. The agent only dials out, so it needs no inbound port unless it has the `access` role.
@@ -738,7 +738,7 @@ docker compose -f compose.agent.yaml up -d
 
 Without `KORNODE_AGENT_IMAGE` the same commands build `Dockerfile.agent` from the checkout. `./agent-data` holds the
 agent's keys, certificate and cached bundle: keep it, it is what lets the agent boot and forward while the hub is
-down. The agent appears as `active · online` under Agents and in Fabric → Topology.
+down. The agent appears as `active · online` under Agents and in Interlink → Topology.
 
 Then manage the agent from the hub: `korctl agent list|show|set|status|revoke|delete`, its exported networks
 (`korctl agent prefix list|add|del`), its egress policy (`korctl agent egress show|set|edit`), sources
@@ -748,8 +748,8 @@ commands (`korctl agent exec`). Every operation exists in the REST API and in th
 Web parity). On the agent, `kornode-agent status|explain|doctor|diag|reconnect|bundle` work offline from the
 cached state.
 
-`korctl fabric show` prints the topology, prefixes, DNS and sources; `korctl fabric set` changes fabric settings
-(Fabric tab in the panel). Fabric DNS records: `korctl dns record list|add|del`.
+`korctl interlink show` prints the topology, prefixes, DNS and sources; `korctl interlink set` changes interlink settings
+(Interlink tab in the panel). Interlink DNS records: `korctl dns record list|add|del`.
 
 ### Egress policy
 
@@ -766,9 +766,9 @@ sets:                          # reusable destination sets
     routes: [10.20.0.0/16]
     domains: [corp.example.com]
 egress:
-  - from: [clients, wg]        # clients, host, fabric or a source name
-    to: {set: corp}            # any | fabric | {set: n} | {routes, domains} | {node: id}
-    via: upstream:office       # local | fabric | node:<n> | upstream:<profile> | drop
+  - from: [clients, wg]        # clients, host, interlink or a source name
+    to: {set: corp}            # any | interlink | {set: n} | {routes, domains} | {node: id}
+    via: upstream:office       # local | interlink | node:<n> | upstream:<profile> | drop
   - from: [clients, wg]
     to: any
     via: local
@@ -776,7 +776,7 @@ egress:
 
 Traffic assigned to a tunnel **fails closed**: while the tunnel is down or reconnecting it is rejected rather than
 sent through the uplink (`kill_switch`, default `true` for every `via` except `local`). Connected networks (LANs,
-docker bridges) and tunnel carrier addresses always win over rules. There is no NAT inside the fabric; masquerade is
+docker bridges) and tunnel carrier addresses always win over rules. There is no NAT inside the interlink; masquerade is
 applied only toward the internet and toward upstreams. Domains of a set are resolved into nft sets by
 `DomainResolverService` (`korctl domains resolve|reload|watch`); clients routed by domain should use the node's
 dnsmasq so they get the same addresses.
@@ -1076,7 +1076,7 @@ CLI:
 - Sessions: list of active sessions via `occtl` and kicking a user;
 - Agents: create/revoke/delete, enroll tokens, per-agent policy (egress, sources, prefixes, upstreams), access
   listener and users, bundle history, remote commands, backup/restore of the hub;
-- Fabric: topology, fabric settings, fabric DNS records;
+- Interlink: topology, interlink settings, interlink DNS records;
 - Network: hub egress rules, sources and sets (`/api/egress`, `/api/sources`);
 - Upstream profiles: status, list/create/edit/delete, switch active profile, connect/disconnect, check host +
   auto-reconnect/failover settings;
@@ -1278,7 +1278,7 @@ Deployment-specific checks remain:
 
 - connecting a real OpenConnect client;
 - the external upstream OpenConnect tunnels;
-- agent enrollment and the fabric (`korctl fabric show`, `kornode-agent status`) in your network;
+- agent enrollment and the interlink (`korctl interlink show`, `kornode-agent status`) in your network;
 - egress rules, kill switch and domain sets for your domains/networks;
 - end-to-end client access to the private network.
 
@@ -1322,7 +1322,7 @@ docker compose exec kornode korctl user otp show-qr alice
 
 # Network
 docker compose exec kornode korctl net plan
-docker compose exec kornode korctl fabric show
+docker compose exec kornode korctl interlink show
 docker compose exec kornode korctl diagnose --dry-run
 
 # Stop

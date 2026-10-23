@@ -237,7 +237,7 @@ class UserService:
         self.runner = runner or CommandRunner()
         self.files = files or FileManager()
         self.passwd_file = config.secret_path("ocpasswd")
-        # Enroll accounts live in their own file: the fabric vhost reads it, the
+        # Enroll accounts live in their own file: the interlink vhost reads it, the
         # client host never does (S-07, D-71).
         self.enroll_passwd_file = config.secret_path("ocpasswd-enroll")
 
@@ -247,7 +247,7 @@ class UserService:
                 f"username '{username}' may contain letters, numbers, _, ., @ and - only"
             )
         if is_reserved_username(username):
-            raise ValueError(f"username '{username}' is reserved for fabric agents/enrollment")
+            raise ValueError(f"username '{username}' is reserved for interlink agents/enrollment")
         return username
 
     def validate_group_name(self, group: str) -> str:
@@ -592,7 +592,7 @@ class UserService:
     ) -> CommandResult:
         """One-shot enrollment account, created directly in the `enroll` group.
 
-        validate_username() rejects `enroll-*` for operators, so the fabric
+        validate_username() rejects `enroll-*` for operators, so the interlink
         enrollment service goes through this narrow entry point instead.
         """
         if not ENROLL_USER_RE.fullmatch(username):

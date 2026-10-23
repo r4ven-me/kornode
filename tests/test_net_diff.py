@@ -245,7 +245,7 @@ def test_elements_are_compared_in_canonical_form() -> None:
     )
 
     assert merged.elements == {"10.0.0.0/23", "192.168.1.5/32"}
-    ifaces = NftElements("inet", "kornode", "fabric_ifaces", frozenset({"vpns0", "oc-hub0"}))
+    ifaces = NftElements("inet", "kornode", "interlink_ifaces", frozenset({"vpns0", "oc-hub0"}))
     assert ifaces.elements == {"vpns0", "oc-hub0"}
 
 

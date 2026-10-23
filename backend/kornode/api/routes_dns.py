@@ -1,4 +1,4 @@
-"""Fabric DNS zone records (spec 07 "DNS", D-66); logic lives in FabricDnsService."""
+"""Interlink DNS zone records (spec 07 "DNS", D-66); logic lives in InterlinkDnsService."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from starlette.concurrency import run_in_threadpool
 from kornode.api.auth import require_admin
 from kornode.api.routes_agents import payload
 from kornode.services.agents import parse
-from kornode.services.fabric_dns import DnsRecordInput, FabricDnsService
+from kornode.services.interlink_dns import DnsRecordInput, InterlinkDnsService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
 
-def service(request: Request) -> FabricDnsService:
-    override: FabricDnsService | None = getattr(request.app.state, "fabric_dns", None)
-    return override or FabricDnsService(request.app.state.config)
+def service(request: Request) -> InterlinkDnsService:
+    override: InterlinkDnsService | None = getattr(request.app.state, "interlink_dns", None)
+    return override or InterlinkDnsService(request.app.state.config)
 
 
 @router.get("/records")

@@ -4,11 +4,11 @@
 node:
   id: 1
 
-fabric:
+interlink:
   cidr: 10.99.0.0/24
   client_pool: 10.100.{id}.0/24
   source_pool: 10.8.{id}.0/24
-  domain: kornode.internal
+  domain: kornode.lan
   reserved: []
 
 control:
@@ -40,19 +40,19 @@ sets:
     domains: [corp.example.com]
 
 egress:
-  # Transit between agents and from hub clients into the fabric.
-  - id: fabric
-    from: [clients, host, fabric]
-    to: fabric
-    via: fabric
+  # Transit between agents and from hub clients into the interlink.
+  - id: interlink
+    from: [clients, host, interlink]
+    to: interlink
+    via: interlink
   # Corporate network through the external office VPN.
   - id: corp
     from: [clients, host]
     to: { set: corp }
     via: upstream:office
   # Agents that declared `node:1` use the hub as their internet gateway.
-  - id: fabric-exit
-    from: [fabric]
+  - id: interlink-exit
+    from: [interlink]
     to: any
     via: local
   - id: internet

@@ -113,8 +113,8 @@ Required:
 
 What leaves the hub and where is one declarative policy: `egress` rules (first match wins),
 named `sources` (wg-easy, Amnezia) and destination `sets` of routes and domains
-(`docs/spec/02-egress-and-sources.md`). A rule says `from` (clients, host, fabric, a source),
-`to` (any, a set, inline routes/domains, a node) and `via` (local, fabric, drop,
+(`docs/spec/02-egress-and-sources.md`). A rule says `from` (clients, host, interlink, a source),
+`to` (any, a set, inline routes/domains, a node) and `via` (local, interlink, drop,
 `upstream:<profile>`, `node:<n>`). Traffic of clients and sources that no rule matches
 is dropped; without an `egress` key clients leave through the uplink (D-72).
 
@@ -237,7 +237,7 @@ korctl upstream switch PROFILE
 korctl egress show
 korctl net plan
 korctl agent list
-korctl fabric show
+korctl interlink show
 korctl domains reload
 korctl diagnose
 korctl logs

@@ -51,7 +51,7 @@ def hub_case() -> tuple[EgressPolicy, NodeFacts]:
             1: (n("10.99.0.0/24"), n("10.100.1.0/24")),
             2: (n("10.100.2.0/24"), n("192.168.2.0/24")),
         },
-        fabric_ifaces=("vpns0",),
+        interlink_ifaces=("vpns0",),
         local_networks=(n("172.17.0.0/16"),),
         resolved={"corp": frozenset({"10.60.5.5/32"})},
         uplink="eth0",
@@ -69,22 +69,22 @@ def node3_case() -> tuple[EgressPolicy, NodeFacts]:
     bundle = json.loads((EXAMPLES / "bundle.node3.example.json").read_text(encoding="utf-8"))
     policy = EgressPolicy.model_validate(bundle["policy"])
     prefixes: dict[int, list[Any]] = {}
-    for item in bundle["fabric"]["prefixes"]:
+    for item in bundle["interlink"]["prefixes"]:
         prefixes.setdefault(item["node_id"], []).append(n(item["prefix"]))
     prefixes.setdefault(3, []).append(n(bundle["node"]["client_pool"]))
-    fabric = bundle["tunnels"]["fabric"]
+    interlink = bundle["tunnels"]["interlink"]
     office = bundle["tunnels"]["upstreams"][0]
     facts = NodeFacts(
         node_id=3,
         client_pool=n(bundle["node"]["client_pool"]),
         tunnels={
-            "fabric": TunnelFact(fabric["interface"], True, ("203.0.113.2",)),
+            "interlink": TunnelFact(interlink["interface"], True, ("203.0.113.2",)),
             "upstream:office": TunnelFact(office["interface"], True, ("198.51.100.9",)),
         },
         sources={"amnezia": SourceFact(present=True)},
         upstreams=("office",),
         node_prefixes={node: tuple(items) for node, items in prefixes.items()},
-        fabric_ifaces=(fabric["interface"],),
+        interlink_ifaces=(interlink["interface"],),
         local_networks=(n("192.168.3.0/24"),),
         uplink="ens3",
         all_rp_filter="0",
@@ -145,7 +145,7 @@ def test_marks_and_tables_follow_first_appearance() -> None:
     exits = {exit_.name: (exit_.mark, exit_.table) for exit_ in compiled.exits}
     # Matches the spec 04 explain example: upstream:office -> 0x0c000200 / 12002.
     assert exits["upstream:office"] == (0x0C000200, 12002)
-    assert exits["fabric"] == (0x0C000100, 12001)
+    assert exits["interlink"] == (0x0C000100, 12001)
     assert exits["local"][0] == 0x0C000300
 
 
@@ -265,18 +265,18 @@ def test_down_tunnel_keeps_only_the_kill_switch_route() -> None:
     }
 
 
-def test_agent_fabric_exit_routes_only_other_nodes_prefixes() -> None:
+def test_agent_interlink_exit_routes_only_other_nodes_prefixes() -> None:
     routes = compile_policy(*node3_case()).desired.routes
 
-    fabric = {r.dst for r in routes if r.table == 12001 and r.type == "unicast"}
-    assert fabric == {"10.99.0.0/24", "10.100.1.0/24", "10.100.2.0/24", "192.168.2.0/24"}
+    interlink = {r.dst for r in routes if r.table == 12001 and r.type == "unicast"}
+    assert interlink == {"10.99.0.0/24", "10.100.1.0/24", "10.100.2.0/24", "192.168.2.0/24"}
 
 
-def test_no_masquerade_toward_the_fabric() -> None:
+def test_no_masquerade_toward_the_interlink() -> None:
     for case in (hub_case, node3_case):
         compiled = compile_policy(*case())
-        fabric = next(exit_ for exit_ in compiled.exits if exit_.name == "fabric")
-        assert fabric.nat is False
+        interlink = next(exit_ for exit_ in compiled.exits if exit_.name == "interlink")
+        assert interlink.nat is False
         assert 'oifname "oc-hub0" masquerade' not in compiled.script
         assert 'oifname "vpns0" masquerade' not in compiled.script
 

@@ -20,7 +20,7 @@ from kornode.bundle.errors import BundleError
 from kornode.bundle.sealing import public_bytes
 from kornode.bundle.validator import validate
 from kornode_agent import __version__
-from kornode_agent.config import AgentConfig, FabricConfig, HubConfig, save_config
+from kornode_agent.config import AgentConfig, HubConfig, InterlinkConfig, save_config
 from kornode_agent.control import ControlClient, decode_enroll_bundle
 from kornode_agent.store import (
     State,
@@ -192,7 +192,7 @@ async def enroll(
                 camouflage=token.camouflage,
                 server_name=token.server_name,
             ),
-            fabric=FabricConfig(),
+            interlink=InterlinkConfig(),
         ),
     )
     return state

@@ -29,10 +29,10 @@ server=/{{ domain }}/{{ dns }}
 {% endfor %}
 {% endfor %}
 
-{% if fabric_zone %}
-# Fabric zone (D-66): answered from local data only, never forwarded.
-local=/{{ fabric_zone.domain }}/
-{% for line in fabric_zone.lines %}
+{% if interlink_zone %}
+# Interlink zone (D-66): answered from local data only, never forwarded.
+local=/{{ interlink_zone.domain }}/
+{% for line in interlink_zone.lines %}
 {{ line }}
 {% endfor %}
 {% endif %}

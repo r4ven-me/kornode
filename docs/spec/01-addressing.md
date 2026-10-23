@@ -6,12 +6,12 @@
 node:
   id: 1                         # the hub is always node 1
 
-fabric:
+interlink:
   enabled: true
-  cidr: 10.99.0.0/24            # fabric addresses: 10.99.0.<id>
+  cidr: 10.99.0.0/24            # interlink addresses: 10.99.0.<id>
   client_pool: 10.100.{id}.0/24 # per-node ocserv client pool template
   source_pool: 10.8.{id}.0/24   # per-node default range for named sources
-  domain: kornode.internal      # DNS zone of the fabric
+  domain: kornode.lan      # DNS zone of the interlink
   enroll_pool: 10.99.255.240/28 # leases of one-time enroll sessions (07), outside cidr
   reserved: []                  # extra CIDRs nothing may overlap (e.g. corp ranges)
 ```
@@ -24,14 +24,14 @@ of ids.
 
 | Item | Formula | node 1 (hub) | node 3 |
 | --- | --- | --- | --- |
-| Fabric address | `cidr` host `<id>` | `10.99.0.1` | `10.99.0.3` |
+| Interlink address | `cidr` host `<id>` | `10.99.0.1` | `10.99.0.3` |
 | Client pool | `client_pool` | `10.100.1.0/24` | `10.100.3.0/24` |
 | Service address | first host of client pool | `10.100.1.1` | `10.100.3.1` |
 | Source default range | `source_pool` | `10.8.1.0/24` | `10.8.3.0/24` |
-| DNS zone | `node<id>.<domain>` | `node1.kornode.internal` | `node3.kornode.internal` |
+| DNS zone | `node<id>.<domain>` | `node1.kornode.lan` | `node3.kornode.lan` |
 
 `server.ipv4_network` and `internal_dns.listen` are always derived on the hub (there
-is no `fabric.enabled` switch, D-71); an explicit `server.ipv4_network` is accepted only
+is no `interlink.enabled` switch, D-71); an explicit `server.ipv4_network` is accepted only
 if it passes the overlap validator (it then overrides the template for node 1) and
 `internal_dns.listen` follows it unless set too.
 
@@ -42,18 +42,18 @@ On agents the same values come from the bundle; agents never compute them.
 Runs on every registry/config mutation (hub) and on bundle apply (agent).
 Input set:
 
-- all fabric prefixes of all nodes (pools, sources, exported LANs);
-- `fabric.cidr`, `fabric.reserved`, `fabric.enroll_pool`;
+- all interlink prefixes of all nodes (pools, sources, exported LANs);
+- `interlink.cidr`, `interlink.reserved`, `interlink.enroll_pool`;
 - per node: its *local* networks reported by the agent (connected routes of
   physical interfaces, docker bridges) — reported in status, see 05;
 - hub: its own connected routes.
 
 Rules:
 
-1. No two fabric prefixes of different nodes may overlap.
-2. No fabric prefix may overlap `fabric.cidr`, `reserved` or `enroll_pool`;
-   `enroll_pool` must not overlap `fabric.cidr` or `reserved` (D-42).
-3. A fabric prefix of node N must not overlap a local network of node M (M≠N)
+1. No two interlink prefixes of different nodes may overlap.
+2. No interlink prefix may overlap `interlink.cidr`, `reserved` or `enroll_pool`;
+   `enroll_pool` must not overlap `interlink.cidr` or `reserved` (D-42).
+3. An interlink prefix of node N must not overlap a local network of node M (M≠N)
    — otherwise M could not reach N's prefix. Reported as **error** for
    prefixes being added, **warning** for already-existing state (so a newly
    reported local network cannot block unrelated edits).

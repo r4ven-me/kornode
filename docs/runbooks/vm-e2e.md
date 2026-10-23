@@ -8,6 +8,23 @@ Never run this suite on dev/production. Practical notes from that run: VM root d
 tmpfs `/tmp` cannot hold the image archive); install `docker.io docker-cli docker-compose
 docker-buildx`; the first image build after a source change needs working PyPI access.
 
+## Current status (2026-10-23)
+
+The historical snapshots above predate D-85. Current names are interlink and
+Nodes; all routed scenarios are executable and NL-07/08/09 are covered by netlab,
+not placeholder skips. E2E-06 now also observes access-client traffic. Its
+pre-D85 `f0d68ed` baseline is not valid for a transparent upgrade across the SNI
+flag day; paired distinct post-D85 digests are required. Never overwrite old
+baseline tags, private runner env or workflow variables implicitly.
+
+Latest local/kernel/VM evidence, the compatible `15b87a6` baseline digests, the
+remaining client-recovery failure and completed cleanup are in
+`tests/e2e/ACCEPTANCE-2026-10-23.md`. The last full VM run was stopped by the
+owner because of duration. It is **not green**. Diagnose its saved artifacts
+before rerunning a full suite; do not lower safety gates or weaken assertions.
+Reclaim only explicitly reviewed unused build cache when disk is short; the
+historical broad image-prune commands above are not a cleanup recommendation.
+
 ## What this stage covers
 
 `tests/e2e/` drives SSH + Docker Compose on four **owner-designated disposable**
@@ -20,23 +37,23 @@ This is deliberately **not `network_mode: host`**: kornode/netlink/nft faults ru
 inside the disposable containers. Docker creates/removes its normal bridge/NAT and
 published ports on the VMs; the harness does not snapshot/flush host nftables,
 host routes or host sysctls. It does not validate production host-network startup
-races or P4 routed fabric. Transport still traverses four real VM kernels/networks.
+races or P4 routed interlink. Transport still traverses four real VM kernels/networks.
 Both agent containers are genuinely behind Docker NAT; agent-b's intended public
 VM topology and agent-a's VM-level NAT ACL emulation remain deployment extensions,
 not claims made by this isolated P3 implementation. See implementation choice D-58.
 
 | Scenario | Implemented assertion |
 | --- | --- |
-| E2E-01 | fresh registry create → enroll → real fabric mTLS ping ≤30 s, both agents; then confirmed bundle |
+| E2E-01 | fresh registry create → enroll → real interlink mTLS ping ≤30 s, both agents; then confirmed bundle |
 | E2E-02 | registry transport mutation → confirmed applied version ≤10 s, no shortened confirm window |
-| E2E-03 | agent-b container uplink blackholed for 60 s, independent watchdog, automatic fabric recovery |
-| E2E-04 | revoke agent-b: fabric unusable and actual mTLS HTTP 403 via a test-only TCP relay |
+| E2E-03 | agent-b container uplink blackholed for 60 s, independent watchdog, automatic interlink recovery |
+| E2E-04 | revoke agent-b: interlink unusable and actual mTLS HTTP 403 via a test-only TCP relay |
 | E2E-05 | announce signing rotation, confirm agents, encrypted backup, advance agent version, stop/wipe ONLY owned hub data, restore/activate, same certs, monotonic high-water recovery |
-| E2E-06 | two different digest-pinned previous images → current hub/agents under continuous fabric mTLS probes, maximum good-probe gap ≤30 s, same certs |
-| NL-01 | hub container connects to a TCP listener in agent-a over the fabric; the listener sees the hub fabric address `10.99.0.1` (no NAT) |
-| NL-04 | a dummy LAN `192.168.30.0/24` on agent-b is exported (`agent prefix add`); agent-a (source = its fabric address) connects to it through the hub; agent-b sees agent-a's fabric address (no NAT); the hub route is installed by its reconciler (`proto 77`) |
-| NL-10 | delete an owned fabric unicast route via `kornode.net.Kernel` inside agent; running reconciler repairs ≤2 s |
-| NL-11 | inject a validly signed bundle that dials fabric port 1; real apply rolls back ≤70 s and reports to hub |
+| E2E-06 | two different digest-pinned previous images → current hub/agents under continuous interlink mTLS probes, maximum good-probe gap ≤30 s, same certs |
+| NL-01 | hub container connects to a TCP listener in agent-a over the interlink; the listener sees the hub interlink address `10.99.0.1` (no NAT) |
+| NL-04 | a dummy LAN `192.168.30.0/24` on agent-b is exported (`agent prefix add`); agent-a (source = its interlink address) connects to it through the hub; agent-b sees agent-a's interlink address (no NAT); the hub route is installed by its reconciler (`proto 77`) |
+| NL-10 | delete an owned interlink unicast route via `kornode.net.Kernel` inside agent; running reconciler repairs ≤2 s |
+| NL-11 | inject a validly signed bundle that dials interlink port 1; real apply rolls back ≤70 s and reports to hub |
 | NL-12 | deliver a body changed after signing; require agent's actual signature-rejection evidence, unchanged applied/high-water versions |
 | NL-13 (partial) | hub stopped ≥600 s; agent restarts from confirmed cache; external ocserv tunnel and real ICMP probes remain healthy; reconnect when hub returns |
 
@@ -45,19 +62,19 @@ not called an upgrade. The baseline must support the current CLI/config/bundle
 contracts (P3-07+) and forward-only DB schema. This does not attempt a downgrade of
 already-current data: the upgrade scenario starts fresh on previous images.
 
-**P4 blockers stay skipped**, with reasons in `test_routed_fabric.py`, the offline
+**P4 blockers stay skipped**, with reasons in `test_routed_interlink.py`, the offline
 plan and summary: E2E-07; NL-05, NL-07…09; access-client traffic during upgrade and hub
 outage. An existing upstream tunnel is not proof of access-client forwarding,
-wg-easy integration, no fabric NAT, domain-based exit selection or no traffic leak.
+wg-easy integration, no interlink NAT, domain-based exit selection or no traffic leak.
 No production P4 feature or GUI/AppConfig field is added by test tooling.
 Running (case `routed`): NL-01, NL-04, NL-03 (access client of agent-a: reaches the hub without NAT,
 leaves through the node with NAT, logs in again with the hub stopped; the throwaway openconnect client
 runs in its own `client` compose service on the agent-b VM, agent-a publishes 8443 and the hub 9100
 for it; MSS is not measured), NL-06 (a source of agent-b: docker network `source` 10.8.3.0/24
 shared by the node and `client` containers; the client and the hub, agent-a reach each other
-without NAT) and NL-02 (fabric DNS: the agent resolves its
+without NAT) and NL-02 (interlink DNS: the agent resolves its
 own zone locally and `monitoring.<domain>` through the hub, then connects with its
-fabric address).
+interlink address).
 
 ## Safety gates
 
@@ -141,10 +158,10 @@ to the runner/agents as appropriate; no host firewall is reconfigured by the har
 Allow agent → hub/ext TCP 443 and agent → hub TCP 18444 for the test relay.
 
 TCP 18444 is **test-only**: the hub container forwards raw TLS bytes to its
-fabric-only control listener. It is used solely to observe an actual authenticated
-HTTP 403 after fabric revocation. The probe keeps CA validation and agent mTLS but
+interlink-only control listener. It is used solely to observe an actual authenticated
+HTTP 403 after interlink revocation. The probe keeps CA validation and agent mTLS but
 disables hostname matching for this relay hop (different dial address); production
-control TLS and the normal direct fabric probes retain normal verification. Never
+control TLS and the normal direct interlink probes retain normal verification. Never
 publish this relay or reuse its Compose definition in production.
 
 Register a dedicated/ephemeral GitHub runner on hub with labels

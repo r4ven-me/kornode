@@ -34,8 +34,8 @@ def hub_facts(*, exit_iface: str | None = "vpns1", guard: bool = True) -> NodeFa
         node_id=1,
         client_pool=n("10.100.1.0/24"),
         node_prefixes=HUB_PREFIXES,
-        fabric_ifaces=("vpns0", "vpns1"),
-        fabric_guard=guard,
+        interlink_ifaces=("vpns0", "vpns1"),
+        interlink_guard=guard,
         transit_exits=(TransitExit(3, (n("10.100.2.0/24"), n("10.8.2.0/24")), exit_iface),),
         uplink="eth0",
         all_rp_filter="1",
@@ -66,23 +66,25 @@ def test_hub_marks_agent_traffic_for_the_exit_nodes_table() -> None:
     compiled = compile_policy(EgressPolicy(), hub_facts())
     lines = lines_of(compiled.script)
 
-    pass_line = next(i for i, line in enumerate(lines) if "ip daddr @fabric_v4 return" in line)
+    pass_line = next(i for i, line in enumerate(lines) if "ip daddr @interlink_v4 return" in line)
     transit = next(i for i, line in enumerate(lines) if 'comment "transit node:3"' in line)
     guard = next(i for i, line in enumerate(lines) if 'comment "agents: no exit declared"' in line)
     assert pass_line < transit < guard
     mark = "0x0c000100"
     assert (
-        f"iifname @fabric_ifaces ip saddr @transit3_v4 meta mark set {mark} "
+        f"iifname @interlink_ifaces ip saddr @transit3_v4 meta mark set {mark} "
         f'ct mark set meta mark accept comment "transit node:3"'
     ) in lines
-    assert "iifname @fabric_ifaces reject with icmpx admin-prohibited" in lines[guard]
+    assert "iifname @interlink_ifaces reject with icmpx admin-prohibited" in lines[guard]
     assert "set transit3_v4 {" in compiled.script and "set transit_ifaces {" in compiled.script
     # Matching is by prefix, never by (changing) session device: the script is stable.
     assert "vpns1" not in compiled.script
     assert elements(compiled, "transit3_v4") == {"10.100.2.0/24", "10.8.2.0/24"}
     assert elements(compiled, "transit_ifaces") == {"vpns1"}
-    fabric = elements(compiled, "fabric_v4")
-    assert all(covers(fabric, net) for net in ("10.99.0.0/24", "10.100.2.0/24", "192.168.2.0/24"))
+    interlink = elements(compiled, "interlink_v4")
+    assert all(
+        covers(interlink, net) for net in ("10.99.0.0/24", "10.100.2.0/24", "192.168.2.0/24")
+    )
 
 
 def test_the_exit_nodes_session_gets_a_table_that_fails_closed() -> None:
@@ -125,14 +127,17 @@ def test_without_the_guard_the_hub_is_unchanged() -> None:
     script = compile_policy(EgressPolicy(), hub_facts(guard=False)).script
     assert "transit exit" not in script.replace("transit_ifaces", "") or True
     assert "agents: no exit declared" not in script
-    assert "ip daddr @fabric_v4 return" not in script
+    assert "ip daddr @interlink_v4 return" not in script
 
 
 def agent_policy() -> EgressPolicy:
     return EgressPolicy.model_validate(
         {
             "egress": [
-                {"id": "to-fabric", "from": ["clients", "host"], "to": "fabric", "via": "fabric"},
+                {
+                    "id": "to-interlink", "from": ["clients", "host"],
+                    "to": "interlink", "via": "interlink",
+                },
                 {"id": "out", "from": ["clients"], "to": "any", "via": "node:3"},
             ]
         }
@@ -144,11 +149,11 @@ def agent_facts() -> NodeFacts:
         node_id=2,
         client_pool=n("10.100.2.0/24"),
         tunnels={
-            "fabric": TunnelFact("oc-hub0", True, ("203.0.113.2",)),
+            "interlink": TunnelFact("oc-hub0", True, ("203.0.113.2",)),
             "node:3": TunnelFact("oc-hub0", True),
         },
         node_prefixes={1: HUB_PREFIXES[1], 2: HUB_PREFIXES[2], 3: HUB_PREFIXES[3]},
-        fabric_ifaces=("oc-hub0",),
+        interlink_ifaces=("oc-hub0",),
         uplink="eth0",
         all_rp_filter="0",
     )
@@ -167,7 +172,7 @@ def test_an_agent_exit_node_sends_through_the_hub_tunnel_without_nat() -> None:
         "masquerade",
         "",
     )
-    # The fabric exit and the node exit share the hub tunnel: one answer mark, the first wins.
+    # The interlink exit and the node exit share the hub tunnel: one answer mark, the first wins.
     answered = [
         line
         for line in lines_of(compiled.script)
@@ -180,7 +185,7 @@ def test_an_agent_exit_to_a_node_that_is_offline_is_marked_and_fails_closed() ->
     facts = agent_facts()
     down = dataclasses.replace(
         facts,
-        tunnels={"fabric": TunnelFact("oc-hub0", False), "node:3": TunnelFact("oc-hub0", False)},
+        tunnels={"interlink": TunnelFact("oc-hub0", False), "node:3": TunnelFact("oc-hub0", False)},
     )
     compiled = compile_policy(agent_policy(), down)
     exit_ = next(e for e in compiled.exits if e.name == "node:3")
@@ -195,8 +200,11 @@ def gateway_node_policy() -> EgressPolicy:
     return EgressPolicy.model_validate(
         {
             "egress": [
-                {"id": "to-fabric", "from": ["clients", "host"], "to": "fabric", "via": "fabric"},
-                {"id": "gateway-local", "from": ["fabric"], "to": "any", "via": "local"},
+                {
+                    "id": "to-interlink", "from": ["clients", "host"],
+                    "to": "interlink", "via": "interlink",
+                },
+                {"id": "gateway-local", "from": ["interlink"], "to": "any", "via": "local"},
             ]
         }
     )
@@ -206,20 +214,20 @@ def gateway_node_facts() -> NodeFacts:
     return NodeFacts(
         node_id=3,
         client_pool=n("10.100.3.0/24"),
-        tunnels={"fabric": TunnelFact("oc-hub0", True)},
+        tunnels={"interlink": TunnelFact("oc-hub0", True)},
         node_prefixes={1: HUB_PREFIXES[1], 2: HUB_PREFIXES[2], 3: HUB_PREFIXES[3]},
-        fabric_ifaces=("oc-hub0",),
+        interlink_ifaces=("oc-hub0",),
         uplink="eth0",
         all_rp_filter="0",
     )
 
 
-def test_the_exit_node_masquerades_what_the_fabric_sends_it() -> None:
+def test_the_exit_node_masquerades_what_the_interlink_sends_it() -> None:
     compiled = compile_policy(gateway_node_policy(), gateway_node_facts())
     local = next(e for e in compiled.exits if e.name == "local")
     lines = lines_of(compiled.script)
     assert (
-        f"iifname @fabric_ifaces meta mark set 0x{local.mark:08x} "
+        f"iifname @interlink_ifaces meta mark set 0x{local.mark:08x} "
         'ct mark set meta mark accept comment "egress rule 1"'
     ) in lines
     assert (
@@ -227,7 +235,7 @@ def test_the_exit_node_masquerades_what_the_fabric_sends_it() -> None:
         in compiled.script
     )
     # Plain marks only: answers are routed by prefix routes in main, not by re-marking
-    # (a mark would make the reverse-path check look the internet up in the fabric table).
+    # (a mark would make the reverse-path check look the internet up in the interlink table).
     assert "ct direction reply ct mark" not in compiled.script
 
 
@@ -313,7 +321,7 @@ def test_hub_transit_matches_set_exits_by_source_and_destination_in_policy_order
 
 def test_hub_transit_set_exit_without_addresses_matches_nothing() -> None:
     """Before the agent has reported any address the destination set is empty: the flow
-    falls to the fabric guard (dropped), never to the hub's uplink."""
+    falls to the interlink guard (dropped), never to the hub's uplink."""
     facts = dataclasses.replace(
         hub_facts(),
         transit_exits=(TransitExit(3, (n("10.100.2.0/24"),), "vpns1", dest=frozenset()),),

@@ -53,7 +53,7 @@ def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     config = load_config(tmp_path / "missing.yaml", environ={})
 
     assert config.node.id == 1
-    assert config.fabric.enroll_pool == "10.99.255.240/28"
+    assert config.interlink.enroll_pool == "10.99.255.240/28"
     assert config.server.port == 443
     assert config.web.enabled is False
     assert config.egress[0].via == "local"  # D-72: clients reach the internet by default
@@ -62,7 +62,7 @@ def test_load_config_defaults_when_file_is_missing(tmp_path: Path) -> None:
     assert config.certificates.letsencrypt.auto_renew_interval_unit == "days"
 
 
-def test_fabric_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
+def test_interlink_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
         environ={},
@@ -73,7 +73,7 @@ def test_fabric_derives_server_network_and_dns_listen(tmp_path: Path) -> None:
     assert config.internal_dns.listen == "10.100.1.1"
 
 
-def test_fabric_uses_node_id_for_derived_addresses(tmp_path: Path) -> None:
+def test_interlink_uses_node_id_for_derived_addresses(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
         cli_overrides={"node": {"id": 7}},
@@ -84,22 +84,22 @@ def test_fabric_uses_node_id_for_derived_addresses(tmp_path: Path) -> None:
     assert config.internal_dns.listen == "10.100.7.1"
 
 
-def test_fabric_env_overrides_work(tmp_path: Path) -> None:
+def test_interlink_env_overrides_work(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
         environ={
             "KORNODE_NODE__ID": "9",
-            "KORNODE_FABRIC__CLIENT_POOL": '"10.110.{id}.0/24"',
+            "KORNODE_INTERLINK__CLIENT_POOL": '"10.110.{id}.0/24"',
         },
     )
 
     assert config.node.id == 9
-    assert config.fabric.client_pool == "10.110.{id}.0/24"
+    assert config.interlink.client_pool == "10.110.{id}.0/24"
     assert config.server.ipv4_network == "10.110.9.0/24"
     assert config.internal_dns.listen == "10.110.9.1"
 
 
-def test_explicit_server_network_overrides_fabric_derived_default(tmp_path: Path) -> None:
+def test_explicit_server_network_overrides_interlink_derived_default(tmp_path: Path) -> None:
     config = load_config(
         tmp_path / "missing.yaml",
         cli_overrides={
@@ -113,12 +113,12 @@ def test_explicit_server_network_overrides_fabric_derived_default(tmp_path: Path
     assert config.internal_dns.listen == "10.120.1.1"
 
 
-def test_explicit_server_network_rejects_fabric_overlap(tmp_path: Path) -> None:
+def test_explicit_server_network_rejects_interlink_overlap(tmp_path: Path) -> None:
     with pytest.raises(AddressOverlapError) as exc_info:
         load_config(
             tmp_path / "missing.yaml",
             cli_overrides={
-                "fabric": {"reserved": ["10.120.0.0/16"]},
+                "interlink": {"reserved": ["10.120.0.0/16"]},
                 "server": {"ipv4_network": "10.120.1.0/24"},
                 "internal_dns": {"listen": "10.120.1.1"},
             },
@@ -129,7 +129,7 @@ def test_explicit_server_network_rejects_fabric_overlap(tmp_path: Path) -> None:
         "prefix": "10.120.1.0/24",
         "node": 1,
         "with": "10.120.0.0/16",
-        "owner": "fabric.reserved",
+        "owner": "interlink.reserved",
     }
 
 
@@ -138,7 +138,7 @@ def test_explicit_server_network_rejects_enroll_pool_overlap(tmp_path: Path) -> 
         load_config(
             tmp_path / "missing.yaml",
             cli_overrides={
-                "fabric": {"enroll_pool": "10.120.1.0/24"},
+                "interlink": {"enroll_pool": "10.120.1.0/24"},
                 "server": {"ipv4_network": "10.120.1.0/24"},
                 "internal_dns": {"listen": "10.120.1.1"},
             },
@@ -149,7 +149,7 @@ def test_explicit_server_network_rejects_enroll_pool_overlap(tmp_path: Path) -> 
         "prefix": "10.120.1.0/24",
         "node": 1,
         "with": "10.120.1.0/24",
-        "owner": "fabric.enroll_pool",
+        "owner": "interlink.enroll_pool",
     }
 
 
@@ -162,12 +162,12 @@ def test_explicit_server_network_rejects_enroll_pool_overlap(tmp_path: Path) -> 
         {"password": {"enabled": True}, "otp": {"enabled": True, "ocserv_oath_auth": True}},
     ],
 )
-def test_fabric_accepts_every_client_auth_method(auth: dict[str, object]) -> None:
+def test_interlink_accepts_every_client_auth_method(auth: dict[str, object]) -> None:
     """D-70/D-71: agents log in on their own virtual host, so client login by
-    certificate, OIDC or OTP no longer conflicts with the fabric (was D-43)."""
+    certificate, OIDC or OTP no longer conflicts with the interlink (was D-43)."""
     config = AppConfig.model_validate({"auth": auth})
 
-    assert config.fabric.server_name == "fabric.kornode.internal"
+    assert config.interlink.server_name == "interlink.kornode.lan"
 
 
 def test_load_config_defaults_for_new_server_tuning_fields(tmp_path: Path) -> None:
@@ -289,9 +289,9 @@ def test_control_enabled(tmp_path: Path) -> None:
     assert config.control.port == 9444
 
 
-def test_the_removed_fabric_enabled_flag_is_rejected(tmp_path: Path) -> None:
-    """D-70/D-71: the hub always runs the fabric; the old switch must not be silently ignored."""
+def test_the_removed_interlink_enabled_flag_is_rejected(tmp_path: Path) -> None:
+    """D-70/D-71: the hub always runs the interlink; the old switch must not be silently ignored."""
     with pytest.raises(ValueError, match="enabled"):
         load_config(
-            tmp_path / "missing.yaml", cli_overrides={"fabric": {"enabled": True}}, environ={}
+            tmp_path / "missing.yaml", cli_overrides={"interlink": {"enabled": True}}, environ={}
         )

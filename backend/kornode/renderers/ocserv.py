@@ -7,13 +7,13 @@ from typing import Any
 from kornode.config.models import AppConfig, GroupPolicyConfig
 from kornode.renderers.base import TemplateRenderer, default_template_dir
 
-_FABRIC_GUARD = """# Fabric guard (D-43, D-71). ocserv passes the virtual host in $VHOST. The fabric
-# vhost accepts certificates of the hub CA, so an OU-less client certificate would
+_INTERLINK_GUARD = """# Interlink guard (D-43, D-71). ocserv passes the virtual host in $VHOST.
+# The interlink vhost accepts certificates of the hub CA, so an OU-less client certificate would
 # get a session there: only the groups agents (user agent-<id>, known to the
 # registry) and enroll (user enroll-*) may log in, everything else is refused. The
-# default host serves clients: it must never place a session in a fabric group.
+# default host serves clients: it must never place a session in an interlink group.
 case "$VHOST" in
-  __FABRIC_VHOST__)
+  __INTERLINK_VHOST__)
     case "$GROUPNAME" in
       agents)
         case "$USERNAME" in
@@ -76,7 +76,7 @@ class OcservConfigRenderer(TemplateRenderer):
             "server_key": server_key,
             "ca_cert": ca_cert,
             "crl": config.cert_path("crl.pem"),
-            "fabric_vhost": _fabric_vhost(config),
+            "interlink_vhost": _interlink_vhost(config),
             "occtl_socket_file": config.generated_path("occtl.sock"),
             "socket_file": config.system.generated_dir / "ocserv.sock",
         }
@@ -94,8 +94,8 @@ class OcservConfigRenderer(TemplateRenderer):
         user_dir = config.identity.config_per_user_dir or (
             config.system.generated_dir / "config-per-user"
         )
-        guard = _FABRIC_GUARD.replace("__USER_DIR__", shlex.quote(str(user_dir))).replace(
-            "__FABRIC_VHOST__", shlex.quote(config.fabric.server_name)
+        guard = _INTERLINK_GUARD.replace("__USER_DIR__", shlex.quote(str(user_dir))).replace(
+            "__INTERLINK_VHOST__", shlex.quote(config.interlink.server_name)
         )
         return content.replace(marker, "\n" + guard + "korctl_bin=", 1)
 
@@ -134,11 +134,11 @@ class OcservConfigRenderer(TemplateRenderer):
         return "\n".join(lines) + "\n"
 
 
-def _fabric_vhost(config: AppConfig) -> dict[str, Any]:
+def _interlink_vhost(config: AppConfig) -> dict[str, Any]:
     return {
-        "name": config.fabric.server_name,
-        "server_cert": config.cert_path("fabric.crt"),
-        "server_key": config.cert_path("fabric.key"),
+        "name": config.interlink.server_name,
+        "server_cert": config.cert_path("interlink.crt"),
+        "server_key": config.cert_path("interlink.key"),
         # Always the hub CA, also with an external (Let's Encrypt) client certificate.
         "ca_cert": config.cert_path("ca.crt"),
         "passwd": config.secret_path("ocpasswd-enroll"),

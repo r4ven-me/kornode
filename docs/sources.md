@@ -3,7 +3,7 @@
 A **source** is the network of a third-party access server (wg-easy, an Amnezia
 container, a plain WireGuard interface) attached to an agent. kornode never starts or
 configures that server: it only owns routing, forwarding and NAT for the source's
-subnet, and exports the subnet into the fabric (spec 02, 07). WireGuard exists in
+subnet, and exports the subnet into the interlink (spec 02, 07). WireGuard exists in
 kornode **only** as such a server; nodes talk to each other over ocserv (443/tcp).
 
 ## What you configure
@@ -24,7 +24,7 @@ kornode **only** as such a server; nodes talk to each other over ocserv (443/tcp
    The names above are taken from the upstream documentation; verify them against the
    version you deploy.
 4. Client settings: allowed IPs `0.0.0.0/0` (the egress policy decides, not the
-   client), MTU **1280** when the node's exit is the fabric over TCP (ocserv adds its
+   client), MTU **1280** when the node's exit is the interlink over TCP (ocserv adds its
    own overhead; kornode clamps TCP MSS, UDP is not clamped), DNS = the node's service
    address `10.100.<node id>.1` so that clients ask the same resolver that fills the
    domain sets.
@@ -44,8 +44,8 @@ The same is available as `PUT /api/agents/{name}/sources/{source}` and in the pa
 | Aspect | Behaviour |
 | --- | --- |
 | Classification | Packets entering on `awg0` **and** with a source address in the cidr are class `amnezia` (egress rules `from: [amnezia]`). A packet from `awg0` with an address outside the cidr is not of that class and follows plain routing: kornode adds no spoof filter for source interfaces, WireGuard's AllowedIPs (cryptokey routing) is what keeps a peer inside its range. |
-| Default | Unrouted source traffic is rejected, never sent through the uplink. The implicit `to-fabric` rule lets sources reach the fabric (other nodes, the hub) without NAT. |
-| Export | With `export: true` (default) the cidr is exported: the hub installs `iroute`/a route to it via the agent's session and every other agent routes it into the fabric (no NAT inside the fabric). The hub's monitoring sees real client addresses. `export: false` keeps it local. |
+| Default | Unrouted source traffic is rejected, never sent through the uplink. The implicit `to-interlink` rule lets sources reach the interlink (other nodes, the hub) without NAT. |
+| Export | With `export: true` (default) the cidr is exported: the hub installs `iroute`/a route to it via the agent's session and every other agent routes it into the interlink (no NAT inside the interlink). The hub's monitoring sees real client addresses. `export: false` keeps it local. |
 | Interface absent | Rules stay installed and match nothing; `kornode-agent doctor` warns (`missing_source`), the report shows the source as down. |
 | Overlaps | The hub refuses a source overlapping another node's prefix or the node's own client pool, or colliding with `oc-hub0`/an upstream interface. |
 

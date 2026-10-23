@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed (interlink naming and Nodes, D-85 / D-86)
+
+- Renamed the public fabric configuration, CLI/API, templates, bundles and panel to **interlink**; default DNS zone is **`kornode.lan`**. Agent version and v2 bundle minimum are 2.1.0. Explicit existing domains remain unchanged. Old YAML/env/.env names, policy aliases, agent config and signed v1 caches are readable for one minor release; conflicting aliases are rejected. Legacy signatures and sealed-secret AAD are verified before normalization. Certificate migration preserves the old files and SPKI pin. **The SNI rename requires explicit re-enrollment across D-85**, not a transparent image upgrade.
+- Combined Agents and Interlink into **Nodes → Overview / Settings / DNS**. Removed duplicate Config controls; retained all addressing controls and CLI/API/Web capabilities. Hub source editing links to the existing Network editor. Updated browser tests, including obsolete v1 panel expectations.
+- Config validation errors no longer echo malformed secret input (`hide_input_in_errors`). Added compatibility and schema-parity regression tests.
+
+### Fixed (stale upstream transport, D-87)
+
+- An agent's openconnect process could keep an UP tunnel while retrying a dead upstream, blackholing traffic instead of exposing its unreachable route. Existing configured `check_host` probes now reset that upstream after three consecutive failures, reconciling before redial. No new config fields; interlink and unmonitored upstreams are unchanged. Two real AmneziaWG abrupt-loss runs passed fast ICMP/no-leak/recovery checks.
+
+### Tests and acceptance
+
+- Added example forwarding netlab coverage, removed obsolete blocked-scenario placeholders, and added continuous access-client traffic during E2E-06 upgrades. Backend: **1334 passed / 104 opt-in skipped**, lint/typecheck/render/parity green; frontend: **48 passed**, build green, **44 Playwright passed**. Netlab: **83 unique passed** across bounded runs.
+- **Not a completed release acceptance:** continuous client recovery in E2E-06 still fails on a distinct compatible post-D85 baseline. The final VM run was interrupted at the owner's request; owned resources were cleaned up. See `tests/e2e/ACCEPTANCE-2026-10-23.md`. No commit/push/PR or GitHub workflow dispatch was performed.
+
+
 ### Changed (role `gateway`, `via: node:<n>`, D-84, branch `redesign/rename-gateway-role`)
 
 - The agent role `exit` is now **`gateway`**, and a rule sends traffic through it with **`via: node:<n>`** instead of `via: exit:<n>`. CLI (`korctl agent create|set --role gateway`), API, panel (role checkboxes with a hint, rule editor `via` = `node`), docs, specs and examples use the new names. Error codes: `gateway_node`, `gateway_in_use`.

@@ -1,4 +1,8 @@
-.agents-view { min-width: 0; }
+.agents-view, .nodes-view { min-width: 0; }
+.nodes-view > .subnav .subnav-item { min-height: 40px; border-radius: 6px; }
+.nodes-view .node-hub { display: grid; gap: 6px; padding: 12px; margin: 12px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); overflow-wrap: anywhere; }
+.nodes-view > .panel { margin-top: 16px; }
+.nodes-view button { white-space: normal; overflow-wrap: anywhere; }
 .agents-view button, .agent-enrollment button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; }
 .agents-view .agent-summary { display: grid; gap: 6px; width: 100%; padding: 12px; text-align: left; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .agents-view .agent-summary.active { border-color: var(--accent); }
@@ -13,7 +17,8 @@
   .agents-view button, .agent-enrollment button, .agents-view summary,
   .agents-view input:not([type="checkbox"]), .agents-view select,
   .agents-view .agent-check, .agents-view .agent-checks label { min-height: 44px; }
-  .agent-enrollment input { min-height: 44px; }
+  .agent-enrollment input, .nodes-view button, .nodes-view input:not([type="checkbox"]), .nodes-view select { min-height: 44px; }
+  .nodes-view > .panel .panel-footer { flex-direction: column; align-items: stretch; }
   .agents-view .row-actions { flex-wrap: wrap; }
   .agents-view .panel-footer { flex-direction: column; align-items: stretch; }
   .agents-view .agent-section { max-width: none; }

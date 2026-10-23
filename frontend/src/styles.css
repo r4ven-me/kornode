@@ -2600,7 +2600,7 @@ label .icon-button span {
   padding: 2px 0;
 }
 
-/* Form building blocks of the v2 views (Agents, Fabric, Network → Egress).
+/* Form building blocks of the v2 views (Agents, Interlink, Network → Egress).
    Their labels wrap the control directly, without a <span>, so the label text
    is styled on the label and the control resets back to the input look. */
 .agent-fields {

@@ -9,7 +9,7 @@ import re
 
 from tests.e2e.fleet import REPOSITORY, Fleet
 from tests.e2e.inventory import E2EError, Inventory
-from tests.e2e.test_routed_fabric import BLOCKED
+from tests.e2e.test_routed_interlink import BLOCKED, NETLAB_COVERAGE
 from tests.e2e.worker import atomic
 
 
@@ -48,13 +48,17 @@ def main() -> int:
                         "E2E-03",
                         "E2E-04",
                         "E2E-05",
-                        "E2E-06 (previous images required)",
-                        "NL-13 (cache/upstream only)",
+                        "E2E-06 (interlink + access-client traffic; previous images required)",
+                        "E2E-07 (source and domain/subnet exits, fail-closed)",
+                        "NL-01…06 (including NL-05 AmneziaWG -> external upstream)",
+                        "NL-13 (cache/upstream and access-client forwarding)",
+                        "interlink recovery after a 60-second outage",
                         "NL-10",
                         "NL-11",
                         "NL-12",
                     ],
                     "blocked_contracts": BLOCKED,
+                    "netlab_coverage": NETLAB_COVERAGE,
                     "requires": [
                         "four owner-designated disposable VMs",
                         "hub self-hosted runner",

@@ -369,7 +369,7 @@ def test_server_enabled_alone_activates_dnsmasq_and_client_dns(tmp_path: Path) -
     # is enabled -- see AppConfig.dnsmasq_active_reasons()/client_dns_servers().
     config = _config(tmp_path)
 
-    assert config.dnsmasq_active_reasons() == ["server_enabled", "fabric_dns"]
+    assert config.dnsmasq_active_reasons() == ["server_enabled", "interlink_dns"]
     assert config.client_dns_servers() == ["10.100.1.1"]
 
 

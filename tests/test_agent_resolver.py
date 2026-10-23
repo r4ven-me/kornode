@@ -201,7 +201,7 @@ def test_run_wakes_the_reconciler_only_when_addresses_change(tmp_path: Path) -> 
 
 
 def test_udp_lookup_queries_from_the_pinned_source_address() -> None:
-    """The hub drops fabric queries from any address but the node's fabric address (D-47,
+    """The hub drops interlink queries from any address but the node's interlink address (D-47,
     D-66), so the resolver must pin it; 127.0.0.2 stands in for that address."""
     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server.bind(("127.0.0.1", 0))

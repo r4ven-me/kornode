@@ -7,17 +7,17 @@ import "./egress.css";
 export type DeadRule = { rule: number; shadowed_by: number };
 export type ExplainState = { result: NetExplainResult; src: string; dst: string } | null;
 
-type ToKind = "any" | "fabric" | "set" | "node" | "inline";
-type ViaKind = "local" | "fabric" | "drop" | "node" | "upstream";
+type ToKind = "any" | "interlink" | "set" | "node" | "inline";
+type ViaKind = "local" | "interlink" | "drop" | "node" | "upstream";
 
-const TO_KINDS: ToKind[] = ["any", "fabric", "set", "node", "inline"];
-const VIA_KINDS: ViaKind[] = ["local", "fabric", "drop", "node", "upstream"];
+const TO_KINDS: ToKind[] = ["any", "interlink", "set", "node", "inline"];
+const VIA_KINDS: ViaKind[] = ["local", "interlink", "drop", "node", "upstream"];
 const ROUTE = /^[0-9a-fA-F:.]+(\/\d+)?$/;
 
 export const NEW_RULE: Rule = { from: ["clients"], to: "any", via: "local" };
 
 function toParts(to: unknown): { kind: ToKind; value: string } {
-  if (to === "any" || to === "fabric") return { kind: to, value: "" };
+  if (to === "any" || to === "interlink") return { kind: to, value: "" };
   const item = (to ?? {}) as { set?: string; node?: number; routes?: string[]; domains?: string[] };
   if (item.set !== undefined) return { kind: "set", value: item.set };
   if (item.node !== undefined) return { kind: "node", value: String(item.node) };
@@ -25,7 +25,7 @@ function toParts(to: unknown): { kind: ToKind; value: string } {
 }
 
 function toValue(kind: ToKind, value: string): unknown {
-  if (kind === "any" || kind === "fabric") return kind;
+  if (kind === "any" || kind === "interlink") return kind;
   if (kind === "set") return { set: value };
   if (kind === "node") return { node: Number(value) };
   const items = value.split(/[\s,]+/).filter(Boolean);

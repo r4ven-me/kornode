@@ -6,6 +6,7 @@ import { AgentActivity } from "./AgentActivity";
 import { AgentPolicy } from "./AgentPolicy";
 import { AccessListenerEditor, AccessUserEditor, PrefixEditor, SourceEditor, UpstreamEditor } from "./AgentResources";
 import { AgentSettings } from "./AgentSettings";
+import { InterlinkView } from "../interlink/InterlinkView";
 
 type Section = "settings" | "networks" | "policy" | "upstreams" | "users" | "activity";
 
@@ -34,7 +35,7 @@ export function EnrollmentDialog({ token, onClose }: { token: string; onClose: (
   </dialog>;
 }
 
-export function AgentsView({ token, dryRun = false }: { token: string | null; dryRun?: boolean }) {
+export function AgentsView({ token, dryRun = false, active = true, onOpenSources = () => {} }: { token: string | null; dryRun?: boolean; active?: boolean; onOpenSources?: () => void }) {
   const [agents, setAgents] = useState<Agent[]>([]); const [control, setControl] = useState<ControlStatus | null>(null);
   const [selected, setSelected] = useState<string | null>(null), [detail, setDetail] = useState<Detail | null>(null);
   const selectedRef = useRef(selected); selectedRef.current = selected;
@@ -67,7 +68,8 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
     return () => { active = false; };
   }, [selected, token]);
   useEffect(() => {
-    let active = true, inFlight = false;
+    if (!active) return;
+    let subscribed = true, inFlight = false;
     const timer = setInterval(() => {
       if (inFlight) return;
       inFlight = true;
@@ -77,14 +79,14 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
         current ? agentGet<{ reports: JsonObject[] }>(agentPath(current, "/reports"), token) : Promise.resolve(null),
         current ? agentGet<{ commands: Detail["commands"] }>(agentPath(current, "/commands"), token) : Promise.resolve(null)
       ]).then(([list, status, reports, commands]) => {
-        if (!active) return;
+        if (!subscribed) return;
         setAgents(list.agents); setControl(status);
         if (current && current === selectedRef.current && reports && commands) setDetail(old => old ? { ...old, reports: reports.reports, commands: commands.commands } : old);
-      }).catch(reason => { if (active) setError(String(reason instanceof Error ? reason.message : reason)); })
+      }).catch(reason => { if (subscribed) setError(String(reason instanceof Error ? reason.message : reason)); })
         .finally(() => { inFlight = false; });
     }, 5000);
-    return () => { active = false; clearInterval(timer); };
-  }, [selected, token]);
+    return () => { subscribed = false; clearInterval(timer); };
+  }, [selected, token, active]);
 
   const mutate: Mutate = async (suffix, method, body, confirmation) => {
     if (!selected) return false;
@@ -118,13 +120,13 @@ export function AgentsView({ token, dryRun = false }: { token: string | null; dr
   }
   const live = agents.find(a => a.name === selected);
   return <div className="view-stack agents-view">
-    <section className="panel" data-capability="control.status"><div className="panel-header"><h2>Agents</h2><span className="pill muted">Control API {control?.enabled ? "enabled" : "disabled"}</span></div>
+    <section className="panel" data-capability="control.status"><div className="panel-header"><h2>Agent control plane</h2><span className="pill muted">Control API {control?.enabled ? "enabled" : "disabled"}</span></div>
       <p>{control?.agents ?? 0} registered · {control?.active ?? 0} enrolled · signing key {control?.signing_key_id ?? "not initialized"}</p>
       {control?.rotation && <p role="status">Rotation: {control.rotation.phase}; promotion {control.rotation.promotes_at}. {control.rotation.warning}</p>}
       <div className="panel-footer"><button className="action-button" type="button" disabled={busy} data-capability="agent.list" onClick={() => void refreshList().catch(reason => setError(String(reason)))}>Refresh agents</button><button className="action-button" type="button" disabled={busy} data-capability="control.rotate_key" onClick={() => void rotate()}>Rotate signing key{dryRun ? " (preview)" : ""}</button></div>
     </section>
     {error && <section className="panel" role="alert">{error}</section>}{message && <p role="status">{message}</p>}
-    <section className="panel"><h2>Registered agents</h2>{loading ? <p>Loading agents…</p> : agents.length === 0 ? <p>No agents registered yet.</p> : <ul className="agent-list">{agents.map(a => <li key={a.id}><button className={selected === a.name ? "agent-summary active" : "agent-summary"} type="button" disabled={busy} aria-pressed={selected === a.name} onClick={() => { setSelected(a.name); setSection("settings"); }}><strong>{a.name} · node {a.id}</strong><span>{a.state} · {a.online ? "online" : "offline"}</span><span>desired {a.desired_version} / reported {a.applied_version}</span></button></li>)}</ul>}</section>
+    <InterlinkView token={token} agents={agents} selected={selected} busy={busy} loading={loading} active={active} onSelect={name => { setSelected(name); setSection("settings"); }} onOpenSources={onOpenSources} />
     <details className="panel"><summary>Add agent</summary><form onSubmit={e => {
       e.preventDefault();
       if (forceReuse && !dryRun && !window.confirm(`Force reuse of ID ${id} for ${name}, bypassing its quarantine?`)) return;

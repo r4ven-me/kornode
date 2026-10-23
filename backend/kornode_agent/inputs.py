@@ -24,13 +24,15 @@ from kornode_agent.access import DEVICE as ACCESS_DEVICE
 from kornode_agent.config import AgentConfig
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
-FABRIC = "fabric"
+INTERLINK = "interlink"
 HUB_NODE_ID = 1
-# Bootstrap policy: the host reaches the hub (control API) through the fabric
+# Bootstrap policy: the host reaches the hub (control API) through the interlink
 # tunnel and nothing else is marked, so nothing can leak.
 BOOTSTRAP_POLICY = EgressPolicy(
     egress=(
-        Rule.model_validate({"id": "to-fabric", "from": ["host"], "to": "fabric", "via": "fabric"}),
+        Rule.model_validate(
+            {"id": "to-interlink", "from": ["host"], "to": "interlink", "via": "interlink"}
+        ),
     )
 )
 
@@ -145,19 +147,19 @@ class AgentNetInputs:
         active = self.active
         links = self.probes.links()
         tunnels: dict[str, TunnelFact] = {}
-        fabric_iface = (
-            active.bundle.tunnels.fabric.interface if active else self.config.fabric.interface
+        interlink_iface = (
+            active.bundle.tunnels.interlink.interface if active else self.config.interlink.interface
         )
-        tunnels[FABRIC] = TunnelFact(
-            interface=fabric_iface,
-            up=links.get(fabric_iface, False),
-            carrier=self.carriers.carrier(FABRIC),
+        tunnels[INTERLINK] = TunnelFact(
+            interface=interlink_iface,
+            up=links.get(interlink_iface, False),
+            carrier=self.carriers.carrier(INTERLINK),
         )
         if active:
             # `node:<n>` goes through the hub tunnel: same device, same carrier (D-69).
             tunnels.update(
                 gateway_tunnels(
-                    active.bundle.policy, fabric_iface, links.get(fabric_iface, False)
+                    active.bundle.policy, interlink_iface, links.get(interlink_iface, False)
                 )
             )
         upstreams: list[str] = []
@@ -196,21 +198,21 @@ class AgentNetInputs:
             for source in bundle.policy.sources:
                 sources[source.name] = SourceFact(present=source.interface in links)
             grouped: dict[int, list[Network]] = {}
-            for item in bundle.fabric.prefixes:
+            for item in bundle.interlink.prefixes:
                 grouped.setdefault(item.node_id, []).append(
                     ipaddress.ip_network(item.prefix, strict=False)
                 )
             node_prefixes = {key: tuple(value) for key, value in grouped.items()}
-            if links.get(fabric_iface, False) and any(
-                "fabric" in rule.from_ for rule in bundle.policy.egress
+            if links.get(interlink_iface, False) and any(
+                "interlink" in rule.from_ for rule in bundle.policy.egress
             ):
-                # The node takes traffic from the fabric (an exit node, D-69): its answers
-                # come back from the internet addressed to fabric prefixes and must return
+                # The node takes traffic from the interlink (an exit node, D-69): its answers
+                # come back from the internet addressed to interlink prefixes and must return
                 # through the tunnel, whatever mark they carry. Prefix routes in main (owned
                 # by protocol 77, gone with the tunnel) do that without touching the
                 # reverse-path check, which honours the packet mark.
                 session_routes = tuple(
-                    (net, fabric_iface) for nets in node_prefixes.values() for net in nets
+                    (net, interlink_iface) for nets in node_prefixes.values() for net in nets
                 )
         tunnel_ifaces = {tunnel.interface for tunnel in tunnels.values()}
         return NodeFacts(
@@ -221,7 +223,7 @@ class AgentNetInputs:
             local_networks=self.probes.local_networks(tunnel_ifaces),
             upstreams=tuple(upstreams),
             node_prefixes=node_prefixes,
-            fabric_ifaces=(fabric_iface,),
+            interlink_ifaces=(interlink_iface,),
             uplink=self.probes.uplink(tunnel_ifaces),
             all_rp_filter=self.probes.rp_filter(),
             local_addresses=local_addresses,

@@ -67,9 +67,9 @@ capabilities:
 | agent.bundle | `agent bundle list/show/diff <name> [v1] [v2]` | `GET /api/agents/{name}/bundles[/{v}]`, `GET .../diff?a=&b=` | Detail → Bundles |
 | agent.reports | `agent status <name> [--watch]` | `GET /api/agents/{name}/reports?limit=` | Detail → Status |
 | agent.command | `agent exec <name> reconnect/explain/collect-diag/restart/rollback ...` | `POST /api/agents/{name}/commands`, `GET .../commands/{id}` | Detail → Actions |
-| fabric.show | `fabric show` | `GET /api/fabric` | Fabric → Topology |
-| fabric.settings | `fabric set --node-id/--cidr/--domain/...` | `PATCH /api/fabric` | Fabric → Settings |
-| dns.records | `dns record add/del <name> <type> <value> [--node <agent>]`, `dns record list` | `GET/POST/DELETE /api/dns/records` | Fabric → DNS |
+| interlink.show | `interlink show` | `GET /api/interlink` | Interlink → Topology |
+| interlink.settings | `interlink set --node-id/--cidr/--domain/...` | `PATCH /api/interlink` | Interlink → Settings |
+| dns.records | `dns record add/del <name> <type> <value> [--node <agent>]`, `dns record list` | `GET/POST/DELETE /api/dns/records` | Interlink → DNS |
 | egress.hub | `egress show/edit/set/check` | `GET/PUT /api/egress`, `POST /api/egress/check` | Network → Egress |
 | sources.hub | `source add/del/list` | `/api/sources` | Network → Sources |
 | sets | `set add/del/list/refresh` | `/api/sets` | Network → Sets |
@@ -131,8 +131,8 @@ korctl agent user add branch alice --password-stdin --group staff
 korctl agent status branch --watch --json
 korctl agent bundle list branch --json
 korctl agent bundle diff branch 1 2 --json
-korctl agent exec branch reconnect --tunnel fabric --dry-run --json
-korctl agent exec branch reconnect --tunnel fabric --yes --json
+korctl agent exec branch reconnect --tunnel interlink --dry-run --json
+korctl agent exec branch reconnect --tunnel interlink --yes --json
 korctl agent delete branch --dry-run --json
 korctl control status --json
 korctl control rotate-signing-key --dry-run --json
@@ -161,5 +161,5 @@ the bundle since P4-04 (password authentication only); unsupported runtime polic
 ## Panel structure (hub)
 
 Top-level sections: Dashboard · Clients · Agents · External servers ·
-Network (egress, sources, sets, plan, explain) · Fabric (topology, DNS) ·
+Network (egress, sources, sets, plan, explain) · Interlink (topology, DNS) ·
 Certificates · Logs · Diagnostics · Settings.

@@ -44,8 +44,8 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
         tunnels={} if offline else {"node:2": TunnelFact("vpns1", True)},
         sources={"wgusers": SourceFact(present=True)},
         node_prefixes=PREFIXES,
-        fabric_ifaces=() if offline else ("vpns1",),
-        fabric_guard=True,
+        interlink_ifaces=() if offline else ("vpns1",),
+        interlink_guard=True,
         uplink="eth0",
         all_rp_filter="1",
     )
@@ -54,14 +54,14 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
 
 def node2() -> tuple[EgressPolicy, NodeFacts]:
     policy = EgressPolicy.model_validate(
-        {"egress": [{"from": ["fabric"], "to": "any", "via": "local"}]}
+        {"egress": [{"from": ["interlink"], "to": "any", "via": "local"}]}
     )
     facts = NodeFacts(
         node_id=2,
         client_pool=n("10.100.2.0/24"),
-        tunnels={"fabric": TunnelFact("oc-hub0", True)},
+        tunnels={"interlink": TunnelFact("oc-hub0", True)},
         node_prefixes=PREFIXES,
-        fabric_ifaces=("oc-hub0",),
+        interlink_ifaces=("oc-hub0",),
         session_routes=((n("10.99.0.0/24"), "oc-hub0"), (n(SOURCE), "oc-hub0")),
         uplink="eth0",
         all_rp_filter="1",

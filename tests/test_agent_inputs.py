@@ -7,7 +7,7 @@ from tests.test_agent_apply import World
 
 from kornode.bundle.signing import key_id, raw_public_bytes
 from kornode.bundle.validator import Validated, validate
-from kornode_agent.config import AgentConfig, FabricConfig, HubConfig
+from kornode_agent.config import AgentConfig, HubConfig, InterlinkConfig
 from kornode_agent.health import AgentHealth
 from kornode_agent.inputs import AgentNetInputs, Network
 from kornode_agent.tunnels import specs_for
@@ -17,7 +17,7 @@ CONFIG = AgentConfig(
     hub=HubConfig(
         host="hub.example", port=443, pin="pin-sha256:AAA", control_url="https://10.99.0.1:8444"
     ),
-    fabric=FabricConfig(),
+    interlink=InterlinkConfig(),
 )
 
 
@@ -52,7 +52,7 @@ def _validated(tmp_path: Path) -> Validated:
         sig,
         trusted={key_id(pub): world.signer.public_key()},
         high_water_version=0,
-        agent_version="2.0.0",
+        agent_version="2.1.0",
         expected_node_id=3,
         seal_private_key=world.seal,
     )
@@ -73,7 +73,7 @@ def test_bundle_facts_follow_the_links(tmp_path: Path) -> None:
     inputs.set_bundle(validated)
     facts = inputs.facts()
     assert facts.node_id == 3 and facts.uplink == "eth0"
-    assert facts.tunnels["fabric"].up and facts.tunnels["fabric"].carrier == ("203.0.113.10",)
+    assert facts.tunnels["interlink"].up and facts.tunnels["interlink"].carrier == ("203.0.113.10",)
     assert not facts.tunnels["upstream:office"].up
     assert facts.sources["amnezia"].present
     assert facts.upstreams == ("office",)
@@ -104,12 +104,12 @@ def test_set_bundle_wakes_the_reconciler(tmp_path: Path) -> None:
 def test_specs_pin_the_hub_and_keep_secrets_out_of_repr(tmp_path: Path) -> None:
     validated = _validated(tmp_path)
     specs = specs_for(validated, CONFIG, tmp_path)
-    assert set(specs) == {"fabric", "upstream:office"}
-    fabric = specs["fabric"].dials[0]
-    assert fabric.server_cert_pin and fabric.pfs and fabric.auth_type == "cert"
+    assert set(specs) == {"interlink", "upstream:office"}
+    interlink = specs["interlink"].dials[0]
+    assert interlink.server_cert_pin and interlink.pfs and interlink.auth_type == "cert"
     office = specs["upstream:office"]
     assert office.password == "pw" and "pw" not in repr(office)
-    assert set(specs_for(None, CONFIG, tmp_path)) == {"fabric"}
+    assert set(specs_for(None, CONFIG, tmp_path)) == {"interlink"}
 
 
 class FakeTunnels:
@@ -128,14 +128,16 @@ def test_health_needs_tunnel_hub_ping_and_check_host(tmp_path: Path) -> None:
         probes.append((iface, host))
         return False
 
-    health = AgentHealth(FakeTunnels({"fabric", "upstream:office"}), lambda: True, probe)
+    health = AgentHealth(FakeTunnels({"interlink", "upstream:office"}), lambda: True, probe)
     result = health.checks(validated)
-    assert result["fabric"] is True
+    assert result["interlink"] is True
     assert result["upstream:office"] is False and probes  # check_host failed through the mark
-    assert AgentHealth(FakeTunnels({"fabric"}), lambda: False).checks(None) == {"fabric": False}
+    assert AgentHealth(FakeTunnels({"interlink"}), lambda: False).checks(None) == {
+        "interlink": False
+    }
 
 
-def test_bootstrap_routes_the_hub_through_the_fabric_exit_only() -> None:
+def test_bootstrap_routes_the_hub_through_the_interlink_exit_only() -> None:
     inputs = AgentNetInputs(
         AgentConfig(
             node_id=3,
@@ -150,14 +152,14 @@ def test_bootstrap_routes_the_hub_through_the_fabric_exit_only() -> None:
         FakeCarriers(),
     )
     desired = inputs.desired()
-    fabric_routes = [r for r in desired.routes if getattr(r, "dev", None) == "oc-hub0"]
-    assert [r.dst for r in fabric_routes] == ["10.99.0.1/32"]
+    interlink_routes = [r for r in desired.routes if getattr(r, "dev", None) == "oc-hub0"]
+    assert [r.dst for r in interlink_routes] == ["10.99.0.1/32"]
 
 
-def test_a_node_that_takes_fabric_traffic_routes_the_fabric_prefixes_in_main(
+def test_a_node_that_takes_interlink_traffic_routes_the_interlink_prefixes_in_main(
     tmp_path: Path,
 ) -> None:
-    """An exit node (D-69): answers come back addressed to fabric prefixes and must return
+    """An exit node (D-69): answers come back addressed to interlink prefixes and must return
     through the tunnel; prefix routes (proto 77, in main) do that and disappear with the link."""
     import dataclasses
 
@@ -167,8 +169,8 @@ def test_a_node_that_takes_fabric_traffic_routes_the_fabric_prefixes_in_main(
     exit_policy = EgressPolicy.model_validate(
         {
             "egress": [
-                {"id": "to-fabric", "from": ["host"], "to": "fabric", "via": "fabric"},
-                {"id": "gateway-local", "from": ["fabric"], "to": "any", "via": "local"},
+                {"id": "to-interlink", "from": ["host"], "to": "interlink", "via": "interlink"},
+                {"id": "gateway-local", "from": ["interlink"], "to": "any", "via": "local"},
             ]
         }
     )

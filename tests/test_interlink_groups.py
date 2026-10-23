@@ -8,7 +8,7 @@ from kornode.net.model import Source
 from kornode.registry.db import migrate, open_registry
 from kornode.registry.repository import Registry
 from kornode.services.config import ConfigService
-from kornode.services.fabric_groups import FabricGroupsService
+from kornode.services.interlink_groups import InterlinkGroupsService
 
 
 def _config(tmp_path: Path, *, clients_policy: bool = False) -> AppConfig:
@@ -45,7 +45,7 @@ def test_render_group_and_user_files_for_active_agents(tmp_path: Path) -> None:
     registry.create_node(id=2, name="node2", state="pending")
     registry.create_node(id=3, name="node3", state="active")
     registry.create_node(id=4, name="node4", state="revoked")
-    service = FabricGroupsService(config)
+    service = InterlinkGroupsService(config)
 
     rendered = {
         item.path.name: item.content for item in service.render_files(registry.list_nodes())
@@ -76,7 +76,7 @@ def test_render_group_and_user_files_for_active_agents(tmp_path: Path) -> None:
 
 def test_clients_group_policy_overrides_generated_clients_file(tmp_path: Path) -> None:
     config = _config(tmp_path, clients_policy=True)
-    service = FabricGroupsService(config)
+    service = InterlinkGroupsService(config)
 
     names = {item.path.name for item in service.render_files([])}
 
@@ -97,7 +97,7 @@ def test_stale_files_and_sync_remove_generated_user_files_of_removed_agents(
     (user_dir / "agent-2").write_text(header, encoding="utf-8")
     (user_dir / "alice").write_text(header, encoding="utf-8")
 
-    changed = FabricGroupsService(config).sync()
+    changed = InterlinkGroupsService(config).sync()
 
     assert user_dir / "agent-2" in changed
     assert not (user_dir / "agent-2").exists()
@@ -111,11 +111,11 @@ def test_nodes_missing_registry_does_not_create_file(tmp_path: Path) -> None:
     config = _config(tmp_path)
     path = config.system.data_dir / "registry.db"
 
-    assert FabricGroupsService(config).nodes() == []
+    assert InterlinkGroupsService(config).nodes() == []
     assert not path.exists()
 
 
-def test_config_service_write_rendered_files_syncs_fabric_groups(tmp_path: Path) -> None:
+def test_config_service_write_rendered_files_syncs_interlink_groups(tmp_path: Path) -> None:
     config = _config(tmp_path)
     registry = _registry(config)
     registry.create_node(id=3, name="node3", state="active")
@@ -151,7 +151,7 @@ def test_user_files_carry_iroute_route_and_transport(tmp_path: Path) -> None:
         registry.list_prefixes(3) + [{"prefix": "192.168.30.0/24", "kind": "lan", "export": False}],
     )
     registry.set_prefixes(4, [{"prefix": "192.168.4.0/24", "kind": "lan", "export": True}])
-    service = FabricGroupsService(config)
+    service = InterlinkGroupsService(config)
 
     rendered = {
         item.path.name: item.content
@@ -178,7 +178,7 @@ def test_sync_reloads_ocserv_only_when_an_existing_file_changes(tmp_path: Path) 
     registry.create_node(id=1, name="hub", state="active")
     registry.create_node(id=2, name="a", state="active")
     reloads: list[int] = []
-    service = FabricGroupsService(config, reload_ocserv=lambda: reloads.append(1))
+    service = InterlinkGroupsService(config, reload_ocserv=lambda: reloads.append(1))
 
     service.sync()
     assert reloads == []  # first write: files are new
@@ -203,7 +203,7 @@ def test_user_files_route_exported_hub_sources_only(tmp_path: Path) -> None:
     registry = _registry(config)
     registry.create_node(id=1, name="hub", state="active")
     registry.create_node(id=2, name="a", state="active")
-    service = FabricGroupsService(config)
+    service = InterlinkGroupsService(config)
 
     rendered = {
         item.path.name: item.content

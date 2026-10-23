@@ -168,7 +168,7 @@ private_key="other-key-material" passwd='other-password'"""
         (["doctor"], {"findings": [{"severity": "warning"}]}, 0),
         (["doctor"], {"findings": [{"severity": "error"}]}, 1),
         (["explain", "host", "1.1.1.1"], {"route": "main table"}, 0),
-        (["reconnect", "fabric"], {"reconnected": ["fabric"]}, 0),
+        (["reconnect", "interlink"], {"reconnected": ["interlink"]}, 0),
         (["bundle", "rollback", "5"], {"result": "confirmed"}, 0),
     ],
 )

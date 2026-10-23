@@ -148,7 +148,7 @@ def hub(tmp_path: Path) -> Iterator[Hub]:
 
 
 def _report(**overrides: Any) -> dict[str, Any]:
-    return {"agent_version": "2.0.0", "applied_version": 1, **overrides}
+    return {"agent_version": "2.1.0", "applied_version": 1, **overrides}
 
 
 def test_every_route_but_enroll_refuses_a_missing_certificate(hub: Hub) -> None:
@@ -292,7 +292,7 @@ def test_report_carries_the_resolved_addresses_of_exit_rules_and_wakes_the_recon
 
 def test_commands_are_delivered_once_and_finished_by_their_node_only(hub: Hub) -> None:
     agent = hub.enroll()
-    command = hub.env.registry.enqueue_command(3, "reconnect", {"tunnel": "fabric"})
+    command = hub.env.registry.enqueue_command(3, "reconnect", {"tunnel": "interlink"})
 
     assert agent.request("GET", "/agent/v1/commands")[0] == 200
     assert agent.request("GET", "/agent/v1/commands")[0] == 204
