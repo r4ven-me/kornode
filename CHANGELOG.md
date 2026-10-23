@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-23
+
+### Security and reliability
+
+- Production audit hardening A01–A25: MFA/session protection, secret-safe command logging, validated PKI publication, stable conntrack routing identity and fail-closed update barriers, serialized config mutations with source ETags, and stricter container readiness. Details and upgrade requirements: `docs/audit-remediation.md`.
+- Follow-up review closes CLI collection lost updates/secret-reference expansion, stale render/runtime writers, and password/TOTP updates through symlinked config paths.
+- Structured control settings, source/destination-set editors, nullable group inheritance, immutable release version tags and mandatory ocserv source checksum.
+- Existing VPN sessions may need reconnecting; conntrack-label support is required. MFA-enabled Basic clients must use the authenticated session flow. This release does **not** include the unaccepted interlink/Nodes redesign.
+
+
 ### Changed (role `gateway`, `via: node:<n>`, D-84, branch `redesign/rename-gateway-role`)
 
 - The agent role `exit` is now **`gateway`**, and a rule sends traffic through it with **`via: node:<n>`** instead of `via: exit:<n>`. CLI (`korctl agent create|set --role gateway`), API, panel (role checkboxes with a hint, rule editor `via` = `node`), docs, specs and examples use the new names. Error codes: `gateway_node`, `gateway_in_use`.
