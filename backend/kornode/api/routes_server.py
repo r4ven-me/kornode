@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
-from kornode.api.routes_config import apply_config_patch
+from kornode.api.routes_config import apply_config_patch, runtime_config_path
 from kornode.config.models import AppConfig, OtpAuthConfig
 from kornode.renderers import OcservConfigRenderer
 from kornode.services.command import CommandResult
@@ -174,7 +174,9 @@ def save_server_settings(
     # reload=False may defer tuning changes, but not an explicit start/stop.
     enabled_changed = was_enabled != loaded_config.server.enabled
     reload_result = (
-        ServerService(loaded_config).apply_config_change(previous)
+        ServerService(loaded_config, config_path=runtime_config_path(request)).apply_config_change(
+            previous
+        )
         if payload.reload or enabled_changed
         else None
     )
@@ -200,7 +202,9 @@ def save_auth_methods_settings(
     loaded_config, written = apply_config_patch(request, {"auth": patch})
     # ocserv reads its `auth =` lines only at startup: switching a method on
     # or off takes a restart, or the running server keeps the old methods.
-    reload_result = ServerService(loaded_config).apply_config_change(previous)
+    reload_result = ServerService(
+        loaded_config, config_path=runtime_config_path(request)
+    ).apply_config_change(previous)
     return {
         "status": "saved",
         "written": written,
@@ -236,7 +240,10 @@ def test_otp_telegram(request: Request, payload: AuthMethodsSettingsRequest) -> 
 @router.get("/status")
 def status(request: Request) -> dict[str, object]:
     config: AppConfig = request.app.state.config
-    return command_result(ServerService(config).status(), ("korctl", "server", "status"))
+    return command_result(
+        ServerService(config).status(),
+        ("korctl", "server", "status"),
+    )
 
 
 @router.get("/processes")
@@ -258,7 +265,9 @@ def reload_server(request: Request, payload: DryRunRequest | None = None) -> dic
 def restart_server(request: Request, payload: DryRunRequest | None = None) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     return command_result(
-        ServerService(config).restart(dry_run=payload.dry_run if payload else False),
+        ServerService(config, config_path=runtime_config_path(request)).restart(
+            dry_run=payload.dry_run if payload else False
+        ),
         ("korctl", "server", "restart"),
     )
 
@@ -267,7 +276,9 @@ def restart_server(request: Request, payload: DryRunRequest | None = None) -> di
 def start_server(request: Request, payload: DryRunRequest | None = None) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     return command_result(
-        ServerService(config).start(dry_run=payload.dry_run if payload else False),
+        ServerService(config, config_path=runtime_config_path(request)).start(
+            dry_run=payload.dry_run if payload else False
+        ),
         ("korctl", "server", "start"),
     )
 
@@ -285,7 +296,7 @@ def stop_server(request: Request, payload: DryRunRequest | None = None) -> dict[
 def process_action(request: Request, payload: ProcessActionRequest) -> dict[str, object]:
     config: AppConfig = request.app.state.config
     try:
-        result = ServerService(config).process_action(
+        result = ServerService(config, config_path=runtime_config_path(request)).process_action(
             payload.action,
             payload.process,
             dry_run=payload.dry_run,

@@ -74,6 +74,29 @@ historical AppConfig control.
    `make release RELEASE_COMMIT=<full-reviewed-HEAD-SHA>`. Floating `EXTRA_TAG` is
    explicitly mutable; semantic version tags are not.
 
+## Follow-up review fixes (2026-10-23)
+
+Independent PR review found three uncovered paths; these are now fixed with
+regression tests:
+
+- CLI profile/provider/group collection mutations run against the latest raw data
+  under the shared source lock, preserving named entries and secret references.
+  Omitted OIDC secrets stay unchanged; `--clear-client-secret` explicitly clears one.
+- Explicit render, delayed blocklist refresh, DNS apply and server start/restart
+  reload the authoritative source under the same lock, retained through dependent
+  runtime actions. Symlink and explicit `.env` contexts remain unchanged; embedded
+  apps with unsaved initialization candidates retain their deliberate overrides.
+- Password/TOTP mutations validate using the supplied source path rather than its
+  resolved alias, keeping symlink-specific environment discovery consistent.
+
+Final follow-up local validation: **1831 backend tests passed**, 120 privileged/VM
+cases deselected; **78 frontend tests passed**, TypeScript/build, Ruff, both mypy
+targets, render and parity passed. The original head's GitHub CI run `39965496145`
+also passed backend, frontend, container-tests and **97 full netlab cases**. Fresh
+CI must pass on the follow-up commit before merge; the original result does not
+validate later edits. No disposable-VM E2E or production deployment was performed
+as part of this review.
+
 ## Validation boundaries
 
 Final ordinary validation: **1789 backend tests passed** (120 privileged/VM cases

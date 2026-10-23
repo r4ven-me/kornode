@@ -22,6 +22,7 @@ from kornode.services.config_store import (
     source_etag,
     source_version,
 )
+from kornode.services.render_transaction import render_config as render_config_transaction
 from kornode.services.secrets import (
     collect_config_secrets,
     mask_text,
@@ -90,9 +91,15 @@ def render_config(request: Request) -> dict[str, str]:
 def write_rendered_config(
     request: Request,
 ) -> dict[str, list[str]]:
-    config: AppConfig = request.app.state.config
-    paths = ConfigService().write_rendered_files(config)
-    return {"written": [str(path) for path in paths]}
+    path = runtime_config_path(request)
+    if path is None:
+        # Embedded/initialization-only apps have no authoritative disk source.
+        return {
+            "written": [
+                str(item) for item in ConfigService().write_rendered_files(request.app.state.config)
+            ]
+        }
+    return {"written": render_config_transaction(path)}
 
 
 @router.get("/diff")
@@ -251,6 +258,7 @@ def _apply_config_mutation(
     def install(config: AppConfig) -> None:
         previous = request.app.state.config
         request.app.state.config = config
+        request.app.state.config_source = _config_path(request)
         invalidate_auth_sessions(request, previous, config)
 
     try:
@@ -308,6 +316,12 @@ def _validate_public_candidate(
                 detail="admin authentication changes require dedicated auth actions",
             )
     return config
+
+
+def runtime_config_path(request: Request) -> Path | None:
+    """Explicit source for runtime writers; embedded config-only apps keep overrides."""
+    source = getattr(request.app.state, "config_source", request.app.state.config_path)
+    return Path(source) if source is not None else None
 
 
 def _config_path(request: Request) -> Path:

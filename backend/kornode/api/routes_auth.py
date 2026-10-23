@@ -126,7 +126,7 @@ def _apply_auth_patch(
     def mutate(raw: dict[str, Any]) -> dict[str, Any]:
         # apply_config_mutation already holds the config lock. Bind the earlier
         # password/TOTP checks to this latest candidate before any persistence.
-        latest = validate_config_data(raw, Path(request.app.state.config_path).resolve())
+        latest = validate_config_data(raw, Path(request.app.state.config_path))
         registry = auth_registry(request)
         if registry is not proof.registry or _auth_fingerprint(latest) != proof.fingerprint:
             raise HTTPException(status_code=401, detail="authentication_changed")

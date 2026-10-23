@@ -51,6 +51,7 @@ def create_app(
     config: AppConfig | None = None,
     config_path: Path | str | None = None,
 ) -> FastAPI:
+    in_memory_only = config is not None and config_path is None and not os.getenv("KORNODE_CONFIG")
     if config_path is None:
         config_path_env = os.getenv("KORNODE_CONFIG")
         resolved_config_path = Path(config_path_env) if config_path_env else DEFAULT_CONFIG_PATH
@@ -62,6 +63,9 @@ def create_app(
     app = FastAPI(title="Korvus Node API", version=__version__)
     app.state.config = config
     app.state.config_path = resolved_config_path
+    # Embedded callers may supply an unsaved initialization candidate. Only
+    # source-backed apps opt into authoritative runtime reloads.
+    app.state.config_source = None if in_memory_only else resolved_config_path
     app.state.auth_sessions = AuthSessionRegistry(config.web.session_lifetime)
     app.state.auth_sessions.synchronize(config)
 

@@ -7,7 +7,11 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from kornode.api.auth import require_admin
-from kornode.api.routes_config import apply_config_mutation, apply_config_patch
+from kornode.api.routes_config import (
+    apply_config_mutation,
+    apply_config_patch,
+    runtime_config_path,
+)
 from kornode.api.routes_server import ocserv_apply_result, running_ocserv_conf
 from kornode.config.models import AppConfig, OidcProviderConfig
 from kornode.services.config_collections import raw_collection, replace_named
@@ -88,7 +92,9 @@ def save_oidc_settings(
     loaded_config, written = apply_config_patch(request, {"auth": {"oidc": patch}})
     # Enabling/disabling the PAM/RADIUS connector changes ocserv's `auth =`
     # lines, which only a restart applies.
-    reload_result = ServerService(loaded_config).apply_config_change(previous)
+    reload_result = ServerService(
+        loaded_config, config_path=runtime_config_path(request)
+    ).apply_config_change(previous)
     return {
         "status": "saved",
         "written": written,

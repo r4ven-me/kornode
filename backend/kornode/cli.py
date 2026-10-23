@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from kornode.registry.snapshot import snapshot as registry_snapshot
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandResult
 from kornode.services.config import ConfigService
+from kornode.services.config_collections import raw_collection, replace_named
 from kornode.services.config_store import mutate_config
 from kornode.services.diagnostics import DiagnosticsService
 from kornode.services.doctor import DoctorService
@@ -125,15 +127,19 @@ def config_render(
         help="Render to stdout without writing files.",
     ),
 ) -> None:
-    config = get_config()
-    service = ConfigService()
-    secrets = collect_config_secrets(config)
     if dry_run:
+        config = get_config()
+        service = ConfigService()
+        secrets = collect_config_secrets(config)
         for rendered in service.render_files(config):
             typer.echo(f"--- {rendered.path}")
             typer.echo(mask_text(rendered.content, secrets).rstrip())
         return
-    for path in service.write_rendered_files(config):
+    from kornode.services.render_transaction import render_config
+
+    for path in render_config(
+        STATE.get("config_path") or DEFAULT_CONFIG_PATH, env_file=STATE.get("env_file")
+    ):
         typer.echo(str(path))
 
 
@@ -154,6 +160,22 @@ def save_config_patch(patch: dict[str, Any], *, write_rendered: bool = True) -> 
     return config
 
 
+def _mutate_collection(
+    section: str,
+    field: str,
+    mutation: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
+) -> AppConfig:
+    path = STATE.get("config_path") or DEFAULT_CONFIG_PATH
+
+    def update(raw: dict[str, Any]) -> dict[str, Any]:
+        items = raw_collection(raw, path, section, field)
+        raw.setdefault(section, {})[field] = mutation(items)
+        return raw
+
+    config, _ = mutate_config(path, update, env_file=STATE.get("env_file"))
+    return config
+
+
 def _validate_config_data(data: dict[str, Any], path: Path) -> AppConfig:
     return validate_config_data(data, path, env_file=STATE.get("env_file"))
 
@@ -162,7 +184,13 @@ def _validate_config_data(data: dict[str, Any], path: Path) -> AppConfig:
 def server_start(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show supervisor command only."),
 ) -> None:
-    echo_result(ServerService(get_config()).start(dry_run=dry_run))
+    echo_result(
+        ServerService(
+            get_config(),
+            config_path=STATE.get("config_path") or DEFAULT_CONFIG_PATH,
+            env_file=STATE.get("env_file"),
+        ).start(dry_run=dry_run)
+    )
 
 
 @server_app.command("stop")
@@ -183,7 +211,13 @@ def server_reload(
 def server_restart(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show supervisor restart command only."),
 ) -> None:
-    echo_result(ServerService(get_config()).restart(dry_run=dry_run))
+    echo_result(
+        ServerService(
+            get_config(),
+            config_path=STATE.get("config_path") or DEFAULT_CONFIG_PATH,
+            env_file=STATE.get("env_file"),
+        ).restart(dry_run=dry_run)
+    )
 
 
 @server_app.command("status")
@@ -223,7 +257,13 @@ def server_process_start(
     process: str,
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    echo_result(ServerService(get_config()).process_action("start", process, dry_run=dry_run))
+    echo_result(
+        ServerService(
+            get_config(),
+            config_path=STATE.get("config_path") or DEFAULT_CONFIG_PATH,
+            env_file=STATE.get("env_file"),
+        ).process_action("start", process, dry_run=dry_run)
+    )
 
 
 @server_process_app.command("stop")
@@ -239,7 +279,13 @@ def server_process_restart(
     process: str,
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
-    echo_result(ServerService(get_config()).process_action("restart", process, dry_run=dry_run))
+    echo_result(
+        ServerService(
+            get_config(),
+            config_path=STATE.get("config_path") or DEFAULT_CONFIG_PATH,
+            env_file=STATE.get("env_file"),
+        ).process_action("restart", process, dry_run=dry_run)
+    )
 
 
 @server_process_app.command("status")
@@ -573,17 +619,14 @@ def upstream_disable_profile(profile: str) -> None:
 
 
 def _set_profile_enabled(name: str, enabled: bool) -> None:
-    config = get_config()
-    if not any(item.name == name for item in config.upstream.profiles):
-        typer.echo(f"unknown upstream profile: {name}", err=True)
-        raise typer.Exit(1)
-    profiles = [
-        {**item.model_dump(mode="json"), "enabled": enabled}
-        if item.name == name
-        else item.model_dump(mode="json")
-        for item in config.upstream.profiles
-    ]
-    save_config_patch({"upstream": {"profiles": profiles}})
+    def update(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        existing = next((item for item in profiles if item.get("name") == name), None)
+        if existing is None:
+            typer.echo(f"unknown upstream profile: {name}", err=True)
+            raise typer.Exit(1)
+        return replace_named(profiles, name, {**existing, "enabled": enabled})
+
+    _mutate_collection("upstream", "profiles", update)
     typer.echo(f"profile '{name}' {'enabled' if enabled else 'disabled'}")
 
 
@@ -890,8 +933,12 @@ def internal_dns_refresh(
 ) -> None:
     config = get_config()
     result = InternalDnsService(config).refresh_url_blocklist(url, preview=preview)
-    if result.saved and config.internal_dns.blocklist_enabled:
-        ConfigService().write_rendered_files(config)
+    if result.saved:
+        from kornode.services.render_transaction import render_config
+
+        render_config(
+            STATE.get("config_path") or DEFAULT_CONFIG_PATH, env_file=STATE.get("env_file")
+        )
     typer.echo(
         json.dumps(
             {
@@ -956,33 +1003,40 @@ def identity_oidc_provider_set(
         hide_input=True,
         help="OIDC client secret; prefer ${SECRET:...} in YAML for production.",
     ),
+    clear_client_secret: bool = typer.Option(
+        False, "--clear-client-secret", help="Remove the stored OIDC client secret."
+    ),
     scope: list[str] = typer.Option(["openid", "profile", "email"], "--scope"),
     username_claim: str = typer.Option("preferred_username", "--username-claim"),
     groups_claim: str = typer.Option("groups", "--groups-claim"),
     allowed_group: list[str] = typer.Option([], "--allowed-group"),
 ) -> None:
-    config = get_config()
-    provider = OidcProviderConfig.model_validate(
-        {
-            "name": name,
-            "issuer_url": issuer_url,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scopes": scope,
-            "username_claim": username_claim,
-            "groups_claim": groups_claim,
-            "allowed_groups": allowed_group,
-        }
-    )
-    providers = [item for item in config.identity.oidc_providers if item.name != provider.name]
-    providers.append(provider)
-    updated = save_config_patch(
-        {
-            "identity": {
-                "oidc_providers": [item.model_dump(mode="json") for item in providers],
+    if clear_client_secret and client_secret is not None:
+        raise typer.BadParameter("--client-secret and --clear-client-secret are mutually exclusive")
+
+    def update(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        existing = next((item for item in providers if item.get("name") == name), {})
+        provider = OidcProviderConfig.model_validate(
+            {
+                "name": name,
+                "issuer_url": issuer_url,
+                "client_id": client_id,
+                "client_secret": (
+                    None
+                    if clear_client_secret
+                    else client_secret
+                    if client_secret is not None
+                    else existing.get("client_secret")
+                ),
+                "scopes": scope,
+                "username_claim": username_claim,
+                "groups_claim": groups_claim,
+                "allowed_groups": allowed_group,
             }
-        }
-    )
+        )
+        return replace_named(providers, name, provider.model_dump(mode="json"))
+
+    updated = _mutate_collection("identity", "oidc_providers", update)
     safe = [
         item.model_dump(mode="json", exclude={"client_secret"})
         for item in updated.identity.oidc_providers
@@ -994,19 +1048,14 @@ def identity_oidc_provider_set(
 def identity_group_set(
     file: Path = typer.Option(..., "--file", "-f", help="YAML or JSON group policy file."),
 ) -> None:
-    config = get_config()
     loaded = yaml.safe_load(file.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise ValueError("group policy file must contain a mapping")
     group = GroupPolicyConfig.model_validate(loaded)
-    groups = [item for item in config.identity.group_policies if item.name != group.name]
-    groups.append(group)
-    updated = save_config_patch(
-        {
-            "identity": {
-                "group_policies": [item.model_dump(mode="json") for item in groups],
-            }
-        }
+    updated = _mutate_collection(
+        "identity",
+        "group_policies",
+        lambda groups: replace_named(groups, group.name, group.model_dump(mode="json")),
     )
     typer.echo(
         json.dumps(
@@ -1019,14 +1068,8 @@ def identity_group_set(
 
 @identity_group_app.command("delete")
 def identity_group_delete(name: str) -> None:
-    config = get_config()
-    groups = [item for item in config.identity.group_policies if item.name != name]
-    updated = save_config_patch(
-        {
-            "identity": {
-                "group_policies": [item.model_dump(mode="json") for item in groups],
-            }
-        }
+    updated = _mutate_collection(
+        "identity", "group_policies", lambda groups: replace_named(groups, name, None)
     )
     typer.echo(
         json.dumps(

@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel
 
 from kornode.api.auth import require_admin
-from kornode.api.routes_config import apply_config_patch
+from kornode.api.routes_config import apply_config_patch, runtime_config_path
 from kornode.config.models import AppConfig
 from kornode.services.apply import apply_dns_configuration, client_dns_signature
 from kornode.services.command import CommandResult
@@ -60,6 +60,7 @@ def save_routing_settings(
         loaded_config,
         background_tasks,
         reconnect_clients=reconnect_required,
+        config_path=runtime_config_path(request),
     )
     # RUNTIME: one reconciler pass over the live kernel state.
     try:
