@@ -751,6 +751,13 @@ capabilities:
     ui: null
     exempt: "process entrypoint for supervisor, not a management action"
 
+  - id: net.wait_ready
+    service: kornode.services.net.NetService.wait_ready
+    cli: "net wait-ready"
+    api: null
+    ui: null
+    exempt: "supervisor start gate for ocserv (boot fail-closed), not a management action"
+
   - id: agent.list
     service: kornode.services.agents.AgentService.list
     cli: "agent list"

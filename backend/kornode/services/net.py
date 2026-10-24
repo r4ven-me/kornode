@@ -160,6 +160,37 @@ class NetService:
             return {"running": False}
         return {"running": True, **reply.get("status", {})}
 
+    def wait_ready(
+        self,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+        report: Callable[[str], None] | None = None,
+        timeout: float | None = None,
+    ) -> bool:
+        """Block until the reconciler has converged the kernel once (fail closed).
+
+        Converged means a pass without error that installed this policy's ruleset
+        (`schema_hash`). Processes that produce client traffic (ocserv) start only
+        after it, so a reboot never forwards clients before the kill switch exists.
+        """
+        started = clock()
+        last_report = started
+        while True:
+            status = self.status()
+            if status.get("running") and status.get("schema_hash") and not status.get("last_error"):
+                return True
+            now = clock()
+            if timeout is not None and now - started >= timeout:
+                return False
+            if report is not None and now - last_report >= 30:
+                last_report = now
+                reason = status.get("last_error") or (
+                    "reconciler not running" if not status.get("running") else "no pass yet"
+                )
+                report(f"waiting for the reconciler to converge: {reason}")
+            sleep(0.5)
+
     def explain(self, src: str, dst: str) -> dict[str, Any]:
         compiled = self.inputs.compiled()
         decision = explain(

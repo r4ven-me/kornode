@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (boot window before the first reconciler pass)
+
+- After a host reboot ocserv could accept and forward clients before the reconciler installed the kill switch and classification. Supervisor now starts ocserv through `korctl net wait-ready -- ocserv …`, which waits for a converged pass without error and then `exec`s ocserv (no shell). A persistently failing reconciler keeps ocserv waiting and logs the reason every 30 s (fail closed).
+
 ### Fixed (`kill_switch: false` falls through)
 
 - A rule with `kill_switch: false` whose upstream was down did not fall through to later rules as spec 02 promises: its flows kept the mark, hit the `throw` route and left through main without NAT, skipping later `drop`/`node:<n>` rules. The reconciler now compiles such rules out while the upstream is down; flows marked before the outage are rejected so they reconnect under the later rules. `explain` shows the skipped rule.

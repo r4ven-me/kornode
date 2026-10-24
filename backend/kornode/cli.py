@@ -1188,6 +1188,29 @@ def net_explain(
             typer.echo(f"{key}: {value}")
 
 
+@net_app.command(
+    "wait-ready",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def net_wait_ready(
+    ctx: typer.Context,
+    timeout: float = typer.Option(0, "--timeout", help="Seconds; 0 waits forever."),
+) -> None:
+    """Wait until the reconciler converged the kernel once, then exec ARGS (supervisor).
+
+    Fail closed at boot: ocserv must not forward clients before the kill switch exists.
+    """
+    ready = NetService(get_config()).wait_ready(
+        timeout=timeout or None, report=lambda line: typer.echo(line, err=True)
+    )
+    if not ready:
+        typer.echo("error: reconciler did not converge", err=True)
+        raise typer.Exit(1)
+    argv = [arg for arg in ctx.args if arg != "--"]
+    if argv:
+        os.execv(argv[0], argv)  # noqa: S606 - explicit argv from the supervisor template
+
+
 @net_app.command("run")
 def net_run() -> None:
     """Run the reconciler (supervisor program; not a management action)."""
