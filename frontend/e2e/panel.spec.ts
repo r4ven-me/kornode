@@ -226,6 +226,7 @@ test("core management buttons call expected API endpoints with CSRF", async ({ p
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await page.getByRole("button", { name: "Render configs", exact: true }).click();
   await page.getByRole("button", { name: "Network", exact: true }).click();
+  await page.getByRole("button", { name: "Kernel diagnostics", exact: true }).click();
   await page.getByRole("button", { name: "Apply", exact: true }).click();
 
   await page.getByRole("button", { name: "Users", exact: true }).click();

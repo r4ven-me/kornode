@@ -30,6 +30,39 @@ describe("Hub egress", () => {
     expect(mocks.write).toHaveBeenCalledWith("/api/sources/wg", "DELETE", undefined, "session");
   });
 
+  it("focuses the sources editor when requested and when it becomes active", () => {
+    const scroll = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scroll;
+    try {
+      const { rerender } = render(<HubEgress token="session" focus="sources" active={false} />);
+      const editor = screen.getByRole("region", { name: "Hub sources editor" });
+      expect(scroll).not.toHaveBeenCalled();
+      expect(document.activeElement).not.toBe(editor);
+      rerender(<HubEgress token="session" focus="sources" active />);
+      expect(scroll).toHaveBeenCalledWith({ block: "start" });
+      expect(document.activeElement).toBe(editor);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("associates source controls with help that distinguishes ingress, export and pool exceptions", async () => {
+    render(<HubEgress token="session" />);
+    await screen.findByText(/wg · wg0/);
+    for (const [label, text] of [
+      ["Source name", "egress rules"],
+      ["Source interface", "Not the outbound exit interface"],
+      ["Source CIDR", "Subnet of clients"],
+      ["Export to the interlink", "does not select an exit"],
+      ["Allow outside derived source pool", "Overlap checks still apply"]
+    ]) {
+      const control = screen.getByLabelText(label);
+      expect(document.getElementById(control.getAttribute("aria-describedby")!)?.textContent).toContain(text);
+    }
+    expect(screen.getByRole("group", { name: "Reachability & address allocation" })).toBeTruthy();
+  });
+
   it("adds a source", async () => {
     render(<HubEgress token="session" />);
     await screen.findByText(/wg · wg0/);
@@ -129,6 +162,7 @@ describe("Hub egress", () => {
     mocks.write.mockResolvedValue({ from_class: "clients", matched_rule: { index: 1 }, implicit: null, mark: null, table: 2, route: "default dev oc0", nat: null, kernel_check: null, warnings: [] });
     render(<HubEgress token="session" />);
     await screen.findByTestId("egress-rule-1");
+    await userEvent.click(screen.getByText("Test a saved rule"));
     await userEvent.type(screen.getByLabelText("Explain destination"), "203.0.113.5");
     await userEvent.click(screen.getByRole("button", { name: "Explain" }));
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/net/explain", "POST", { src: "host", dst: "203.0.113.5" }, "session"));

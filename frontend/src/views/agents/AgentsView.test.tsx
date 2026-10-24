@@ -29,11 +29,26 @@ describe("Agent management", () => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/interlink" ? interlink : path === "/api/agents" ? { agents: [agent] } : { records: [] }));
     render(<AgentsView token="session" />);
     await userEvent.click(await screen.findByRole("button", { name: /branch · node 2/ }));
-    await userEvent.selectOptions(await screen.findByLabelText("Agent section"), "users");
+    await userEvent.click(await screen.findByRole("button", { name: "VPN access & users" }));
     expect(screen.getByText("Not configured: the agent runs no VPN server.")).not.toBeNull();
     await userEvent.type(screen.getByLabelText("Listener hostname or IP"), "vpn.branch.example");
     await userEvent.click(screen.getByRole("button", { name: "Save access listener" }));
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/agents/branch/access", "PUT", { hostname: "vpn.branch.example", port: 443, udp: false, reissue: false }, "session"));
+  });
+
+  it("opens a dedicated node workspace with tabs and retains settings drafts between tabs", async () => {
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/interlink" ? interlink : { agents: [agent] }));
+    render(<AgentsView token="session" />);
+    await userEvent.click(await screen.findByRole("button", { name: /branch · node 2/ }));
+    await userEvent.type(await screen.findByLabelText("Description"), "Unsaved description");
+    expect(screen.queryByRole("button", { name: "Add agent" })).toBeNull();
+    expect(screen.queryByLabelText("Agent section")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Networks & sources" }));
+    await userEvent.click(screen.getByRole("button", { name: "Settings & enrollment" }));
+    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe("Unsaved description");
+    await userEvent.click(screen.getByRole("button", { name: "← All nodes" }));
+    expect(screen.getByRole("button", { name: "Add agent" })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Node settings sections" })).toBeNull();
   });
 
   it("creates an agent, reveals token only in ephemeral dialog, and forgets it on close", async () => {
@@ -74,6 +89,8 @@ describe("Agent management", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     rerender(<AgentsView token="session" />);
     vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByText("Control plane maintenance"));
     await userEvent.click(screen.getByRole("button", { name: "Rotate signing key" }));
     expect(mocks.write.mock.calls.filter(call => call[0].includes("rotate-signing-key"))).toHaveLength(0);
   });

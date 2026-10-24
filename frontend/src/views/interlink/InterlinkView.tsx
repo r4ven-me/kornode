@@ -29,7 +29,7 @@ export function InterlinkView({ token, agents, selected, busy, loading, active =
   }, [token, agents, active]);
 
   return <section className="panel" data-capability="interlink.show">
-    <div className="panel-header"><div><h2>Topology</h2><p className="muted-line">The hub and its agents. Select an agent to manage its settings, networks and activity below.</p></div><span className="pill muted">{data?.interlink.cidr ?? "interlink"}</span></div>
+    <div className="panel-header"><div><h2>Interlink topology</h2><p className="muted-line">The private network between the hub and its nodes. Open a node to manage its settings; exported prefixes are the networks it makes reachable.</p></div><span className="pill muted">{data?.interlink.cidr ?? "interlink"}</span></div>
     {error && <p role="alert">Topology unavailable: {error}. Agent management is still available below.</p>}
     {data && <div className="node-hub"><strong>Hub · {data.hub.interlink_address}</strong><span>{data.hub.server_name}</span><span>{prefixes(data.hub.prefixes)}</span></div>}
     {loading ? <p>Loading agents…</p> : agents.length === 0 ? <p>No agents registered yet.</p> : <ul className="agent-list" aria-label="Agent nodes">{agents.map(agent => {
@@ -38,7 +38,9 @@ export function InterlinkView({ token, agents, selected, busy, loading, active =
         <strong>{agent.name} · node {agent.id}</strong>
         <span>{agent.state} · {agent.online ? "online" : "offline"}{agent.roles.length ? ` · ${agent.roles.join(", ")}` : ""}</span>
         {node && <span>{node.interlink_address} · {prefixes(node.prefixes)}</span>}
+        {agent.description && <span>{agent.description}</span>}
         <span>desired {agent.desired_version} / reported {agent.applied_version}</span>
+        <span className="field-help">{agent.state === "pending" ? "Awaiting enrollment" : agent.state === "revoked" ? "Access revoked" : agent.desired_version !== agent.applied_version ? "Configuration pending" : "Configuration in sync"} · Open node →</span>
       </button></li>;
     })}</ul>}
     <p className="field-help">Hub prefixes follow the client pool and exported hub sources. Edit sources in Network, not in the topology.</p>

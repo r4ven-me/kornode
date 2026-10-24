@@ -43,6 +43,9 @@ export function AgentsView({ token, dryRun = false, active = true, onOpenSources
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
   const [error, setError] = useState(""), [message, setMessage] = useState("");
   const [enrollment, setEnrollment] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { if (detail) detailHeading.current?.focus(); }, [detail?.agent.id]);
   const [name, setName] = useState(""), [id, setId] = useState(""), [description, setDescription] = useState("");
   const [roles, setRoles] = useState<string[]>([]), [forceReuse, setForceReuse] = useState(false);
 
@@ -120,21 +123,28 @@ export function AgentsView({ token, dryRun = false, active = true, onOpenSources
   }
   const live = agents.find(a => a.name === selected);
   return <div className="view-stack agents-view">
-    <section className="panel" data-capability="control.status"><div className="panel-header"><h2>Agent control plane</h2><span className="pill muted">Control API {control?.enabled ? "enabled" : "disabled"}</span></div>
-      <p>{control?.agents ?? 0} registered · {control?.active ?? 0} enrolled · signing key {control?.signing_key_id ?? "not initialized"}</p>
-      {control?.rotation && <p role="status">Rotation: {control.rotation.phase}; promotion {control.rotation.promotes_at}. {control.rotation.warning}</p>}
-      <div className="panel-footer"><button className="action-button" type="button" disabled={busy} data-capability="agent.list" onClick={() => void refreshList().catch(reason => setError(String(reason)))}>Refresh agents</button><button className="action-button" type="button" disabled={busy} data-capability="control.rotate_key" onClick={() => void rotate()}>Rotate signing key{dryRun ? " (preview)" : ""}</button></div>
+    <div hidden={selected !== null || creating}>
+    <section className="panel" data-capability="control.status">
+      <div className="panel-header"><div><h2>Nodes</h2><p className="muted-line">Choose a node to manage its configuration. The hub connects the nodes through the interlink network.</p></div><button className="action-button primary" type="button" disabled={busy} onClick={() => setCreating(true)}>Add agent</button></div>
+      <dl className="node-metrics"><div><dt>Registered</dt><dd>{loading ? "…" : agents.length}</dd></div><div><dt>Online</dt><dd>{loading ? "…" : agents.filter(agent => agent.online).length}</dd></div><div><dt>Enrolled</dt><dd>{control?.active ?? "—"}</dd></div><div><dt>Control API</dt><dd>{control ? control.enabled ? "Enabled" : "Disabled" : "Loading…"}</dd></div></dl>
+      {control && !control.enabled && <p className="field-help">The control API is disabled. Agents need it enabled to enroll and receive configuration.</p>}
+      <details><summary>Control plane maintenance</summary><p>Signing key: {control?.signing_key_id ?? "not initialized"}. Rotation announces a replacement key before promotion; it is not a routine refresh.</p>
+        {control?.rotation && <p role="status">Rotation: {control.rotation.phase}; promotion {control.rotation.promotes_at}. {control.rotation.warning}</p>}
+        <button className="action-button" type="button" disabled={busy} data-capability="control.rotate_key" onClick={() => void rotate()}>Rotate signing key{dryRun ? " (preview)" : ""}</button>
+      </details>
+      <div className="panel-footer"><button className="action-button" type="button" disabled={busy} data-capability="agent.list" onClick={() => void refreshList().catch(reason => setError(String(reason)))}>Refresh agents</button></div>
     </section>
+    <InterlinkView token={token} agents={agents} selected={selected} busy={busy} loading={loading} active={active && !selected && !creating} onSelect={name => { setSelected(name); setSection("settings"); }} onOpenSources={onOpenSources} />
+    </div>
     {error && <section className="panel" role="alert">{error}</section>}{message && <p role="status">{message}</p>}
-    <InterlinkView token={token} agents={agents} selected={selected} busy={busy} loading={loading} active={active} onSelect={name => { setSelected(name); setSection("settings"); }} onOpenSources={onOpenSources} />
-    <details className="panel"><summary>Add agent</summary><form onSubmit={e => {
+    {creating && <section className="panel"><div className="panel-header"><div><h2>Add agent</h2><p className="muted-line">Register a node, then use its one-time token to enroll the agent. Registration alone does not bring it online.</p></div><button className="action-button" type="button" disabled={busy} onClick={() => setCreating(false)}>Cancel</button></div><form onSubmit={e => {
       e.preventDefault();
       if (forceReuse && !dryRun && !window.confirm(`Force reuse of ID ${id} for ${name}, bypassing its quarantine?`)) return;
       setBusy(true); setError(""); setMessage("");
       void agentWrite("/api/agents", "POST", { name, id: id ? Number(id) : null, description, roles, force_reuse: forceReuse, dry_run: dryRun }, token).then(async data => {
         if (typeof data.token === "string") setEnrollment(data.token);
         if (dryRun) setMessage(`Preview: node ID ${data.id}; no agent created.`);
-        else { const created = data.agent as Agent; setSelected(created.name); setSection("settings"); setName(""); setId(""); setDescription(""); setRoles([]); setForceReuse(false); }
+        else { const created = data.agent as Agent; setCreating(false); setSelected(created.name); setSection("settings"); setName(""); setId(""); setDescription(""); setRoles([]); setForceReuse(false); }
         await refreshList();
       }).catch(reason => setError(String(reason instanceof Error ? reason.message : reason))).finally(() => setBusy(false));
     }}><fieldset className="agent-fields" disabled={busy}>
@@ -143,17 +153,24 @@ export function AgentsView({ token, dryRun = false, active = true, onOpenSources
       <label>New agent description<input value={description} onChange={e => setDescription(e.target.value)} /></label>
       <div className="agent-checks">{AGENT_ROLES.map(role => <label key={role} title={ROLE_HINTS[role]}><input type="checkbox" checked={roles.includes(role)} onChange={e => setRoles(e.target.checked ? [...roles, role] : roles.filter(r => r !== role))} /> {role} role</label>)}<p className="field-help agent-roles-help">access: serves its own VPN clients. gateway: other nodes may leave to the internet through it (<code>via node:&lt;id&gt;</code>).</p></div>
       <label className="agent-check"><input type="checkbox" checked={forceReuse} onChange={e => setForceReuse(e.target.checked)} /> Force ID reuse (bypass 30-day quarantine)</label>
-    </fieldset><div className="panel-footer"><button className="action-button primary" disabled={busy} data-capability="agent.create">{dryRun ? "Preview creation" : "Create agent and token"}</button></div></form></details>
-    {selected && !detail && <p role="status">Loading agent details…</p>}
+    </fieldset><div className="panel-footer"><button className="action-button primary" disabled={busy} data-capability="agent.create">{dryRun ? "Preview creation" : "Create agent and token"}</button></div></form></section>}
+    {selected && <section className="panel node-detail-header">
+      <button className="action-button" type="button" disabled={busy} onClick={() => { setSelected(null); setDetail(null); }}>← All nodes</button>
+      <h2 ref={detailHeading} tabIndex={-1}>{selected} · node {detail?.agent.id ?? "…"}</h2>
+      <p className="muted-line">{detail?.agent.description || "Manage this node’s settings, published networks and configuration delivery."}</p>
+      {live && <p role="status">{live.online ? "Online" : "Offline"} · {live.state} · last seen {live.last_seen ?? "never"} · desired {live.desired_version} / reported {live.applied_version}{live.desired_version !== live.applied_version ? " · Configuration not yet applied" : ""}</p>}
+    </section>}
+    {selected && !detail && !error && <p role="status">Loading agent details…</p>}
     {detail && <>
-      <label className="agent-section">Agent section<select value={section} onChange={e => setSection(e.target.value as Section)}><option value="settings">Settings and enrollment</option><option value="networks">Networks and sources</option><option value="policy">Egress policy</option><option value="upstreams">Upstreams</option>{detail.agent.roles.includes("access") && <option value="users">Access listener and users</option>}<option value="activity">Reports, bundles and commands</option></select></label>
-      {live && <p role="status">{live.online ? "Online" : "Offline"} · last seen {live.last_seen ?? "never"} · desired {live.desired_version} / reported {live.applied_version}</p>}
+      <nav className="node-detail-tabs" aria-label="Node settings sections">{([
+        ["settings", "Settings & enrollment"], ["networks", "Networks & sources"], ["policy", "Egress policy"], ["upstreams", "Upstreams"],
+        ...(detail.agent.roles.includes("access") ? [["users", "VPN access & users"]] : []), ["activity", "Activity & diagnostics"]] as Array<[Section, string]>).map(([id, label]) => <button key={id} type="button" className={`subnav-item${section === id ? " active" : ""}`} aria-current={section === id ? "page" : undefined} onClick={() => setSection(id)}>{label}</button>)}</nav>
       <div key={detail.agent.id}>
-        {section === "settings" && <AgentSettings agent={detail.agent} busy={busy} mutate={mutate} />}
+        <div hidden={section !== "settings"}><AgentSettings agent={detail.agent} busy={busy} mutate={mutate} /></div>
         <fieldset disabled={detail.agent.state === "revoked"} className="agent-resource-stack">
-          {section === "networks" && <><PrefixEditor prefixes={detail.prefixes} busy={busy} mutate={mutate} /><SourceEditor sources={detail.policy.sources ?? []} busy={busy} mutate={mutate} /></>}
-          {section === "policy" && <AgentPolicy policy={detail.policy} busy={busy} mutate={mutate} />}
-          {section === "upstreams" && <UpstreamEditor upstreams={detail.upstreams} busy={busy} mutate={mutate} />}
+          <div hidden={section !== "networks"}><PrefixEditor prefixes={detail.prefixes} busy={busy} mutate={mutate} /><SourceEditor sources={detail.policy.sources ?? []} busy={busy} mutate={mutate} /></div>
+          <div hidden={section !== "policy"}><AgentPolicy policy={detail.policy} busy={busy} mutate={mutate} /></div>
+          <div hidden={section !== "upstreams"}><UpstreamEditor upstreams={detail.upstreams} busy={busy} mutate={mutate} /></div>
           {section === "users" && detail.agent.roles.includes("access") && <><AccessListenerEditor access={detail.access} busy={busy} mutate={mutate} /><AccessUserEditor users={detail.users} busy={busy} mutate={mutate} /></>}
         </fieldset>
         {section === "activity" && <AgentActivity name={detail.agent.name} reports={detail.reports} commands={detail.commands} bundles={detail.bundles} busy={busy} mutate={mutate} read={read} download={async id => { try { await downloadAgentArtifact(detail.agent.name, id, token); } catch (reason) { setError(String(reason instanceof Error ? reason.message : reason)); } }} />}

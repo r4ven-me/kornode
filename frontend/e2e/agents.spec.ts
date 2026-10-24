@@ -34,7 +34,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       if (viewport.width < 760) await page.getByRole("button", { name: "Menu", exact: true }).click();
       await page.getByRole("button", { name: "Nodes", exact: true }).click();
       await page.getByRole("button", { name: new RegExp(agent.name + " · node 2") }).click();
-      await page.getByLabel("Agent section").selectOption("upstreams");
+      await page.getByRole("button", { name: "Upstreams", exact: true }).click();
       await expect(page.getByRole("heading", { name: "External upstreams" })).toBeVisible();
       await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "password");
       const dimensions = await page.evaluate(() => ({ scroll: document.body.scrollWidth, client: document.body.clientWidth }));
@@ -55,7 +55,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByLabel("Server", { exact: true }).focus();
       await expect(page.getByLabel("Server", { exact: true })).toBeFocused();
       await page.screenshot({ path: info.outputPath("agents-upstreams.png"), fullPage: true });
-      await page.getByLabel("Agent section").selectOption("users");
+      await page.getByRole("button", { name: "VPN access & users", exact: true }).click();
       await expect(page.getByText(/Users reach the agent as password hashes/)).toBeVisible();
       await expect(page.getByRole("alert")).toHaveCount(0);
       expect(pageErrors).toEqual([]);

@@ -21,17 +21,17 @@ describe("Nodes sections", () => {
   it("retains the Overview draft while visiting Settings and DNS", async () => {
     render(<View />);
     await userEvent.type(screen.getByLabelText("Agent draft"), "unsaved");
-    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-    await userEvent.click(screen.getByRole("button", { name: "DNS" }));
+    await userEvent.click(screen.getByRole("button", { name: "Interlink addressing" }));
+    await userEvent.click(screen.getByRole("button", { name: "Interlink DNS" }));
     await screen.findByText("DNS scopes: branch");
     expect(mocks.get).toHaveBeenCalledWith("/api/agents", "session");
-    await userEvent.click(screen.getByRole("button", { name: "Overview" }));
+    await userEvent.click(screen.getByRole("button", { name: "Node list" }));
     expect((screen.getByLabelText("Agent draft") as HTMLInputElement).value).toBe("unsaved");
   });
 
   it("binds all seven addressing controls to the existing settings-save callback", async () => {
     render(<View />);
-    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await userEvent.click(screen.getByRole("button", { name: "Interlink addressing" }));
     const fields = [["Hub node ID", "3"], ["Interlink CIDR", "10.90.0.0/24"], ["Client pool template", "10.101.{id}.0/24"], ["Source pool template", "10.9.{id}.0/24"], ["Enroll pool", "10.90.255.240/28"], ["Interlink domain", "mesh.example"], ["Reserved CIDRs (one per line)", "192.168.0.0/16\n172.16.0.0/12"]];
     for (const [name, value] of fields) fireEvent.change(screen.getByLabelText(name), { target: { value } });
     await userEvent.click(screen.getByRole("button", { name: "Save interlink settings" }));

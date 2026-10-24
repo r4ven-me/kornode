@@ -5,7 +5,7 @@ import { AgentsView } from "./agents/AgentsView";
 import { InterlinkDns } from "./agents/InterlinkDns";
 
 type Section = "overview" | "settings" | "dns";
-const SECTIONS: Array<[Section, string]> = [["overview", "Overview"], ["settings", "Settings"], ["dns", "DNS"]];
+const SECTIONS: Array<[Section, string]> = [["overview", "Node list"], ["settings", "Interlink addressing"], ["dns", "Interlink DNS"]];
 
 export function NodesView({ token, dryRun, draft, busy, onDraftChange, onSave, onOpenSources }: {
   token: string | null;
@@ -38,12 +38,12 @@ export function NodesView({ token, dryRun, draft, busy, onDraftChange, onSave, o
       <form onSubmit={e => { e.preventDefault(); onSave(); }}>
         <fieldset className="agent-fields" disabled={busy}>
           <label>Hub node ID<input type="number" min={1} max={254} value={draft.nodeId} onChange={e => onDraftChange({ ...draft, nodeId: Number(e.target.value) || 1 })} required /></label>
-          <label>Interlink CIDR<input value={draft.cidr} onChange={e => onDraftChange({ ...draft, cidr: e.target.value })} required /></label>
-          <label>Client pool template<input value={draft.clientPool} onChange={e => onDraftChange({ ...draft, clientPool: e.target.value })} required /></label>
-          <label>Source pool template<input value={draft.sourcePool} onChange={e => onDraftChange({ ...draft, sourcePool: e.target.value })} required /></label>
-          <label>Enroll pool<input value={draft.enrollPool} onChange={e => onDraftChange({ ...draft, enrollPool: e.target.value })} required /></label>
+          <label>Interlink CIDR<input aria-label="Interlink CIDR" value={draft.cidr} onChange={e => onDraftChange({ ...draft, cidr: e.target.value })} required /><small>Private transport network connecting the hub and agents, not the VPN client pool.</small></label>
+          <label>Client pool template<input aria-label="Client pool template" value={draft.clientPool} onChange={e => onDraftChange({ ...draft, clientPool: e.target.value })} required /><small>VPN client subnet per node. {"{id}"} is replaced with the node ID.</small></label>
+          <label>Source pool template<input aria-label="Source pool template" value={draft.sourcePool} onChange={e => onDraftChange({ ...draft, sourcePool: e.target.value })} required /><small>Address pool allocated to each node’s local sources.</small></label>
+          <label>Enroll pool<input aria-label="Enroll pool" value={draft.enrollPool} onChange={e => onDraftChange({ ...draft, enrollPool: e.target.value })} required /><small>Temporary addresses used during agent enrollment.</small></label>
           <label>Interlink domain<input value={draft.domain} onChange={e => onDraftChange({ ...draft, domain: e.target.value })} required /></label>
-          <label>Reserved CIDRs (one per line)<textarea rows={4} value={draft.reserved} onChange={e => onDraftChange({ ...draft, reserved: e.target.value })} /></label>
+          <label>Reserved CIDRs (one per line)<textarea aria-label="Reserved CIDRs (one per line)" rows={4} value={draft.reserved} onChange={e => onDraftChange({ ...draft, reserved: e.target.value })} /><small>Networks to exclude from automatic address allocation.</small></label>
         </fieldset>
         <div className="panel-footer"><button className="action-button primary" disabled={busy}>Save interlink settings</button></div>
       </form>

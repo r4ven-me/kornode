@@ -28,7 +28,7 @@ async function open(page: Page, section: string, mobile: boolean) {
 
 async function selectNodesSection(page: Page, section: "overview" | "settings" | "dns", mobile: boolean) {
   if (mobile) await page.getByRole("combobox", { name: "Nodes section", exact: true }).selectOption(section);
-  else await page.getByRole("navigation", { name: "Nodes sections" }).getByRole("button", { name: { overview: "Overview", settings: "Settings", dns: "DNS" }[section], exact: true }).click();
+  else await page.getByRole("navigation", { name: "Nodes sections" }).getByRole("button", { name: { overview: "Node list", settings: "Interlink addressing", dns: "Interlink DNS" }[section], exact: true }).click();
 }
 
 /** The v2 views share the panel look: no browser-default fieldset frames, list bullets or native checkboxes. */
@@ -63,6 +63,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       for (const section of ["Network", "Nodes"]) {
         await open(page, section, mobile);
         if (section === "Nodes") await page.getByText("Add agent", { exact: true }).click();
+        if (section === "Network") {
+          const clipped = await page.locator(".network-task-nav button").evaluateAll(buttons => buttons.filter(button => button.scrollHeight > button.clientHeight + 1).length);
+          expect(clipped).toBe(0);
+        }
         await page.screenshot({ path: info.outputPath(`${section.toLowerCase()}.png`), fullPage: true });
         await expectPanelLook(page);
       }
@@ -94,7 +98,8 @@ test("the sidebar groups sections by task and explains the open one", async ({ p
   expect(new Set(icons).size).toBe(icons.length);
   await nav.getByRole("button", { name: "Network", exact: true }).click();
   await expect(page.locator(".topbar p")).toHaveText(/Where client traffic goes/);
-  await expect(page.locator(".view-stack > .panel h2").first()).toHaveText("Egress rules");
+  await expect(page.getByRole("button", { name: /Hub policy & sources/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Egress rules", exact: true })).toBeVisible();
 });
 
 for (const mobile of [false, true]) {

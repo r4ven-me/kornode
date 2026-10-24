@@ -15,7 +15,7 @@ for (const mobile of [false, true]) {
       await signIn(page);
       if (mobile) await page.getByRole("button", { name: "Menu", exact: true }).click();
       await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Nodes", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Nodes", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1, name: "Nodes", exact: true })).toBeVisible();
       if (mobile) await page.getByRole("button", { name: "Menu", exact: true }).click();
       await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Config", exact: true }).click();
       await configSection(page, "System", mobile);
