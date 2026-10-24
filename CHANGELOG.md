@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (`kill_switch: false` falls through)
+
+- A rule with `kill_switch: false` whose upstream was down did not fall through to later rules as spec 02 promises: its flows kept the mark, hit the `throw` route and left through main without NAT, skipping later `drop`/`node:<n>` rules. The reconciler now compiles such rules out while the upstream is down; flows marked before the outage are rejected so they reconnect under the later rules. `explain` shows the skipped rule.
+
 ### Fixed (inline domain destinations keyed by content)
 
 - Addresses resolved for an inline `to: {domains: [...]}` destination were stored under the rule's position (`rule<N>`). Resolution runs on its own clock (up to an hour), so inserting or reordering rules handed one rule's addresses to another: traffic meant for an upstream could be classified `via local` until the next resolve. The key is now derived from the domains (`inline.<hash>`) on the hub and the agent; the hub still reads `rule<N>` from agents before 2.2. The hub resolver also wakes within ~10 s when a new set or inline destination has never been resolved.

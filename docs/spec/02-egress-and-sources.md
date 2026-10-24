@@ -61,7 +61,13 @@ egress:
 - `kill_switch` (bool): when the exit is unavailable, traffic is rejected
   instead of falling through to the next rule. Default `true` for every `via`
   except `local`. `false` means "fall through to later rules while the exit is
-  down" (useful for opportunistic exits).
+  down" (useful for opportunistic exits): while a kill-switch-free `upstream`
+  is down the reconciler compiles its rules out of `egress_classify`, so new
+  flows meet the later rules; flows it marked before it went down are rejected
+  (they reconnect and are classified again) instead of leaving through main
+  without NAT. `explain` reports the skipped rule as a warning. Since one exit
+  has one table (D-24), a single `kill_switch: true` rule makes the whole exit
+  fail closed.
 
 ### Implicit rules (always prepended, not editable)
 

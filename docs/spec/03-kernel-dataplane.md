@@ -38,8 +38,10 @@ Exit table contents:
 - `unreachable default metric 4096` — permanent; when the exit device
   disappears the kernel removes the first route and the second one rejects
   traffic. This is the routing-layer kill switch (D-11).
-- Exits with `kill_switch: false` get `throw default metric 4096` instead
-  (falls back to further rules / main).
+- Exits with `kill_switch: false` get `throw default metric 4096` instead.
+  The throw alone would send a flow to main un-NATed; the fall-through to later
+  rules is done by classification (spec 02): a down kill-switch-free upstream
+  marks nothing new, and its old marks are rejected in forward/postrouting.
 - On the hub, the `interlink` exit has no default: its table is populated with
   `<prefix> dev vpnsN` copies maintained from ocserv `iroute` sessions — in
   practice rule 90 already resolves them via main; the table exists for

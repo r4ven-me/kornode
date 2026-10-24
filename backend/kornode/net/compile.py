@@ -380,6 +380,10 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
             to_sets = (f"{dest}_v4", f"{dest}_v6")
         via = _resolved_via(rule.parsed_via, facts)
         exit_ = None if via.kind == "drop" else exits[via.name]
+        if exit_ is not None and falls_through(exit_):
+            # Spec 02: `kill_switch: false` means fall through to later rules while
+            # the upstream is down, not "leave through main un-NATed" (the throw route).
+            continue
         for source in rule.from_:
             target = classify_host if source == "host" else classify
             target.append(
@@ -525,6 +529,11 @@ def _transit_head(
             )
         )
     return head
+
+
+def falls_through(exit_: Exit) -> bool:
+    """A down upstream without kill switch: its rules are skipped (spec 02)."""
+    return exit_.kind == "upstream" and not exit_.up and not exit_.kill_switch
 
 
 def _make_exit(via: Via, index: int, policy: EgressPolicy, facts: NodeFacts) -> Exit:

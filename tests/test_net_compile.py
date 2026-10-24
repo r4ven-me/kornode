@@ -451,3 +451,54 @@ def test_session_routes_become_kornode_owned_main_routes() -> None:
         Route(table=MAIN_TABLE, dst="192.168.3.0/24", dev="vpns0", proto=KORNODE_RTPROTO) in routes
     )
     assert not any(r.table == MAIN_TABLE for r in compile_policy(*hub_case()).desired.routes)
+
+
+def _fallthrough_case(up: bool) -> tuple[EgressPolicy, NodeFacts]:
+    policy = EgressPolicy.model_validate(
+        {
+            "egress": [
+                {
+                    "from": ["clients"],
+                    "to": {"routes": ["198.51.100.0/24"]},
+                    "via": "upstream:office",
+                    "kill_switch": False,
+                },
+                {"from": ["clients"], "to": "any", "via": "drop"},
+            ]
+        }
+    )
+    facts = NodeFacts(
+        node_id=1,
+        client_pool=n("10.100.1.0/24"),
+        tunnels={"upstream:office": TunnelFact("oc-office0", up, ())},
+        upstreams=("office",),
+        uplink="eth0",
+        all_rp_filter="1",
+    )
+    return policy, facts
+
+
+def test_kill_switch_false_falls_through_to_later_rules_while_the_upstream_is_down() -> None:
+    # Spec 02: `false` means fall through to later rules, not "main table un-NATed".
+    up = compile_policy(*_fallthrough_case(True))
+    down = compile_policy(*_fallthrough_case(False))
+    office = next(e for e in down.exits if e.name == "upstream:office")
+
+    assert [rule.index for rule in up.classify if rule.exit is not None] == [0]
+    assert [rule.index for rule in down.classify] == [1, 2]  # rule 0 skipped, drop and tail
+    assert f"meta mark set 0x{office.mark:08x}" not in down.script
+    # Flows the upstream marked before it went down reconnect instead of leaking.
+    forward = down.script.split("chain forward {")[1].split("\n  }")[0]
+    assert f"meta mark & 0xffffff00 == 0x{office.mark:08x} reject" in forward
+    postrouting = down.script.split("chain postrouting {")[1].split("\n  }")[0]
+    assert f"meta mark & 0xffffff00 == 0x{office.mark:08x} drop" in postrouting
+
+
+def test_explain_reports_a_skipped_kill_switch_false_rule_and_moves_on() -> None:
+    from kornode.net.explain import explain
+
+    policy, facts = _fallthrough_case(False)
+    decision = explain(compile_policy(policy, facts), policy, facts, "10.100.1.5", "198.51.100.7")
+
+    assert decision.matched_rule is not None and decision.matched_rule["via"] == "drop"
+    assert any("rule 0 skipped" in warning for warning in decision.warnings)

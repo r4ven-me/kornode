@@ -84,9 +84,10 @@ def _classify_lines(rule: ClassifyRule) -> list[str]:
 
 
 def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> list[str]:
-    down = [
-        exit_ for exit_ in exits if exit_.kill_switch and exit_.kind == "upstream" and not exit_.up
-    ]
+    # A down upstream without kill switch marks no new flows (its rules fall through);
+    # flows it marked before going down are refused too, so they reconnect and are
+    # classified again instead of leaving through main un-NATed.
+    down = [exit_ for exit_ in exits if exit_.kind == "upstream" and not exit_.up]
     blocked = [f"    meta mark & {MARK_MASK} == {_hex(exit_.mark)} {action}" for exit_ in down]
     guarded = [exit_ for exit_ in exits if exit_.kill_switch and exit_ not in down]
     if not guarded:
