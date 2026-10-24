@@ -321,15 +321,21 @@ def render_script(
         "  }",
         "}",
         "table ip kornode_nat {",
+        # Sets are per table: the NAT table needs its own copy of the interlink
+        # interfaces. Nothing that leaves into the interlink is masqueraded:
+        # `local` means main + NAT to the uplink, but main also holds the routes
+        # to interlink sessions and prefixes (spec 02/03, "no NAT inside the interlink").
+        *_set_decl("interlink_ifaces", "ifname"),
         "  chain postrouting {",
         "    type nat hook postrouting priority srcnat; policy accept;",
     ]
+    not_interlink = "oifname != @interlink_ifaces"
     for exit_ in exits:
         if not exit_.nat:
             continue
         mark = f"meta mark & {MARK_MASK} == {_hex(exit_.mark)}"
         if exit_.kind == "local":
-            lines.append(f'    {mark} oifname != "lo" masquerade')
+            lines.append(f'    {mark} oifname != "lo" {not_interlink} masquerade')
         elif exit_.interface:
             lines.append(f'    {mark} oifname "{_ifname(exit_.interface)}" masquerade')
     # Unmarked client/source traffic only gets here on its way to this
@@ -338,11 +344,14 @@ def render_script(
     unmarked = f"meta mark & {MARK_MASK} == 0x00000000"
     if facts.client_pool is not None:
         pool = facts.client_pool
-        lines.append(f"    ip saddr {pool} ip daddr != {pool} {unmarked} masquerade")
+        lines.append(
+            f"    ip saddr {pool} ip daddr != {pool} {unmarked} {not_interlink} masquerade"
+        )
     for source in policy.sources:
         if ":" not in source.cidr:
             lines.append(
-                f"    ip saddr {source.cidr} ip daddr != {source.cidr} {unmarked} masquerade"
+                f"    ip saddr {source.cidr} ip daddr != {source.cidr} {unmarked} "
+                f"{not_interlink} masquerade"
             )
     lines += ["  }", "}"]
     return "\n".join(lines) + "\n"

@@ -152,7 +152,28 @@ def test_local_exit_has_no_rule_or_table_but_is_masqueraded() -> None:
     compiled = compile_policy(*hub_case())
 
     assert not [rule for rule in compiled.desired.rules if rule.table == 12003]
-    assert '== 0x0c800000 oifname != "lo" masquerade' in compiled.script
+    assert (
+        '== 0x0c800000 oifname != "lo" oifname != @interlink_ifaces masquerade' in compiled.script
+    )
+
+
+def test_nothing_leaving_into_the_interlink_is_masqueraded() -> None:
+    # `local` is main + NAT to the uplink, but main also routes into interlink
+    # sessions: a hub client reaching an agent prefix through `to: any via local`
+    # must keep its source address (no NAT inside the interlink).
+    compiled = compile_policy(*hub_case())
+    nat = compiled.script.split("table ip kornode_nat {", 1)[1]
+    assert "set interlink_ifaces {" in nat
+    masquerades = [line.strip() for line in nat.splitlines() if line.strip().endswith("masquerade")]
+    unguarded = [
+        line
+        for line in masquerades
+        if "oifname != @interlink_ifaces" not in line and 'oifname "' not in line
+    ]
+    assert masquerades and not unguarded, masquerades
+    sets = {(e.family, e.table, e.set_name): e.elements for e in compiled.desired.elements}
+    assert sets[("ip", "kornode_nat", "interlink_ifaces")] == frozenset({"vpns0"})
+    assert sets[("inet", "kornode", "interlink_ifaces")] == frozenset({"vpns0"})
 
 
 def test_implicit_returns_come_before_every_rule() -> None:

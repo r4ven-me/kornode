@@ -668,6 +668,10 @@ def _elements(
         NftElements(family, table, name, frozenset(members)) for name, members in elements.items()
     }
     items.add(NftElements(family, table, "interlink_ifaces", frozenset(facts.interlink_ifaces)))
+    nat_family, nat_table = NAT_TABLE
+    items.add(
+        NftElements(nat_family, nat_table, "interlink_ifaces", frozenset(facts.interlink_ifaces))
+    )
     if facts.transit_exits:
         items.add(
             NftElements(

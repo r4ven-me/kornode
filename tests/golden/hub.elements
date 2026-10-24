@@ -7,3 +7,4 @@
 ('inet', 'kornode', 'interlink_v6'): []
 ('inet', 'kornode', 'local_v4'): ['10.100.1.0/24', '172.17.0.0/16']
 ('inet', 'kornode', 'local_v6'): []
+('ip', 'kornode_nat', 'interlink_ifaces'): ['vpns0']

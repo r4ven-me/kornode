@@ -141,8 +141,10 @@ def agent_policy() -> EgressPolicy:
         {
             "egress": [
                 {
-                    "id": "to-interlink", "from": ["clients", "host"],
-                    "to": "interlink", "via": "interlink",
+                    "id": "to-interlink",
+                    "from": ["clients", "host"],
+                    "to": "interlink",
+                    "via": "interlink",
                 },
                 {"id": "out", "from": ["clients"], "to": "any", "via": "node:3"},
             ]
@@ -175,7 +177,7 @@ def test_an_agent_exit_node_sends_through_the_hub_tunnel_without_nat() -> None:
     )
     assert "masquerade" not in compiled.script.split("table ip kornode_nat")[1].replace(
         "ip saddr 10.100.2.0/24 ip daddr != 10.100.2.0/24 meta mark & 0xffffff00 == 0x00000000 "
-        "masquerade",
+        "oifname != @interlink_ifaces masquerade",
         "",
     )
     # The interlink exit and the node exit share the hub tunnel: one answer mark, the first wins.
@@ -211,8 +213,10 @@ def gateway_node_policy() -> EgressPolicy:
         {
             "egress": [
                 {
-                    "id": "to-interlink", "from": ["clients", "host"],
-                    "to": "interlink", "via": "interlink",
+                    "id": "to-interlink",
+                    "from": ["clients", "host"],
+                    "to": "interlink",
+                    "via": "interlink",
                 },
                 {"id": "gateway-local", "from": ["interlink"], "to": "any", "via": "local"},
             ]
@@ -242,8 +246,8 @@ def test_the_exit_node_masquerades_what_the_interlink_sends_it() -> None:
         'goto validate_connection comment "egress rule 1"'
     ) in lines
     assert (
-        f'meta mark & 0xffffff00 == 0x{local.mark:08x} oifname != "lo" masquerade'
-        in compiled.script
+        f'meta mark & 0xffffff00 == 0x{local.mark:08x} oifname != "lo" '
+        "oifname != @interlink_ifaces masquerade" in compiled.script
     )
     # Plain marks only: answers are routed by prefix routes in main, not by re-marking
     # (a mark would make the reverse-path check look the internet up in the interlink table).

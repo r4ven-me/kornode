@@ -7,3 +7,4 @@
 ('inet', 'kornode', 'interlink_v6'): []
 ('inet', 'kornode', 'local_v4'): ['10.100.3.0/24', '10.8.3.0/24', '192.168.3.0/24']
 ('inet', 'kornode', 'local_v6'): []
+('ip', 'kornode_nat', 'interlink_ifaces'): ['oc-hub0']

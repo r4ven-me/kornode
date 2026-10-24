@@ -104,8 +104,11 @@ table inet kornode {
   }
 }
 table ip kornode_nat {
+  set interlink_ifaces {
+    type ifname;
+  }
   chain postrouting {
     type nat hook postrouting priority srcnat; policy accept;
-    ip saddr 10.100.1.0/24 ip daddr != 10.100.1.0/24 meta mark & 0xffffff00 == 0x00000000 masquerade
+    ip saddr 10.100.1.0/24 ip daddr != 10.100.1.0/24 meta mark & 0xffffff00 == 0x00000000 oifname != @interlink_ifaces masquerade
   }
 }

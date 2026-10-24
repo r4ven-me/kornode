@@ -1,7 +1,7 @@
 """Runs inside a netlab namespace (as root): converge the kernel of the hub or of the
 exit node of NL-17/NL-18 (hub source leaves through node 2).
 
-Usage: exit_set_driver.py hub|node2 set|full [--offline]
+Usage: exit_set_driver.py hub|node2 set|full|local [--offline]
 Prints the leftover plan (must be empty) as JSON.
 """
 
@@ -29,6 +29,8 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
             {"from": ["wgusers"], "to": "any", "via": "local"},
         ]
         if scenario == "set"
+        else [{"from": ["wgusers"], "to": "any", "via": "local"}]
+        if scenario == "local"
         else [{"from": ["wgusers"], "to": "any", "via": "node:2"}]
     )
     policy = EgressPolicy.model_validate(
@@ -46,6 +48,8 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
         node_prefixes=PREFIXES,
         interlink_ifaces=() if offline else ("vpns1",),
         interlink_guard=True,
+        # The hub routes node 2's prefixes into its session (proto-77 routes in main).
+        session_routes=() if offline else ((n("10.100.2.0/24"), "vpns1"),),
         uplink="eth0",
         all_rp_filter="1",
     )

@@ -1,5 +1,8 @@
 """NL-17 / NL-18 (spec 09): a source of the hub leaves through node 2.
 
+Also: `via: local` traffic that main routes into the interlink keeps its source
+(no NAT inside the interlink).
+
 Namespaces: `src` (client of the hub source `wgusers`) -> `hub` -> `node2` -> `inet`;
 the hub has its own uplink to `inet` as well, so a leak is visible there. Both kernels
 are converged with the real `kornode.net` compiler and writer (facts are built by hand:
@@ -181,6 +184,33 @@ def test_nl18_full_tunnel_exits_node2_and_the_hub_reaches_node2_by_its_interlink
     try:
         time.sleep(0.5)
         assert exit_lab.fetch(exit_lab.hub, NODE2_INTERLINK, port=9100) == "10.99.0.1"
+    finally:
+        agent.terminate()
+        agent.wait(timeout=10)
+
+
+def test_local_rule_into_an_agent_prefix_keeps_the_client_source_address(
+    exit_lab: ExitLab,
+) -> None:
+    # `to: any via local` on the hub: main routes node 2's prefix into the session.
+    # The local exit's masquerade is for the uplink only; inside the interlink the
+    # agent must see the real client address, not the hub's interlink address.
+    exit_lab.node2.run(["ip", "addr", "add", "10.100.2.1/32", "dev", "lo"])
+    exit_lab.drive(exit_lab.node2, "node2", "set")
+    exit_lab.drive(exit_lab.hub, "hub", "local")
+    agent = subprocess.Popen(  # noqa: S603 - explicit argv
+        [
+            "ip", "netns", "exec", exit_lab.node2.full_name, sys.executable, "-c", SERVER,
+            str(exit_lab.log.with_name("node2.log")), "10.100.2.1:9100",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        time.sleep(0.5)
+        assert exit_lab.fetch(exit_lab.src, "10.100.2.1", port=9100) == "10.8.1.2"
+        # The uplink stays NATed.
+        assert exit_lab.fetch(exit_lab.src, OTHER_HOST) == HUB_UPLINK
     finally:
         agent.terminate()
         agent.wait(timeout=10)

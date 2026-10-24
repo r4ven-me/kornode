@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (no NAT inside the interlink for `via: local`)
+
+- `via: local` masqueraded everything not leaving through `lo`, and main also routes into interlink sessions and prefixes. A hub client reaching an agent prefix through the default `clients → any via local` rule (and the D-26 rule toward connected networks, including agents' /32 session routes) reached the agent as the hub's interlink address. Masquerade now never applies to interlink interfaces (`ip kornode_nat` has its own `interlink_ifaces` set). New netlab case in `test_p4_exit_set.py` fails before the fix (`10.99.0.1`) and passes after (real client address).
+
 ### Fixed (fast failure of dead exits, D-89)
 
 - Clients of a dead kill-switched upstream waited for a timeout instead of getting ICMP unreachable: the error inherited the dead exit's mark from the flow and was dropped in postrouting. Locally generated ICMP errors that do not leave via the uplink now pass before the kill switch. Found by netlab `test_examples_forwarding` on the integrated code.
