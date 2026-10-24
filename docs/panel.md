@@ -24,7 +24,7 @@ Network.
 | Access | Users | VPN accounts: passwords, client certificates and `.p12`, revocation, one-time codes. |
 | Access | Groups | ocserv groups: settings shared by a set of users, membership. |
 | Access | Sessions | Clients connected right now; disconnect a session. |
-| Routing | Network | Where client traffic goes: egress rules, sources, and the reconciler that applies them. |
+| Routing | Network | Where client traffic goes: egress rules, destination sets and sources; kernel diagnostics. |
 | Routing | Nodes | Hub and agents: topology, enrollment, agent management, interlink addressing and DNS. |
 | System | Config | Server, certificates, authentication, identity, upstream profiles, DNS, Web/API, backups. |
 | System | Diagnostics | Probe commands and the doctor's health checks. |
@@ -43,11 +43,13 @@ The line under the page title repeats the short description of the open section.
    your own list, only your rules apply.
 4. Connect a client, watch it in **Sessions**.
 
-Nodes → Overview shows the hub even before a second server joins. Enrollment and agent management become useful when you add another server.
+Nodes → Node list shows the hub even before a second server joins. Enrollment and agent management become useful when you add another server.
 
 ## Network
 
-The section is ordered from what you edit to what you inspect.
+Network has two tasks, chosen at the top of the page. **Hub policy & sources** (opened by
+default) edits where traffic goes; **Kernel diagnostics** inspects how the saved policy is
+applied. Unsaved edits in one task survive switching to the other.
 
 ### Egress rules
 
@@ -59,13 +61,16 @@ no rule is **dropped** — nothing leaves unrouted. Each rule has:
 - **To** — `any`, inline CIDRs and domains, a named set, or the prefixes of one node;
 - **Via** — `local` (this server's uplink), `upstream:<profile>` (an external VPN from
   Config → Upstream), `node:<n>` (agent node `n` with the gateway role), `interlink`, or `drop`;
-- **Kill switch** — when the chosen exit is down, reject the traffic instead of trying the
-  next rule. On by default for everything except `local`; this is what keeps traffic
-  meant for a tunnel from leaking through the uplink.
+- **Kill switch** — when the chosen exit is down, reject the traffic. On by default for
+  everything except `local`; this is what keeps traffic meant for a tunnel from leaking
+  through the uplink. Turned off on an upstream rule, the rule is skipped while that
+  upstream is down and the next rules decide.
 
-Rules are reordered by drag or by the arrows. A rule that can never match (an earlier rule
-covers it) is marked inline. **Explain from … to …** shows which saved rule a packet would
-hit. `Check` validates without saving; the JSON tab edits the same policy as text.
+**Destination sets** above the rules are reusable lists of addresses, domains and URL
+lists, referred to by name in **To**. Rules are reordered by drag or by the arrows. A rule
+that can never match (an earlier rule covers it) is marked inline. **Test a saved rule**
+shows which saved rule a packet would hit. `Check` validates without saving; the JSON tab
+edits the same policy as text.
 
 ### Sources
 
@@ -78,45 +83,48 @@ makes the network reachable from the other nodes.
 Sources cannot be changed while rule edits are unsaved: saving a source stores the saved
 policy, not the draft.
 
-### Reconciler, Plan, Explain
+### Kernel diagnostics
 
-Technical views. The **reconciler** is the background process that keeps the kernel
-(routing rules, tables, nftables) in line with the saved policy; `drift` above zero means
-the kernel differs from the plan. **Plan** lists the compiled exits and the operations a
-run would perform; `Dry run` shows them without touching the kernel, `Apply` forces a run.
-**Explain** is the detailed form of the inline explain: matched rule, mark, table, route
-and NAT.
+Technical views, loaded only when this task is opened; they use the saved policy, not
+unsaved edits. **Kernel sync status** is the reconciler, the background process that keeps
+the kernel (routing rules, tables, nftables) in line with the saved policy; `drift` above
+zero means the kernel differs from the plan. **Preview & apply network plan** lists the
+compiled exits and the operations a run would perform; `Dry run` shows them without
+touching the kernel, `Apply` forces a run. **Explain a packet** is the detailed form of
+the rule test: matched rule, mark, table, route, NAT and a kernel check.
 
 ## Nodes
 
 Nodes combines the hub topology and agent management in one section, with three subsections:
 
-- **Overview** — the hub and agents, their interlink addresses, state, roles, announced
-  prefixes and desired/reported versions. Select an agent's card to manage it below the
-  topology; **Add agent** creates a new one. The control-plane status, refresh and signing-key
-  rotation actions remain here.
-- **Settings** — the interlink address plan: hub node ID, interlink CIDR, client and source
+- **Node list** — counters (registered, online, enrolled, control API), **Add agent**, and
+  the interlink topology: the hub and agents with their interlink addresses, state, roles,
+  announced prefixes and configuration state. **Open node** on a card opens that node's
+  workspace. Signing-key rotation is under **Control plane maintenance**: it is not a
+  routine refresh.
+- **Interlink addressing** — the interlink address plan: hub node ID, interlink CIDR, client and source
   pool templates, enrollment pool, domain and reserved CIDRs. This is the only structured
   editor for these settings; the duplicate Config → Interlink entry has been removed.
   Defaults fit most setups; change them only for network collisions. `{id}` is the node ID.
-- **DNS** — the `kornode.lan` interlink zone. Generated records are read-only; extra A, AAAA
+- **Interlink DNS** — the `kornode.lan` interlink zone. Generated records are read-only; extra A, AAAA
   and CNAME records can be hub-wide or scoped to one agent, which keeps answering its own
   node zone without the hub. This is distinct from Config → DNS (resolver/forwarding settings).
 
 Hub prefixes are read-only: they follow the client pool and exported sources. Use
-**Manage hub sources in Network** in Overview to open and focus the existing Network →
+**Manage hub sources in Network** in Node list to open and focus the existing Network →
 Sources editor for adding, editing, deleting or exporting hub sources; there is no second
 source editor in Nodes.
 
-### Agent management in Overview
+### Agent management in Node list
 
 1. **Add agent** — a name, optionally a node ID, roles: `access` (serves its own VPN
    clients) and/or `gateway` (other nodes may leave to the internet through it). The result is a
    one-time enrollment token; run the agent with it as described in the README.
-2. Pick the agent's card in **Topology**, then a part of it in **Agent section**:
-   settings and enrollment, networks and sources, egress policy (the same rule editor as
-   the hub's), upstreams, access listener and users (`access` role), reports, bundles and
-   commands.
+2. **Open node** on the agent's card. The node workspace has tabs: **Settings & enrollment**,
+   **Networks & sources**, **Egress policy** (the same rule editor as the hub's),
+   **Upstreams**, **VPN access & users** (`access` role only) and **Activity & diagnostics**
+   (reports, bundles, commands). Unsaved edits survive switching tabs; **← All nodes**
+   returns to the list.
 
 An agent keeps forwarding with its last signed bundle while the hub is unreachable.
 
@@ -128,14 +136,14 @@ The agent is a separate image, `kornode-agent` (`Dockerfile.agent`), published a
 1. **Prepare the hub once.**
    - Turn the control plane on: `control: {enabled: true}` in the hub config (Config →
      Advanced → Persistent YAML, or the file itself), then restart the hub container. The
-     control API is a supervisor program rendered at start-up. Nodes → Overview shows
-     "Control API enabled".
+     control API is a supervisor program rendered at start-up. Nodes → Node list shows
+     Control API "Enabled".
    - Config → Server → **Common name** (`server.cn`) must be a name or address the new node
      can reach: the enroll token carries `server.cn:server.port` as the hub address.
    - That port, 443/tcp by default, must be open. The agent only dials out.
-2. **Create the agent.** Nodes → Overview → Add agent → "Create agent and token". Copy the token right
+2. **Create the agent.** Nodes → Node list → Add agent → "Create agent and token". Copy the token right
    away: it is shown once and expires after 60 minutes (`control.enroll_token_ttl_minutes`).
-   A new token for a pending agent: its Settings → "Issue enrollment token".
+   A new token for a pending agent: its Settings & enrollment tab → "Issue enrollment token".
 3. **Start it on the new node.** It needs Docker with `/dev/net/tun`. Copy `compose.agent.yaml`
    there; the rest of the repository is not needed:
 
@@ -149,16 +157,16 @@ The agent is a separate image, `kornode-agent` (`Dockerfile.agent`), published a
    Without `KORNODE_AGENT_IMAGE`, run the same commands in a checkout of the repository; they
    build the image locally. Keep `./agent-data` next to the compose file: it holds the
    agent's keys, certificate and cached bundle.
-4. **Check.** The agent's card in Nodes → Overview → Topology shows `active · online`
-   with desired and reported versions equal. On the node,
+4. **Check.** The agent's card in Nodes → Node list shows `active · online` and
+   "Configuration in sync" (desired and reported versions equal). On the node,
    `docker compose -f compose.agent.yaml exec agent kornode-agent status` (or `doctor`)
    works even without the hub.
 
 To send hub clients through the agent, give it the `gateway` role and add a rule with
-`via node:<its node ID>` in Network → Egress rules.
+`via node:<its node ID>` in Network → Hub policy & sources → Egress rules.
 
 ## Dry-run
 
 The **Dry-run** switch in the top bar makes server commands, certificate actions, agent
 creation, signing-key rotation and backup restore return a preview instead of changing
-anything. Network has its own `Dry run` button next to `Apply`.
+anything. Network → Kernel diagnostics has its own `Dry run` button next to `Apply`.

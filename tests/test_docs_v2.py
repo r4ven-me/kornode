@@ -24,6 +24,16 @@ DOCS = (
     "docs/networking.md",
     "docs/features.md",
     "docs/configuration.md",
+    "docs/panel.md",
+    "docs/sources.md",
+    "docs/docker.md",
+    "docs/security.md",
+    # Spec 10 names the legacy spellings on purpose (migration table).
+    *sorted(
+        str(path.relative_to(Path(__file__).resolve().parents[1]))
+        for path in (Path(__file__).resolve().parents[1] / "docs/spec").glob("[0-9][0-9]-*.md")
+        if not path.name.startswith("10-")
+    ),
 )
 REMOVED_TERMS = (
     "client_policy",
@@ -53,6 +63,8 @@ REMOVED = re.compile("|".join(REMOVED_TERMS), re.IGNORECASE)
 @pytest.mark.parametrize("name", DOCS)
 def test_doc_has_no_removed_v1_terms(name: str) -> None:
     text = (ROOT / name).read_text(encoding="utf-8")
+    # The signed v1 bundle's sealing AAD path is a wire literal, not a user-facing name.
+    text = text.replace("/tunnels/fabric/camouflage", "")
     assert REMOVED.findall(text) == []
 
 

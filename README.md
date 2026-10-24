@@ -721,7 +721,7 @@ address `10.99.0.1:8444`, reached from inside the tunnel); `server.cn` set to a 
 reach, because the enroll token carries `server.cn:server.port` as the hub address; and that port (443/tcp by
 default) open. The agent only dials out, so it needs no inbound port unless it has the `access` role.
 
-On the hub (or in the panel: Agents → Add agent; the token is shown once and expires after
+On the hub (or in the panel: Nodes → Node list → Add agent; the token is shown once and expires after
 `control.enroll_token_ttl_minutes`, 60 by default):
 
 ```bash
@@ -744,7 +744,7 @@ docker compose -f compose.agent.yaml up -d
 
 Without `KORNODE_AGENT_IMAGE` the same commands build `Dockerfile.agent` from the checkout. `./agent-data` holds the
 agent's keys, certificate and cached bundle: keep it, it is what lets the agent boot and forward while the hub is
-down. The agent appears as `active · online` under Agents and in Interlink → Topology.
+down. The agent appears as `active · online` in Nodes → Node list.
 
 Then manage the agent from the hub: `korctl agent list|show|set|status|revoke|delete`, its exported networks
 (`korctl agent prefix list|add|del`), its egress policy (`korctl agent egress show|set|edit`), sources
@@ -796,7 +796,7 @@ docker compose exec kornode korctl net plan                # what the reconciler
 docker compose exec kornode korctl net explain --help      # why traffic from SRC to DST goes where it goes
 ```
 
-In the panel: Network → Egress rules and Sources (hub) and Agents → policy (agents). Sources are documented in
+In the panel: Network → Hub policy & sources (hub) and Nodes → a node → Egress policy (agents). Sources are documented in
 [docs/sources.md](docs/sources.md): run the access server in `network_mode: host` and disable its own NAT hooks,
 kornode owns routing and NAT for the source subnet (`korctl doctor` reports foreign NAT rules as an error).
 

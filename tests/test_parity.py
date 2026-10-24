@@ -63,6 +63,8 @@ def discover_ui_capabilities() -> set[str]:
     pattern = re.compile(r"data-capability\s*=\s*[\"']([^\"']+)[\"']")
     found: set[str] = set()
     for path in UI_ROOT.rglob("*.tsx"):
+        if path.name.endswith(".test.tsx"):
+            continue  # a capability that survives only in a test is not in the panel
         found.update(pattern.findall(path.read_text(encoding="utf-8")))
     return found
 

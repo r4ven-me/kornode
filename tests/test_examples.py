@@ -10,7 +10,9 @@ from kornode.config.loader import load_config
 from kornode.config.models import profile_slug
 
 ROOT = Path(__file__).resolve().parents[1]
-EXAMPLES = sorted((ROOT / "examples").glob("config.*.yaml"))
+EXAMPLES = sorted((ROOT / "examples").glob("config.*.yaml")) + [
+    ROOT / "docs/spec/examples/hub.config.yaml"
+]
 
 
 def test_examples_exist() -> None:
