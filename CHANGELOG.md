@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (certificate path activation, D-88)
+
+- Activating a certificate at a new path (self-signed → external or Let's Encrypt, or a certificate mode change) restarted nothing and sent ocserv a SIGHUP, which ocserv 1.5 cannot apply to a new path (`cannot find snapshot for file`). Certificate paths and `[vhost:...]` sections are now restart-only: activation restarts ocserv (active sessions reconnect), renewal at the same paths still reloads. The response names the action (`korctl server restart|reload`) and reports `restart_pending` when reload was unticked.
+
 ### Changed (interlink naming and Nodes, D-85 / D-86)
 
 - Renamed the public fabric configuration, CLI/API, templates, bundles and panel to **interlink**; default DNS zone is **`kornode.lan`**. Agent version and v2 bundle minimum are 2.1.0. Explicit existing domains remain unchanged. Old YAML/env/.env names, policy aliases, agent config and signed v1 caches are readable for one minor release; conflicting aliases are rejected. Legacy signatures and sealed-secret AAD are verified before normalization. Certificate migration preserves the old files and SPKI pin. **The SNI rename requires explicit re-enrollment across D-85**, not a transparent image upgrade.

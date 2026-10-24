@@ -10,8 +10,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from pydantic import BaseModel, Field, field_validator
 
 from kornode.api.auth import invalidate_auth_sessions, require_admin
+from kornode.api.routes_server import ocserv_apply_result, running_ocserv_conf
 from kornode.config.loader import deep_merge, load_config
 from kornode.config.models import AppConfig, IntervalUnit, LetsEncryptConfig
+from kornode.renderers import OcservConfigRenderer
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandError, CommandResult
 from kornode.services.config import ConfigService
@@ -21,6 +23,7 @@ from kornode.services.config_store import (
     config_lock,
     mutate_config,
 )
+from kornode.services.ocserv_reload import restart_required
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificatePaths, ServerCertificateService
 
@@ -242,18 +245,20 @@ async def upload_external(
             detail="certificate files must be UTF-8 PEM files",
         ) from exc
     reload_result: CommandResult | None = None
+    previous = running_ocserv_conf(request)
 
     def apply(config: AppConfig) -> None:
         nonlocal reload_result
-        reload_result = _write_and_reload(config, reload=reload, write_rendered=False)
+        reload_result = _write_and_reload(
+            config, reload=reload, write_rendered=False, previous_ocserv_conf=previous
+        )
 
     loaded_config = _activate_external_config(request, paths, letsencrypt=False, after_apply=apply)
     return {
         "status": "external certificates installed",
         "config": loaded_config.model_dump_safe(),
-        "reload": command_result(reload_result, ("korctl", "server", "reload"))
-        if reload_result
-        else None,
+        "reload": ocserv_apply_result(reload_result),
+        "restart_pending": not reload and _restart_required(previous, loaded_config),
     }
 
 
@@ -285,6 +290,7 @@ def issue_letsencrypt(
         raise_command_http_error(exc)
     loaded_config: AppConfig | None = None
     reload_result: CommandResult | None = None
+    previous = running_ocserv_conf(request)
     if not payload.dry_run:
         paths = service.letsencrypt_paths(domains[0])
         try:
@@ -306,7 +312,10 @@ def issue_letsencrypt(
         def apply(candidate: AppConfig) -> None:
             nonlocal reload_result
             reload_result = _write_and_reload(
-                candidate, reload=payload.reload, write_rendered=False
+                candidate,
+                reload=payload.reload,
+                write_rendered=False,
+                previous_ocserv_conf=previous,
             )
 
         loaded_config = _activate_letsencrypt_config(
@@ -329,9 +338,10 @@ def issue_letsencrypt(
             ("korctl", "certificates", "letsencrypt-issue", "--email", "***"),
         ),
         "config": loaded_config.model_dump_safe() if loaded_config else None,
-        "reload": command_result(reload_result, ("korctl", "server", "reload"))
-        if reload_result
-        else None,
+        "reload": ocserv_apply_result(reload_result),
+        "restart_pending": loaded_config is not None
+        and not payload.reload
+        and _restart_required(previous, loaded_config),
     }
 
 
@@ -383,11 +393,29 @@ def save_certificate_settings(
     request: Request,
     payload: CertificateSettingsRequest,
 ) -> dict[str, object]:
+    # The mode selects which certificate files ocserv.conf points at. A saved
+    # path change must reach the running server now: a later SIGHUP (renewal
+    # loop, DNS apply) cannot load a path ocserv did not start with.
+    previous = running_ocserv_conf(request)
+    reload_result: CommandResult | None = None
+
+    def apply(candidate: AppConfig) -> None:
+        nonlocal reload_result
+        if OcservConfigRenderer().render(candidate) != previous:
+            reload_result = _write_and_reload(
+                candidate, reload=True, write_rendered=False, previous_ocserv_conf=previous
+            )
+
     loaded_config = _update_certificate_config(
         request,
         {"mode": payload.mode, "ca_name": payload.ca_name},
+        after_apply=apply,
     )
-    return {"status": "certificate settings saved", "config": loaded_config.model_dump_safe()}
+    return {
+        "status": "certificate settings saved",
+        "config": loaded_config.model_dump_safe(),
+        "reload": ocserv_apply_result(reload_result),
+    }
 
 
 @router.post("/letsencrypt/renew")
@@ -522,18 +550,33 @@ def _update_certificate_config(
 
 
 def _write_and_reload(
-    config: AppConfig, *, reload: bool, write_rendered: bool = True
+    config: AppConfig,
+    *,
+    reload: bool,
+    write_rendered: bool = True,
+    previous_ocserv_conf: str | None = None,
 ) -> CommandResult | None:
     """Caller holds config_lock, or runs in mutate_config.after_apply.
 
     Transactions already rendered their authoritative candidate. Renewal still
     renders here, after rereading current YAML under the shared lock.
+
+    Renewal rewrites files at the same paths, so SIGHUP is enough. Activation
+    passes ``previous_ocserv_conf``: a changed certificate path or vhost needs a
+    restart (see ``ocserv_reload``), which drops the active VPN sessions.
     """
     if write_rendered:
         ConfigService().write_rendered_files(config)
     if not reload:
         return None
-    return ServerService(config).reload(dry_run=False)
+    if previous_ocserv_conf is None:
+        return ServerService(config).reload(dry_run=False)
+    return ServerService(config, already_rendered=True).apply_config_change(previous_ocserv_conf)
+
+
+def _restart_required(previous_ocserv_conf: str, config: AppConfig) -> bool:
+    """A saved change the running ocserv only picks up after a restart."""
+    return restart_required(previous_ocserv_conf, OcservConfigRenderer().render(config))
 
 
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:

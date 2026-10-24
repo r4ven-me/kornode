@@ -33,13 +33,15 @@ class ServerService:
         *,
         config_path: Path | None = None,
         env_file: Path | None = None,
+        already_rendered: bool = False,
     ) -> None:
         # No source path means an intentional in-memory candidate (e.g. a
         # lock-owning transaction callback), never an implicit reload of defaults.
         self.config_path = config_path
         self.env_file = env_file
         self._rpc_override = rpc_client
-        self._already_rendered = False
+        # True inside a config transaction that already wrote the rendered files.
+        self._already_rendered = already_rendered
         self.config = config
         self.rpc = rpc_client or SupervisorRpcClient(config.generated_path("supervisor.sock"))
         self.config_service = config_service or ConfigService()

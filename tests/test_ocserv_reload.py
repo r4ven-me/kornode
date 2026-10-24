@@ -33,3 +33,56 @@ def test_port_change_requires_restart() -> None:
 
 def test_reloadable_change_does_not_require_restart() -> None:
     assert not restart_required(BASE, BASE.replace("max-clients = 128", "max-clients = 64"))
+
+
+CERTS = """server-cert = /var/lib/kornode/certs/server.crt
+server-key = /var/lib/kornode/certs/server.key
+ca-cert = /var/lib/kornode/certs/ca.crt
+crl = /var/lib/kornode/certs/crl.pem
+[vhost:interlink.kornode.lan]
+server-cert = /var/lib/kornode/certs/interlink.crt
+server-key = /var/lib/kornode/certs/interlink.key
+"""
+
+
+def test_new_certificate_path_requires_restart() -> None:
+    # ocserv snapshots certificate files by path at startup: SIGHUP with a new
+    # path fails with "cannot find snapshot for file" (self-signed -> Let's Encrypt).
+    letsencrypt = CERTS.replace(
+        "server-cert = /var/lib/kornode/certs/server.crt",
+        "server-cert = /etc/letsencrypt/live/vpn.example.com/fullchain.pem",
+    )
+    assert restart_required(BASE + CERTS, BASE + letsencrypt)
+
+
+def test_server_key_or_crl_path_change_requires_restart() -> None:
+    assert restart_required(BASE + CERTS, BASE + CERTS.replace("server.key\n", "other.key\n", 1))
+    assert restart_required(BASE + CERTS, BASE + CERTS.replace("crl.pem", "crl2.pem"))
+
+
+def test_vhost_certificate_path_change_requires_restart() -> None:
+    changed = CERTS.replace("interlink.crt", "interlink-new.crt")
+    assert restart_required(BASE + CERTS, BASE + changed)
+
+
+def test_vhost_rename_or_removal_requires_restart() -> None:
+    renamed = CERTS.replace("[vhost:interlink.kornode.lan]", "[vhost:interlink.mesh.example]")
+    assert restart_required(BASE + CERTS, BASE + renamed)
+    without_vhost = CERTS.split("[vhost:")[0]
+    assert restart_required(BASE + CERTS, BASE + without_vhost)
+
+
+def test_global_and_vhost_paths_are_compared_per_section() -> None:
+    # Moving a path from the global section into a vhost is a different server.
+    moved = (
+        CERTS.replace("server-key = /var/lib/kornode/certs/server.key\n", "")
+        + "server-key = /var/lib/kornode/certs/server.key\n"
+    )
+    assert restart_required(BASE + CERTS, BASE + moved)
+
+
+def test_renewal_at_the_same_paths_keeps_reload() -> None:
+    # Renewal rewrites file content at unchanged paths: SIGHUP re-reads it.
+    assert not restart_required(
+        BASE + CERTS + "max-same-clients = 2\n", BASE + CERTS + "max-same-clients = 4\n"
+    )
