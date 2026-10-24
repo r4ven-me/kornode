@@ -147,15 +147,15 @@ class DynamicSet:
 
 def dynamic_sets(policy: EgressPolicy) -> dict[str, DynamicSet]:
     """Destinations that need resolving, keyed as NodeFacts.resolved is read: the set
-    name, or `rule<N>` for an inline destination (D-25)."""
+    name, or `InlineDest.resolved_key()` for an inline destination (D-25)."""
     found = {
         name: DynamicSet(tuple(dest.domains), tuple(dest.domain_urls), tuple(dest.route_urls))
         for name, dest in policy.sets.items()
         if dest.domains or dest.domain_urls or dest.route_urls
     }
-    for index, rule in enumerate(policy.egress):
+    for rule in policy.egress:
         if isinstance(rule.to, InlineDest) and rule.to.domains:
-            found[f"rule{index}"] = DynamicSet(tuple(rule.to.domains), (), ())
+            found[rule.to.resolved_key()] = DynamicSet(tuple(rule.to.domains), (), ())
     return found
 
 

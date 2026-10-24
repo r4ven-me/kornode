@@ -75,8 +75,8 @@ def domain_groups(
 ) -> list[DomainGroup]:
     """Every destination with domains, resolved through the internal DNS upstreams: the
     policy's named sets (key = set name; `url_domains` are the domains downloaded from
-    its `domain_urls`) and inline rule destinations (key `rule<N>`, the names
-    NodeFacts.resolved is read by)."""
+    its `domain_urls`) and inline rule destinations (key `InlineDest.resolved_key()`,
+    the names NodeFacts.resolved is read by)."""
     url_domains = url_domains or {}
     policy = policy or config.egress_policy()
     upstreams = tuple(config.internal_dns.upstreams)
@@ -87,11 +87,12 @@ def domain_groups(
         for name, dest in policy.sets.items()
         if dest.domains or url_domains.get(name)
     ]
-    groups += [
-        DomainGroup(f"rule{index}", tuple(rule.to.domains), upstreams)
-        for index, rule in enumerate(policy.egress)
+    inline = {
+        rule.to.resolved_key(): tuple(rule.to.domains)
+        for rule in policy.egress
         if isinstance(rule.to, InlineDest) and rule.to.domains
-    ]
+    }
+    groups += [DomainGroup(key, domains, upstreams) for key, domains in inline.items()]
     return groups
 
 
@@ -149,6 +150,13 @@ class DomainResolverService:
 
     def state_dir(self) -> Path:
         return resolved_state_dir(self.config)
+
+    def pending(self) -> bool:
+        """A destination with domains has never been resolved (new set or rule)."""
+        directory = self.state_dir()
+        return any(
+            not (directory / f"{group.name}.txt").exists() for group in domain_groups(self.config)
+        )
 
     def refresh(self, *, dry_run: bool = False) -> RefreshOutcome:
         policy = self.config.egress_policy()

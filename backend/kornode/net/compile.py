@@ -247,7 +247,7 @@ def dest_members(
             dest.domains or dest.domain_urls or dest.route_urls
         )
     assert isinstance(to, InlineDest)
-    resolved = facts.resolved.get(f"rule{index}", frozenset())
+    resolved = facts.resolved.get(to.resolved_key(), frozenset())
     return frozenset(to.routes) | resolved, bool(to.domains)
 
 

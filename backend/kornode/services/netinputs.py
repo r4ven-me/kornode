@@ -311,11 +311,13 @@ class HubNetInputs:
                 if is_dest:
                     # The agent classified by the addresses it resolved itself: the hub
                     # matches the same ones (static routes come from the policy).
-                    reported = NodeFacts(
-                        node_id=node.id,
-                        client_pool=None,
-                        resolved=view.gateway_sets.get(node.id, {}),
-                    )
+                    sets = dict(view.gateway_sets.get(node.id, {}))
+                    if isinstance(rule.to, InlineDest):
+                        # Agents before 2.2 key inline destinations by rule position.
+                        legacy = sets.get(f"rule{index}")
+                        if legacy is not None:
+                            sets.setdefault(rule.to.resolved_key(), legacy)
+                    reported = NodeFacts(node_id=node.id, client_pool=None, resolved=sets)
                     dest, _ = dest_members(rule, index, policy, reported)
                 found.append(TransitExit(target, tuple(sources), view.sessions.get(target), dest))
         return found

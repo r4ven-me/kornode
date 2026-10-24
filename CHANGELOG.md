@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (inline domain destinations keyed by content)
+
+- Addresses resolved for an inline `to: {domains: [...]}` destination were stored under the rule's position (`rule<N>`). Resolution runs on its own clock (up to an hour), so inserting or reordering rules handed one rule's addresses to another: traffic meant for an upstream could be classified `via local` until the next resolve. The key is now derived from the domains (`inline.<hash>`) on the hub and the agent; the hub still reads `rule<N>` from agents before 2.2. The hub resolver also wakes within ~10 s when a new set or inline destination has never been resolved.
+
 ### Fixed (no NAT inside the interlink for `via: local`)
 
 - `via: local` masqueraded everything not leaving through `lo`, and main also routes into interlink sessions and prefixes. A hub client reaching an agent prefix through the default `clients → any via local` rule (and the D-26 rule toward connected networks, including agents' /32 session routes) reached the agent as the hub's interlink address. Masquerade now never applies to interlink interfaces (`ip kornode_nat` has its own `interlink_ifaces` set). New netlab case in `test_p4_exit_set.py` fails before the fix (`10.99.0.1`) and passes after (real client address).

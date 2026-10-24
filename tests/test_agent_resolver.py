@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from kornode.net.lists import UrlListCache
-from kornode.net.model import EgressPolicy
+from kornode.net.model import EgressPolicy, InlineDest
 from kornode_agent.resolver import (
     MAX_INTERVAL_SECONDS,
     MIN_INTERVAL_SECONDS,
@@ -151,7 +151,7 @@ def test_refresh_records_every_dynamic_set_by_the_name_facts_read(tmp_path: Path
     assert resolver.read() == {
         "web": frozenset({"203.0.113.5", "2001:db8::1", "192.0.2.0/24"}),
         "feed": frozenset({"198.51.100.7"}),
-        "rule1": frozenset({"203.0.113.9"}),
+        InlineDest(domains=("inline.example",)).resolved_key(): frozenset({"203.0.113.9"}),
     }
     assert all(servers == ["10.100.1.1"] for servers in lookup.servers)  # via the hub resolver
 

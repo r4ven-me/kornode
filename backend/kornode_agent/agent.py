@@ -608,13 +608,13 @@ class Agent:
             return {}
         resolved = self.set_resolver.read()
         found: dict[str, list[str]] = {}
-        for index, rule in enumerate(active.bundle.policy.egress):
+        for rule in active.bundle.policy.egress:
             if rule.parsed_via.kind != "node":
                 continue
             if isinstance(rule.to, SetRef):
                 key = rule.to.set
             elif isinstance(rule.to, InlineDest):
-                key = f"rule{index}"
+                key = rule.to.resolved_key()
             else:
                 continue
             found[key] = sorted(resolved.get(key, frozenset()))

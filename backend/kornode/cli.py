@@ -850,8 +850,18 @@ def domains_watch() -> None:
         except Exception as exc:  # noqa: BLE001 - keep watching
             typer.echo(f"domain resolve failed: {exc}", err=True)
         deadline = time.monotonic() + interval
+        check_at = time.monotonic() + 10
         while not stopping and time.monotonic() < deadline:
             time.sleep(0.5)
+            if time.monotonic() < check_at:
+                continue
+            # A new set or inline rule must not wait up to an hour for addresses.
+            check_at = time.monotonic() + 10
+            try:
+                if DomainResolverService(get_config()).pending():
+                    break
+            except Exception:  # noqa: BLE001, S112 - the next cycle reports it
+                continue
 
 
 @internal_dns_app.command("status")

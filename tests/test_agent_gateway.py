@@ -17,6 +17,9 @@ from kornode.services.command import CommandResult
 from kornode.services.netinputs import HubNetInputs
 
 OUT = {"id": "out", "from": ["clients"], "to": "any", "via": "node:3"}
+from kornode.net.model import InlineDest  # noqa: E402
+
+INLINE = InlineDest(domains=("example.net",)).resolved_key()
 
 
 def make(world: Any) -> Any:  # type: ignore[no-untyped-def]
@@ -57,8 +60,10 @@ def test_the_exit_node_gets_the_nat_rule_for_what_the_hub_sends_it(world: Any) -
 def test_an_operators_own_interlink_rule_is_not_duplicated(world: Any) -> None:  # type: ignore[no-untyped-def]
     env, service = make(world)
     own = {
-        "id": "mine", "from": ["interlink"],
-        "to": {"routes": ["198.51.100.0/24"]}, "via": "local",
+        "id": "mine",
+        "from": ["interlink"],
+        "to": {"routes": ["198.51.100.0/24"]},
+        "via": "local",
     }
     service.set_policy("node3", {"egress": [own]})
     rules = env.check(env.registry.latest_bundle(3)).bundle.policy.egress
@@ -234,7 +239,7 @@ def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rul
         set_resolver=SimpleNamespace(
             read=lambda: {
                 "web": frozenset({"203.0.113.9", "198.51.100.1"}),
-                "rule1": frozenset({"192.0.2.5"}),
+                INLINE: frozenset({"192.0.2.5"}),
                 "lan": frozenset({"10.1.1.1"}),
             }
         ),
@@ -242,7 +247,7 @@ def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rul
 
     assert Agent._gateway_sets(stub) == {  # type: ignore[arg-type]
         "web": ["198.51.100.1", "203.0.113.9"],
-        "rule1": ["192.0.2.5"],
+        INLINE: ["192.0.2.5"],
     }
 
     stub.inputs.active = None
@@ -253,14 +258,36 @@ def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implic
     world: Any,  # type: ignore[no-untyped-def]
     tmp_path: Path,
 ) -> None:
-    """The bundle gets `to-interlink` in front of the operator's rules, so the agent reports its
-    inline destination as `rule1`; the hub must read the same key (D-79)."""
+    """Agents before 2.2 key an inline destination by its bundle position (`rule1`: the bundle
+    gets `to-interlink` in front of the operator's rules); the hub still reads that key (D-79)."""
     env, service = make(world)
     service.set_policy(
         "node2",
         {"egress": [{"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "node:3"}]},
     )
     env.registry.add_report(2, {"applied_version": 1, "gateway_sets": {"rule1": ["203.0.113.9"]}})
+
+    facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
+
+    assert [t.dest for t in facts.transit_exits] == [frozenset({"203.0.113.9/32"})]
+
+
+def test_the_hub_reads_content_keyed_inline_destinations_whatever_their_position(
+    world: Any,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    env, service = make(world)
+    key = InlineDest(domains=("example.org",)).resolved_key()
+    service.set_policy(
+        "node2",
+        {
+            "egress": [
+                {"from": ["clients"], "to": {"routes": ["198.51.100.0/24"]}, "via": "local"},
+                {"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "node:3"},
+            ]
+        },
+    )
+    env.registry.add_report(2, {"applied_version": 1, "gateway_sets": {key: ["203.0.113.9"]}})
 
     facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
 

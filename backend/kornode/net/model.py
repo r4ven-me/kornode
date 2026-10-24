@@ -3,6 +3,7 @@ docs/spec/schemas/egress.v1.schema.json). First match wins."""
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
@@ -113,6 +114,16 @@ class InlineDest(_Strict):
     @classmethod
     def _valid_domains(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(_domains(list(value)))
+
+    def resolved_key(self) -> str:
+        """Key of this destination's resolved addresses (NodeFacts.resolved, files).
+
+        Derived from the domains, never from the rule's position: resolution runs
+        on its own clock, so a positional key would hand one rule's addresses to
+        another after rules are inserted or reordered. `.` cannot occur in a set name.
+        """
+        digest = hashlib.sha256("\n".join(sorted(set(self.domains))).encode()).hexdigest()
+        return f"inline.{digest[:16]}"
 
 
 To = Literal["any", "interlink"] | SetRef | NodeRef | InlineDest
