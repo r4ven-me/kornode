@@ -67,6 +67,7 @@ table inet kornode {
     iifname "awg0" ip saddr 10.8.3.0/24 meta mark set 0x0c800000 ct mark set meta mark ct label set (1 | 4 | 5 | 8 | 11 | 12 | 14 | 16 | 18 | 20 | 21 | 22 | 23 | 24 | 26 | 27 | 28 | 29 | 32 | 33 | 35 | 36 | 39 | 41 | 48 | 49 | 50 | 52 | 53 | 56 | 58 | 59 | 63 | 68 | 72 | 76 | 77 | 78 | 79 | 80 | 81 | 84 | 87 | 88 | 89 | 93 | 97 | 99 | 100 | 105 | 106 | 107 | 111 | 112 | 113 | 114 | 115 | 116 | 117 | 119 | 120 | 122 | 125) goto validate_connection comment "egress rule 2"
     ip saddr 10.100.3.0/24 reject with icmpx admin-prohibited comment "egress rule 3"
     iifname "awg0" ip saddr 10.8.3.0/24 reject with icmpx admin-prohibited comment "egress rule 3"
+    iifname "awg0" ip6 saddr != fe80::/10 ip6 daddr != { fe80::/10, ff00::/8 } reject with icmpx admin-prohibited comment "source amnezia: no IPv6 policy"
   }
   chain output {
     type route hook output priority mangle; policy accept;

@@ -191,12 +191,15 @@ def test_implicit_returns_come_before_every_rule() -> None:
 
 def test_unrouted_clients_and_sources_are_rejected_last() -> None:
     script = compile_policy(*node3_case()).script
-    chain = script.split("chain egress_classify {", 1)[1].split("}", 1)[0].strip().splitlines()
+    chain = script.split("chain egress_classify {", 1)[1].split("\n  }", 1)[0].splitlines()
 
-    assert chain[-2:] == [
+    assert chain[-3:] == [
         '    ip saddr 10.100.3.0/24 reject with icmpx admin-prohibited comment "egress rule 3"',
         '    iifname "awg0" ip saddr 10.8.3.0/24 reject with icmpx admin-prohibited '
         'comment "egress rule 3"',
+        # An IPv4 source's IPv6 (wg-easy hands out both) is not forwarded unclassified.
+        '    iifname "awg0" ip6 saddr != fe80::/10 ip6 daddr != { fe80::/10, ff00::/8 } '
+        'reject with icmpx admin-prohibited comment "source amnezia: no IPv6 policy"',
     ]
 
 

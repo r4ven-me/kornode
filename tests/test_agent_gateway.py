@@ -292,3 +292,12 @@ def test_the_hub_reads_content_keyed_inline_destinations_whatever_their_position
     facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
 
     assert [t.dest for t in facts.transit_exits] == [frozenset({"203.0.113.9/32"})]
+
+
+def test_a_report_cannot_widen_a_set_into_any() -> None:
+    from kornode.net.lists import parse_gateway_sets
+
+    report = {"web": ["0.0.0.0/0", "10.0.0.0/7", "10.0.0.0/8", "203.0.113.9"]}
+    assert parse_gateway_sets(report) == {"web": frozenset({"10.0.0.0/8", "203.0.113.9/32"})}
+    with pytest.raises(ValueError, match="wider than /8"):
+        parse_gateway_sets(report, strict=True)

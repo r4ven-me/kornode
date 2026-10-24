@@ -399,6 +399,25 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
         if name == "clients" and facts.client_pool is None:
             continue
         classify.append(ClassifyRule(tail_index, name, _from_match(name, policy, facts), (), None))
+    for item in policy.sources:
+        if ipaddress.ip_network(item.cidr).version == 4:
+            # An IPv4 source may still carry IPv6 (wg-easy hands out both by default):
+            # with no IPv6 policy it must not be forwarded unclassified. Link-local and
+            # multicast stay untouched (neighbour discovery on bridged interfaces).
+            classify.append(
+                ClassifyRule(
+                    tail_index,
+                    item.name,
+                    (
+                        f'iifname "{item.interface}"',
+                        "ip6 saddr != fe80::/10",
+                        "ip6 daddr != { fe80::/10, ff00::/8 }",
+                    ),
+                    (),
+                    None,
+                    label=f"source {item.name}: no IPv6 policy",
+                )
+            )
     if facts.interlink_guard:
         # Agents never reach a destination outside the interlink unless a policy says so
         # (spec 07: the hub accepts exit traffic only from nodes that declare it).

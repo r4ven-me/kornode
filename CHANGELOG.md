@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed (smaller data-plane gaps)
+
+- An IPv4 source (wg-easy, Amnezia) that also hands out IPv6 had its IPv6 forwarded unclassified; it is now rejected at the end of `egress_classify` (link-local and multicast untouched).
+- Agent-reported `gateway_sets` entries wider than /8 are refused, so a compromised agent cannot widen its set rule into `to: any` on the hub.
+
 ### Fixed (boot window before the first reconciler pass)
 
 - After a host reboot ocserv could accept and forward clients before the reconciler installed the kill switch and classification. Supervisor now starts ocserv through `korctl net wait-ready -- ocserv …`, which waits for a converged pass without error and then `exec`s ocserv (no shell). A persistently failing reconciler keeps ocserv waiting and logs the reason every 30 s (fail closed).

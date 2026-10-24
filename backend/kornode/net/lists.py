@@ -161,6 +161,9 @@ def dynamic_sets(policy: EgressPolicy) -> dict[str, DynamicSet]:
 
 MAX_GATEWAY_SETS = 64
 MAX_GATEWAY_SET_ADDRESSES = 4096
+# A report cannot widen a set rule into `to: any` (or most of it): the hub would send
+# that traffic to the reporting node. Static routes come from the policy, not the report.
+MIN_GATEWAY_SET_PREFIXLEN = 8
 
 
 def parse_gateway_sets(value: object, *, strict: bool = False) -> dict[str, frozenset[str]]:
@@ -193,6 +196,12 @@ def parse_gateway_sets(value: object, *, strict: bool = False) -> dict[str, froz
             except ValueError:
                 if strict:
                     raise ValueError(f"gateway_sets[{key}]: {item!r} is not an address") from None
+                continue
+            if network.version == 4 and network.prefixlen < MIN_GATEWAY_SET_PREFIXLEN:
+                if strict:
+                    raise ValueError(
+                        f"gateway_sets[{key}]: {item!r} is wider than /{MIN_GATEWAY_SET_PREFIXLEN}"
+                    )
                 continue
             if network.version == 4:
                 addresses.add(str(network))
