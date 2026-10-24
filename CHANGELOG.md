@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed (fast failure of dead exits, D-89)
+
+- Clients of a dead kill-switched upstream waited for a timeout instead of getting ICMP unreachable: the error inherited the dead exit's mark from the flow and was dropped in postrouting. Locally generated ICMP errors that do not leave via the uplink now pass before the kill switch. Found by netlab `test_examples_forwarding` on the integrated code.
+
 ### Fixed (certificate path activation, D-88)
 
 - Activating a certificate at a new path (self-signed → external or Let's Encrypt, or a certificate mode change) restarted nothing and sent ocserv a SIGHUP, which ocserv 1.5 cannot apply to a new path (`cannot find snapshot for file`). Certificate paths and `[vhost:...]` sections are now restart-only: activation restarts ocserv (active sessions reconnect), renewal at the same paths still reloads. The response names the action (`korctl server restart|reload`) and reports `restart_pending` when reload was unticked.

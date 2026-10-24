@@ -99,6 +99,8 @@ table inet kornode {
   chain postrouting {
     type filter hook postrouting priority filter; policy accept;
     oifname "lo" accept
+    meta l4proto icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } fib saddr type local oifname != "ens3" accept
+    meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } fib saddr type local oifname != "ens3" accept
     tcp flags syn / syn,rst tcp option maxseg size set rt mtu
     meta mark & 0xffffff00 { 0x0c800100, 0x0cc63d00 } oifname "ens3" drop
     meta mark & 0xff000000 == 0x0c000000 meta mark & 0xffffff00 != { 0x0c800100, 0x0cc63d00, 0x0c800000 } drop

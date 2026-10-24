@@ -227,10 +227,29 @@ def test_stale_own_marks_never_leave_via_the_uplink() -> None:
     script = compile_policy(policy, facts).script
     strict = compile_policy(policy, dataclasses.replace(facts, uplink=None)).script
 
-    assert f'{stale} reject with icmpx admin-prohibited' in script
-    assert f'{stale} drop' in script
+    assert f"{stale} reject with icmpx admin-prohibited" in script
+    assert f"{stale} drop" in script
     assert f"{stale} reject with icmpx admin-prohibited" in strict
     assert f"{stale} drop" in strict
+
+
+def test_local_icmp_errors_toward_clients_pass_before_the_kill_switch() -> None:
+    # D-28: a client of a dead kill-switched upstream gets ICMP unreachable.
+    # icmp_send attaches the flow's conntrack, so output restores the dead mark
+    # onto the error; it must still pass postrouting unless it heads to the uplink.
+    policy, facts = hub_case()
+    down = dataclasses.replace(
+        facts, tunnels={"upstream:office": TunnelFact("oc-office0", False, ("198.51.100.9",))}
+    )
+    postrouting = compile_policy(policy, down).script.split("chain postrouting {")[1]
+    lines = [line.strip() for line in postrouting.split("}\n", 1)[0].splitlines()]
+    icmp = [i for i, line in enumerate(lines) if "fib saddr type local" in line]
+    kill = [i for i, line in enumerate(lines) if line.endswith(" drop")]
+    assert len(icmp) == 2 and kill and max(icmp) < min(kill), lines
+    assert all('oifname != "eth0" accept' in lines[i] for i in icmp)
+    # Unknown uplink: no exemption, the strict kill switch keeps everything (fail closed).
+    strict = compile_policy(policy, dataclasses.replace(down, uplink=None)).script
+    assert "fib saddr type local" not in strict
 
 
 def test_uplink_that_is_not_an_ifname_is_rejected_not_rendered() -> None:

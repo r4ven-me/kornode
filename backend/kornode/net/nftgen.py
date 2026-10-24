@@ -107,6 +107,29 @@ def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> li
     ]
 
 
+def _local_icmp_errors(uplink: str | None) -> list[str]:
+    """ICMP errors this node sends back toward a client must not die with the flow.
+
+    When an exit is down its table answers with ``unreachable`` and the kernel
+    (or a forward ``reject``) sends an ICMP error. ``icmp_send`` attaches the
+    flow's conntrack, so output restores the dead exit's mark onto the error
+    and the unconditional postrouting drop for that mark would swallow it:
+    the promised fast failure (D-28) becomes a silent timeout. Errors that
+    originate here and leave through anything but the uplink are let through
+    before the kill switch; toward the uplink, and when the uplink is unknown,
+    the kill switch still applies (fail closed).
+    """
+    if not uplink:
+        return []
+    out = f'oifname != "{_ifname(uplink)}"'
+    return [
+        "    meta l4proto icmp icmp type { destination-unreachable, time-exceeded, "
+        f"parameter-problem }} fib saddr type local {out} accept",
+        "    meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, "
+        f"time-exceeded, parameter-problem }} fib saddr type local {out} accept",
+    ]
+
+
 def _stale_marks(exits: tuple[Exit, ...], uplink: str | None, action: str) -> list[str]:
     """Defense in depth: removed and legacy marks may not leave on any
     interface, even if a main-table route points somewhere other than the
@@ -292,6 +315,7 @@ def render_script(
         "  chain postrouting {",
         "    type filter hook postrouting priority filter; policy accept;",
         '    oifname "lo" accept',
+        *_local_icmp_errors(facts.uplink),
         f"    {MSS_CLAMP}",
         *kill_postrouting,
         "  }",
