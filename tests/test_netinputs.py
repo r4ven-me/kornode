@@ -230,3 +230,20 @@ def test_hub_exit_goes_through_the_node_session_and_fails_closed_without_it(
     assert [r.type for r in default] == ["unreachable", "unreachable"]
     # answers of the exit node pass the strict reverse path
     assert "@transit_ifaces" in up.script
+
+
+def test_dns_listen_address_is_a_local_address_of_the_reconciler(tmp_path: Path) -> None:
+    """D-99: only kornode.net adds the resolver's /32 to `lo`."""
+    from kornode.net.state import Address
+
+    config = _config(tmp_path)  # the VPN server is on: the built-in resolver is active
+    assert config.dns_tunnel_active()
+    inputs = HubNetInputs(config, runner=FakeRunner(), proc_sys=_proc(tmp_path, "1"))
+    listen = ipaddress.IPv4Address(config.internal_dns.listen)
+    assert listen in inputs.facts().local_addresses
+    assert Address("lo", f"{listen}/32") in inputs.desired().addresses
+
+    off = _config(tmp_path, server={"enabled": False})
+    assert not off.dns_tunnel_active()
+    quiet = HubNetInputs(off, runner=FakeRunner(), proc_sys=_proc(tmp_path / "off", "1"))
+    assert quiet.facts().local_addresses == ()

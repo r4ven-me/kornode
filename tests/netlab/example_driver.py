@@ -49,8 +49,9 @@ def main() -> None:
     kernel = Kernel()
     keys = [sysctl.key for sysctl in want.sysctls]
     chains = sorted({rule.chain_key for rule in want.foreign_rules})
-    kernel.apply(diff(kernel.read(keys, chains), want))
-    left = diff(kernel.read(keys, chains), want)
+    devs = sorted({address.dev for address in want.addresses})  # like the reconciler
+    kernel.apply(diff(kernel.read(keys, chains, devs), want))
+    left = diff(kernel.read(keys, chains, devs), want)
     print(json.dumps({"after": [repr(op) for op in left.ops]}))
 
 

@@ -329,17 +329,44 @@ def test_rendered_files_include_dnsmasq_and_blocklist(tmp_path: Path) -> None:
     assert "command=/usr/local/bin/korctl internal-dns run" in supervisor
 
 
-def test_ensure_listen_address_assigns_ip_to_loopback(tmp_path: Path) -> None:
-    config = _config(tmp_path)
-    result = InternalDnsService(config).ensure_listen_address(dry_run=True)
-    assert result.argv == ("ip", "addr", "replace", "10.100.1.1/32", "dev", "lo")
-    assert result.dry_run
+def test_ensure_listen_address_goes_through_the_reconciler_not_ip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only kornode.net changes kernel state (D-99): the service awaits a reconciler pass."""
+    from kornode.services.net import NetApplyError, NetService
 
-
-def test_remove_listen_address_command(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    result = InternalDnsService(config).remove_listen_address(dry_run=True)
-    assert result.argv == ("ip", "addr", "del", "10.100.1.1/32", "dev", "lo")
+    seen: list[bool] = []
+
+    def apply(_self: NetService, *, dry_run: bool = False) -> dict[str, object]:
+        seen.append(dry_run)
+        return {"applied": True, "via": "reconciler", "status": {"last_error": None}}
+
+    monkeypatch.setattr(NetService, "apply", apply)
+    assert InternalDnsService(config).ensure_listen_address().ok
+    assert InternalDnsService(config).ensure_listen_address(dry_run=True).dry_run
+    assert seen == [False, True]
+
+    def refused(_self: NetService, *, dry_run: bool = False) -> dict[str, object]:
+        raise NetApplyError("reconciler refused the pass")
+
+    monkeypatch.setattr(NetService, "apply", refused)
+    failed = InternalDnsService(config).ensure_listen_address()
+    assert not failed.ok and "refused" in failed.stderr
+
+    def not_applied(_self: NetService, *, dry_run: bool = False) -> dict[str, object]:
+        return {"applied": False, "status": {"last_error": "OSError: nft"}}
+
+    monkeypatch.setattr(NetService, "apply", not_applied)
+    assert "OSError: nft" in InternalDnsService(config).ensure_listen_address().stderr
+
+    def denied(_self: NetService, *, dry_run: bool = False) -> dict[str, object]:
+        raise PermissionError(13, "Permission denied")
+
+    # An OSError never aborts the caller (the dnsmasq restart still happens).
+    monkeypatch.setattr(NetService, "apply", denied)
+    unreachable = InternalDnsService(config).ensure_listen_address()
+    assert not unreachable.ok and "PermissionError" in unreachable.stderr
 
 
 def test_dnsmasq_argv_uses_generated_conf(tmp_path: Path) -> None:
