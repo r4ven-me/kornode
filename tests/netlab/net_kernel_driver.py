@@ -93,11 +93,12 @@ def main() -> None:
     kernel = Kernel()
     keys = [sysctl.key for sysctl in want.sysctls]
     chains = sorted({rule.chain_key for rule in want.foreign_rules})
-    first = diff(kernel.read(keys, chains), want)
+    devs = sorted({address.dev for address in want.addresses})  # like the reconciler
+    first = diff(kernel.read(keys, chains, devs), want)
     out: dict[str, object] = {"plan": [type(op).__name__ for op in first.ops]}
     if sys.argv[1] == "converge":
         kernel.apply(first)
-        second = diff(kernel.read(keys, chains), want)
+        second = diff(kernel.read(keys, chains, devs), want)
         out["after"] = [repr(op) for op in second.ops]
     print(json.dumps(out))
 

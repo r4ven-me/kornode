@@ -225,8 +225,10 @@ class InternalDnsService:
         argv = ("korctl", "net", "apply")
         try:
             result = NetService(self.config).apply(dry_run=dry_run)
-        except NetApplyError as exc:
-            return CommandResult(argv, 1, "", str(exc), dry_run)
+        except (NetApplyError, OSError) as exc:
+            # A failure here must never stop the dnsmasq restart that follows: dnsmasq
+            # reports a bind failure itself, as it did when this ran `ip` (check=False).
+            return CommandResult(argv, 1, "", f"{type(exc).__name__}: {exc}", dry_run)
         ok = dry_run or result.get("applied") is True
         error = "" if ok else str((result.get("status") or {}).get("last_error") or "not applied")
         return CommandResult(argv, 0 if ok else 1, "", error, dry_run)

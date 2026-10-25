@@ -21,6 +21,19 @@ from kornode.services.config_store import config_lock, mutate_config
 from kornode.services.internal_dns import InternalDnsService
 
 
+@pytest.fixture(autouse=True)
+def no_kernel_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests are about locks and rendering; DNS applies must not run a real
+    reconciler pass (it would write /var/lib/kornode and, as root, touch the kernel)."""
+    from kornode.services.command import CommandResult
+
+    monkeypatch.setattr(
+        InternalDnsService,
+        "ensure_listen_address",
+        lambda *_args, **_kwargs: CommandResult(("korctl", "net", "apply"), 0, "", ""),
+    )
+
+
 def request_for(path: Path) -> Request:
     state = SimpleNamespace(config_path=path, config=load_config(path))
     return Request({"type": "http", "app": SimpleNamespace(state=state)})

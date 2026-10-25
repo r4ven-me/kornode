@@ -360,6 +360,14 @@ def test_ensure_listen_address_goes_through_the_reconciler_not_ip(
     monkeypatch.setattr(NetService, "apply", not_applied)
     assert "OSError: nft" in InternalDnsService(config).ensure_listen_address().stderr
 
+    def denied(_self: NetService, *, dry_run: bool = False) -> dict[str, object]:
+        raise PermissionError(13, "Permission denied")
+
+    # An OSError never aborts the caller (the dnsmasq restart still happens).
+    monkeypatch.setattr(NetService, "apply", denied)
+    unreachable = InternalDnsService(config).ensure_listen_address()
+    assert not unreachable.ok and "PermissionError" in unreachable.stderr
+
 
 def test_dnsmasq_argv_uses_generated_conf(tmp_path: Path) -> None:
     config = _config(tmp_path)
