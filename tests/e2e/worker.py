@@ -243,11 +243,25 @@ script="\\n".join([
 open(d+"/vpnc","w").write(script)
 os.chmod(d+"/vpnc",0o755)
 url="https://%s:%d"%(o["host"],o["port"])
-subprocess.run(["openconnect","--background","--pid-file="+d+"/pid",
+dial=["openconnect","--background","--pid-file="+d+"/pid",
  "--interface","kn-vpnc0","--script="+d+"/vpnc","--servercert",o["pin"],
- "--non-inter","--user",o["user"],"--passwd-on-stdin",url],
- input=(o["password"]+"\\n").encode(),stdout=open(d+"/log","ab"),
+ "--non-inter","--user",o["user"],"--passwd-on-stdin",url]
+for stale in ("stop",):
+ try: os.remove(d+"/"+stale)
+ except OSError: pass
+subprocess.run(dial,input=(o["password"]+"\\n").encode(),stdout=open(d+"/log","ab"),
  stderr=subprocess.STDOUT,timeout=60,check=True)
+# A VPN client application dials again when the server ends the session (a graceful
+# server restart makes openconnect exit with "Session terminated by server"). This
+# stands in for it: it redials the same account while the process is gone, until the
+# stop file appears. The password lives only in this disposable container (0600).
+pw=os.open(d+"/pw",os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+os.write(pw,(o["password"]+"\\n").encode()); os.close(pw)
+watch="d=$1; shift\\nwhile [ ! -e \\"$d/stop\\" ]; do\\n"\
+ " if ! kill -0 \\"$(cat \\"$d/pid\\" 2>/dev/null)\\" 2>/dev/null; then\\n"\
+ "  \\"$@\\" < \\"$d/pw\\" >> \\"$d/log\\" 2>&1\\n fi\\n sleep 1\\ndone\\n"
+subprocess.Popen(["sh","-c",watch,"kn-redial",d,*dial],stdin=subprocess.DEVNULL,
+ stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
 addr=None
 for _ in range(150):
  r=subprocess.run(["ip","-4","-j","addr","show","dev","kn-vpnc0"],capture_output=True)
@@ -258,6 +272,7 @@ if addr is None: raise SystemExit("no tunnel address")
 print(json.dumps({"address":addr}))
 """
 ACCESS_CLIENT_STOP = """import os,signal
+open("/tmp/kn-access/stop","w").close()
 try:
  os.kill(int(open("/tmp/kn-access/pid").read()),signal.SIGTERM)
 except (OSError,ValueError): pass
@@ -414,6 +429,7 @@ ping=subprocess.run(["ping","-c","1","-W","1","-I","oc-office","10.8.0.1"],
 print(json.dumps({"links":links,"routes":routes,"rules":rules,
  "office_pid_alive":alive,"office_check_host_reachable":ping.returncode==0}))
 """
+
 
 class Worker:
     def __init__(
@@ -1048,9 +1064,10 @@ class Worker:
     def access_setup(self) -> Any:
         """Role access + listener + one user on a case agent (hub only)."""
         if (
-                    self.role != "hub" or self.case not in {"routed", "upgrade"}
-                    or self.payload["name"] != "agent-a"
-                ):
+            self.role != "hub"
+            or self.case not in {"routed", "upgrade"}
+            or self.payload["name"] != "agent-a"
+        ):
             raise ValueError("routed case, hub, agent-a only")
         host = str(ipaddress.ip_address(self.payload["host"]))
         port, user, password = self.payload["port"], self.payload["user"], self.payload["password"]
@@ -1360,8 +1377,15 @@ class Worker:
             host = str(ipaddress.IPv4Address(self.payload["host"]))
             expected = str(ipaddress.IPv4Address(self.payload["expected"]))
             argv = [
-                "docker", "exec", "-d", self.container("client"), "python", "-c",
-                FORWARD_OBSERVER, host, expected,
+                "docker",
+                "exec",
+                "-d",
+                self.container("client"),
+                "python",
+                "-c",
+                FORWARD_OBSERVER,
+                host,
+                expected,
             ]
         self.run(argv, timeout=20)
         return {"started": True}
@@ -1371,7 +1395,8 @@ class Worker:
             raise ValueError("upgrade traffic: agent-b only")
         script = 'from pathlib import Path;print(Path("/tmp/kn-upgrade-traffic.json").read_text())'
         _, data = self.run(
-            ["docker", "exec", self.container("client"), "python", "-c", script], timeout=10,
+            ["docker", "exec", self.container("client"), "python", "-c", script],
+            timeout=10,
         )
         return json.loads(data)
 
@@ -1382,9 +1407,19 @@ class Worker:
         phase = self.payload["phase"]
         if phase == "start":
             host = str(ipaddress.IPv4Address(self.payload["host"]))
-            self.run([
-                "docker", "exec", "-d", self.container(), "python", "-c", UPLINK_CAPTURE, host,
-            ], timeout=20)
+            self.run(
+                [
+                    "docker",
+                    "exec",
+                    "-d",
+                    self.container(),
+                    "python",
+                    "-c",
+                    UPLINK_CAPTURE,
+                    host,
+                ],
+                timeout=20,
+            )
             return {"started": True}
         if phase not in {"status", "stop"}:
             raise ValueError("invalid capture phase")
@@ -1392,11 +1427,11 @@ class Worker:
         if phase == "stop":
             script += (
                 'p.with_suffix(".stop").touch()\n'
-                'for _ in range(50):\n'
+                "for _ in range(50):\n"
                 ' if json.loads(p.read_text())["done"]: break\n'
-                ' time.sleep(.1)\n'
+                " time.sleep(.1)\n"
             )
-        script += 'print(p.read_text())'
+        script += "print(p.read_text())"
         return json.loads(self.execute(["python", "-c", script], timeout=10)[1])
 
     def nl05_snapshot(self) -> Any:

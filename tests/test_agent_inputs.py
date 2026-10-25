@@ -202,20 +202,16 @@ def test_agent_yaml_hub_is_the_last_dial_after_the_bundle_hubs(tmp_path: Path) -
     names = [dial.server_name for dial in dials]
     assert names[-1] == "interlink.mesh.example"
     assert len(names) == len(validated.bundle.hubs) + 1
-    # Without an override that differs from the bundle, nothing is added.
+    # The same vhost name with another endpoint is not a fallback: a bundle with a
+    # broken hub endpoint must fail its health check and roll back (NL-11).
     first = validated.bundle.hubs[0]
-    same = CONFIG.model_copy(
-        update={
-            "hub": CONFIG.hub.model_copy(
-                update={
-                    "host": first.host,
-                    "port": first.port,
-                    "pin": first.pin,
-                    "server_name": first.server_name,
-                }
-            )
-        }
+    same_name = CONFIG.model_copy(
+        update={"hub": CONFIG.hub.model_copy(update={"server_name": first.server_name})}
     )
-    assert len(specs_for(validated, same, tmp_path)["interlink"].dials) == len(
+    assert len(specs_for(validated, same_name, tmp_path)["interlink"].dials) == len(
+        validated.bundle.hubs
+    )
+    # No name in agent.yaml (enrolled before the rename was known): nothing added.
+    assert len(specs_for(validated, CONFIG, tmp_path)["interlink"].dials) == len(
         validated.bundle.hubs
     )

@@ -223,13 +223,15 @@ def test_marker_required_before_commands(worker: FakeWorker) -> None:
 
 def test_marker_owner_and_permissions_required(worker: FakeWorker) -> None:
     cast(Mock, worker.marker).lstat.return_value = SimpleNamespace(
-            st_mode=stat.S_IFREG | 0o666, st_uid=0,
-        )
+        st_mode=stat.S_IFREG | 0o666,
+        st_uid=0,
+    )
     with pytest.raises(ValueError):
         worker.guard()
     cast(Mock, worker.marker).lstat.return_value = SimpleNamespace(
-            st_mode=stat.S_IFREG | 0o600, st_uid=1000,
-        )
+        st_mode=stat.S_IFREG | 0o600,
+        st_uid=1000,
+    )
     with pytest.raises(ValueError):
         worker.guard()
     assert worker.commands == []
@@ -610,7 +612,8 @@ def test_public_state_probe_contains_no_private_data(
 
 @pytest.mark.parametrize("role", ["hub", "agent-a", "agent-b", "ext"])
 def test_upgrade_deployment_has_an_independent_client_and_only_owned_ports(
-    worker: FakeWorker, role: str,
+    worker: FakeWorker,
+    role: str,
 ) -> None:
     worker.role, worker.case = role, "upgrade"
     worker.directory = worker.root / "upgrade"
@@ -631,15 +634,23 @@ def test_upgrade_deployment_has_an_independent_client_and_only_owned_ports(
 
 
 def test_upgrade_restart_targets_only_node_and_preserves_client_image(
-    worker: FakeWorker, monkeypatch: pytest.MonkeyPatch,
+    worker: FakeWorker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     worker.role, worker.case = "agent-b", "upgrade"
     worker.directory.mkdir()
     client = {"image": "baseline:previous", "entrypoint": ["sleep", "infinity"]}
     compose_path = worker.directory / "compose.json"
-    compose_path.write_text(json.dumps({"services": {
-        "node": {"image": "baseline:previous"}, "client": client,
-    }}))
+    compose_path.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "node": {"image": "baseline:previous"},
+                    "client": client,
+                }
+            }
+        )
+    )
     worker.payload = {"image": "current:agent"}
     monkeypatch.setattr(worker, "owned_case", lambda: {"image": "baseline:previous"})
     calls: list[tuple[str, ...]] = []
@@ -655,12 +666,17 @@ def test_upgrade_restart_targets_only_node_and_preserves_client_image(
 @pytest.mark.parametrize(
     "action",
     [
-        "upgrade_traffic_start", "upgrade_traffic_status", "uplink_capture", "nl05_snapshot",
-        "nl05_ext_kill", "nl05_tunnel_down",
+        "upgrade_traffic_start",
+        "upgrade_traffic_status",
+        "uplink_capture",
+        "nl05_snapshot",
+        "nl05_ext_kill",
+        "nl05_tunnel_down",
     ],
 )
 def test_new_runtime_actions_reject_unrelated_cases_before_any_command(
-    worker: FakeWorker, action: str,
+    worker: FakeWorker,
+    action: str,
 ) -> None:
     with pytest.raises(ValueError):
         getattr(worker, action)()
@@ -678,15 +694,21 @@ def test_upgrade_policy_uses_only_the_shared_local_client_subset(worker: FakeWor
 
     worker.cli = cli  # type: ignore[method-assign]
     worker.access_policy()
-    assert captured == [{"egress": [
-        {"id": "clients-out", "from": ["clients"], "to": "any", "via": "local"},
-    ]}]
+    assert captured == [
+        {
+            "egress": [
+                {"id": "clients-out", "from": ["clients"], "to": "any", "via": "local"},
+            ]
+        }
+    ]
     assert not (worker.directory / "access-policy.json").exists()
 
 
 @pytest.mark.parametrize("full", [False, True])
 def test_access_client_hook_restores_routes_on_reconnect_without_relogin(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, full: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    full: bool,
 ) -> None:
     import subprocess
 
@@ -694,6 +716,7 @@ def test_access_client_hook_restores_routes_on_reconnect_without_relogin(
 
     directory = tmp_path / "access"
     dials: list[list[str]] = []
+    watchers: list[list[str]] = []
 
     def run(argv: list[str], **kwargs: Any) -> Any:
         if argv[0] == "openconnect":
@@ -705,23 +728,37 @@ def test_access_client_hook_restores_routes_on_reconnect_without_relogin(
         return SimpleNamespace(returncode=0, stdout=b'[{"addr_info":[{"local":"10.9.0.2"}]}]')
 
     options = {
-        "host": "192.0.2.2", "port": 8443, "pin": "fake-pin", "user": "alice",
-        "password": "local-test-only", "routes": ["192.0.2.4/32"], "full": full,
+        "host": "192.0.2.2",
+        "port": 8443,
+        "pin": "fake-pin",
+        "user": "alice",
+        "password": "local-test-only",
+        "routes": ["192.0.2.4/32"],
+        "full": full,
     }
     # Execute the actual generator, but never start openconnect or inspect real routes.
     with monkeypatch.context() as patch:
         patch.setattr(sys, "stdin", io.StringIO(json.dumps(options)))
         patch.setattr(subprocess, "run", run)
+        patch.setattr(subprocess, "Popen", lambda argv, **_kw: watchers.append(argv))
         code = ACCESS_CLIENT.replace("/tmp/kn-access", str(directory))
         exec(compile(code, "<access-client>", "exec"), {})
     assert len(dials) == 1
     assert "--script=" + str(directory / "vpnc") in dials[0]
+    # The same dial is repeated by the redial watcher; the password never reaches argv.
+    assert len(watchers) == 1 and watchers[0][-len(dials[0]) :] == dials[0]
+    assert "local-test-only" not in " ".join(watchers[0] + dials[0])
+    assert (directory / "pw").read_text() == "local-test-only\n"
+    assert (directory / "pw").stat().st_mode & 0o777 == 0o600
 
     state_path = tmp_path / "ip-state.json"
     state_path.write_text(json.dumps({"address": None, "routes": {}, "errors": 0}))
     ip = tmp_path / "ip"
     ip.write_text(
-        "#!" + sys.executable + "\n" + '''import json,os,sys
+        "#!"
+        + sys.executable
+        + "\n"
+        + """import json,os,sys
 from pathlib import Path
 path=Path(os.environ["FAKE_IP_STATE"])
 state=json.loads(path.read_text());args=sys.argv[1:];code=0
@@ -740,25 +777,36 @@ else:
  raise SystemExit("unexpected fake ip command")
 path.write_text(json.dumps(state))
 sys.exit(code)
-'''
+"""
     )
     ip.chmod(0o700)
     env = {
-        **os.environ, "PATH": str(tmp_path), "FAKE_IP_STATE": str(state_path),
-        "TUNDEV": "kn-vpnc0", "INTERNAL_IP4_ADDRESS": "10.9.0.2",
+        **os.environ,
+        "PATH": str(tmp_path),
+        "FAKE_IP_STATE": str(state_path),
+        "TUNDEV": "kn-vpnc0",
+        "INTERNAL_IP4_ADDRESS": "10.9.0.2",
     }
 
     def hook(reason: str) -> dict[str, Any]:
-        subprocess.run(["/bin/sh", str(directory / "vpnc")], env={**env, "reason": reason},
-                       check=True, capture_output=True, timeout=5)
+        subprocess.run(
+            ["/bin/sh", str(directory / "vpnc")],
+            env={**env, "reason": reason},
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
         return cast(dict[str, Any], json.loads(state_path.read_text()))
 
     connected = hook("connect")
     expected_routes = {"192.0.2.4/32": ["dev", "kn-vpnc0"]}
     if full:
-        expected_routes.update({
-            "192.0.2.2/32": ["via", "192.0.2.254"], "default": ["dev", "kn-vpnc0"],
-        })
+        expected_routes.update(
+            {
+                "192.0.2.2/32": ["via", "192.0.2.254"],
+                "default": ["dev", "kn-vpnc0"],
+            }
+        )
     assert connected["routes"] == expected_routes
     # A link flap may remove routes while leaving the assigned address. The hook
     # must restore those routes, not rely on a new login or a fresh tun device.
@@ -783,8 +831,12 @@ sys.exit(code)
     ],
 )
 def test_forwarding_observer_counts_real_recovery_and_rejects_direct_fallback(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-    samples: list[str | None], device: str, successes: int, wrong_peer: int,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    samples: list[str | None],
+    device: str,
+    successes: int,
+    wrong_peer: int,
 ) -> None:
     import socket
     from contextlib import nullcontext
@@ -827,8 +879,10 @@ def test_forwarding_observer_counts_real_recovery_and_rejects_direct_fallback(
 
 @pytest.mark.parametrize("client_gap,wrong_peer", [(0.5, 0), (31.0, 0), (0.5, 1)])
 def test_upgrade_preserves_client_gap_and_checks_post_upgrade_success(
-    environment: dict[str, str], monkeypatch: pytest.MonkeyPatch,
-    client_gap: float, wrong_peer: int,
+    environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    client_gap: float,
+    wrong_peer: int,
 ) -> None:
     fleet = Fleet(Inventory.from_env(environment))
     fleet.image_ids = {"hub": "hub-id", "agent": "agent-id"}
@@ -841,7 +895,9 @@ def test_upgrade_preserves_client_gap_and_checks_post_upgrade_success(
         if action == "upgrade_traffic_status":
             successes[0] += 2
             return {
-                "healthy": True, "successes": successes[0], "wrong_peer": wrong_peer,
+                "healthy": True,
+                "successes": successes[0],
+                "wrong_peer": wrong_peer,
                 "max_gap_seconds": client_gap,
             }
         if action == "restart":
@@ -863,7 +919,9 @@ def test_upgrade_preserves_client_gap_and_checks_post_upgrade_success(
 
 @pytest.mark.parametrize("healthy", [False, True])
 def test_upgrade_rejects_stale_client_success_without_operator_relogin(
-    environment: dict[str, str], monkeypatch: pytest.MonkeyPatch, healthy: bool,
+    environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    healthy: bool,
 ) -> None:
     fleet = Fleet(Inventory.from_env(environment))
     fleet.image_ids = {"hub": "hub-id", "agent": "agent-id"}
@@ -965,7 +1023,8 @@ def test_netlab_coverage_references_resolve_to_real_tests() -> None:
 
 @pytest.mark.parametrize("unsafe", ["showlocals", "xdist", None])
 def test_vm_opt_in_cannot_be_bypassed_by_root_or_secret_leaking_pytest_options(
-    monkeypatch: pytest.MonkeyPatch, unsafe: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe: str | None,
 ) -> None:
     from tests.e2e.conftest import pytest_collection_modifyitems
 
@@ -992,7 +1051,8 @@ def test_vm_opt_in_cannot_be_bypassed_by_root_or_secret_leaking_pytest_options(
 
 
 def test_fail_closed_requires_a_completed_listener_and_actual_traffic_attempts(
-    environment: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+    environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cluster = Cluster(Fleet(Inventory.from_env(environment)), "routed")
     thread = Mock()
@@ -1020,19 +1080,26 @@ def test_example_forwarding_expectations_cover_every_file_and_match_its_policy()
         pool = ipaddress.IPv4Network(config.server.ipv4_network)
         for up in (True, False):
             facts = NodeFacts(
-                node_id=1, client_pool=pool, uplink="uplink0",
+                node_id=1,
+                client_pool=pool,
+                uplink="uplink0",
                 upstreams=tuple(profile_slug(p.name) for p in config.upstream.profiles),
                 tunnels={
                     f"upstream:{profile_slug(p.name)}": TunnelFact(
-                        config.upstream.profile_interface(p), up,
-                    ) for p in config.upstream.profiles
+                        config.upstream.profile_interface(p),
+                        up,
+                    )
+                    for p in config.upstream.profiles
                 },
                 resolved={name: frozenset({"198.51.100.9"}) for name in config.sets},
             )
             compiled = compile_policy(policy, facts)
             for source, destination, profile in PROBES[path.name]:
                 decision = explain(
-                    compiled, policy, facts, "host" if source == "host" else str(pool[2]),
+                    compiled,
+                    policy,
+                    facts,
+                    "host" if source == "host" else str(pool[2]),
                     destination,
                 )
                 if profile:
@@ -1044,13 +1111,15 @@ def test_example_forwarding_expectations_cover_every_file_and_match_its_policy()
 
 
 def test_awg_peer_accepts_gateway_icmp_without_installing_a_full_tunnel(
-    worker: FakeWorker, monkeypatch: pytest.MonkeyPatch,
+    worker: FakeWorker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tests.e2e.worker import AWG_SOURCE_CIDR
 
     worker.role, worker.case = "agent-b", "routed"
     worker.payload = {
-        "endpoint_host": "192.0.2.2", "routes": ["192.0.2.3/32"],
+        "endpoint_host": "192.0.2.2",
+        "routes": ["192.0.2.3/32"],
         "config": (
             "[Interface]\nAddress = 10.8.2.2/24\nPrivateKey = fake-local-test-only\n"
             "[Peer]\nPublicKey = fake-local-test-only\nAllowedIPs = 0.0.0.0/0\n"
@@ -1065,7 +1134,8 @@ def test_awg_peer_accepts_gateway_icmp_without_installing_a_full_tunnel(
 
 
 def test_nl05_abrupt_fault_disables_restart_and_targets_only_the_owned_container(
-    worker: FakeWorker, monkeypatch: pytest.MonkeyPatch,
+    worker: FakeWorker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     worker.case, worker.role = "routed", "ext"
     identifier = "a" * 64
@@ -1091,14 +1161,26 @@ def upstream_health_manager(tmp_path: Path) -> Iterator[tuple[TunnelManager, Tun
         fake.converge()
 
     manager = TunnelManager(
-        tmp_path, converge=converge, link_up=fake.link_up, runner=fake,
-        resolve=lambda server: ["192.0.2.4"], clock=fake.clock,
-        sleep=fake.sleep, jitter=lambda: 1.0, probe=probe,
+        tmp_path,
+        converge=converge,
+        link_up=fake.link_up,
+        runner=fake,
+        resolve=lambda server: ["192.0.2.4"],
+        clock=fake.clock,
+        sleep=fake.sleep,
+        jitter=lambda: 1.0,
+        probe=probe,
     )
     spec = TunnelSpec(
         "upstream:office",
-        (DialSpec(server="192.0.2.4", port=443, interface="oc-office",
-                  pid_file=tmp_path / "run" / "oc-office.pid"),),
+        (
+            DialSpec(
+                server="192.0.2.4",
+                port=443,
+                interface="oc-office",
+                pid_file=tmp_path / "run" / "oc-office.pid",
+            ),
+        ),
         check_host="10.8.0.1",
     )
     manager.set_desired({spec.exit_name: spec})
@@ -1167,7 +1249,8 @@ def test_upstream_health_is_rate_limited_and_success_resets_consecutive_failures
 @pytest.mark.parametrize("name,check_host", [("interlink", "10.8.0.1"), ("upstream:office", None)])
 def test_steady_upstream_probe_does_not_change_interlink_or_unconfigured_health(
     upstream_health_manager: tuple[TunnelManager, TunnelFake, Mock],
-    name: str, check_host: str | None,
+    name: str,
+    check_host: str | None,
 ) -> None:
     from dataclasses import replace
 
@@ -1179,3 +1262,50 @@ def test_steady_upstream_probe_does_not_change_interlink_or_unconfigured_health(
     manager.tick()
     probe.assert_not_called()
     assert manager.is_up(name)
+
+
+def test_access_client_redials_after_the_server_ends_the_session_until_stopped(
+    tmp_path: Path,
+) -> None:
+    """A graceful server restart makes openconnect exit ("Session terminated by server").
+    The harness client stands in for a VPN application: it dials again, and stops on request."""
+    import re
+    import subprocess
+    import time
+
+    from tests.e2e.worker import ACCESS_CLIENT
+
+    match = re.search(r"\nwatch=(.*?)\nsubprocess\.Popen", ACCESS_CLIENT, re.S)
+    assert match
+    namespace: dict[str, Any] = {}
+    exec("watch=" + match.group(1), namespace)  # the literal from the generator
+    directory = tmp_path / "access"
+    directory.mkdir()
+    (directory / "pw").write_text("secret\n")
+    fake = tmp_path / "fake-openconnect"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'echo "$$ $(cat)" >> "{tmp_path}/dials"\n'  # one line per dial, with the stdin
+        f'echo $$ > "{directory}/pid"\n'
+        "exit 0\n"  # the "client" ends at once: the session was terminated by the server
+    )
+    fake.chmod(0o700)
+    (directory / "pid").write_text("999999")  # no such process
+    proc = subprocess.Popen(
+        ["sh", "-c", namespace["watch"], "kn-redial", str(directory), str(fake)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        dials = tmp_path / "dials"
+        while time.monotonic() < deadline and (
+            not dials.exists() or len(dials.read_text().splitlines()) < 2
+        ):
+            time.sleep(0.2)
+        assert dials.exists() and len(dials.read_text().splitlines()) >= 2  # redialed
+        assert all(line.endswith(" secret") for line in dials.read_text().splitlines())
+        (directory / "stop").touch()
+        assert proc.wait(timeout=10) == 0
+    finally:
+        proc.kill()
