@@ -56,6 +56,7 @@ capabilities:
 | agent.create | `agent create <name> [--id N] [--role access] [--description]` | `POST /api/agents` | Nodes → Node list → Add agent |
 | agent.token | `agent token <name>` (re-issue) | `POST /api/agents/{name}/token` | Node → Settings & enrollment |
 | agent.update | `agent set <name> --role/--description/--transport ...` | `PATCH /api/agents/{name}` | Node → Settings & enrollment |
+| agent.push | `agent push <name> [--dry-run]` | `POST /api/agents/{name}/push` | Node → Activity & diagnostics → Re-push bundle |
 | agent.revoke | `agent revoke <name>` | `POST /api/agents/{name}/revoke` | Node → Settings & enrollment → Revoke |
 | agent.delete | `agent delete <name>` | `DELETE /api/agents/{name}` | Node → Settings & enrollment → Delete |
 | agent.prefixes | `agent prefix add/del/list <name> <cidr> [--kind lan] [--no-export]` | `GET/POST/DELETE /api/agents/{name}/prefixes` | Node → Networks & sources |

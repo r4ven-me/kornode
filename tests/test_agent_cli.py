@@ -260,3 +260,18 @@ def test_enroll_waits_for_the_pushed_route_but_still_refuses_an_unrouted_hub(
 
     monkeypatch.setattr(agent_cli, "_routed_through_enroll", lambda host: False)
     assert agent_cli._wait_routed_through_enroll("10.99.0.1", timeout=0.0) is False
+
+
+def test_set_hub_name_rewrites_only_the_vhost_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from kornode_agent.config import load_config
+
+    root = enrolled(World(tmp_path))
+    assert call(root, "--json", "set-hub-name", "Interlink.Mesh.Example.") == 0
+    config = load_config(root)
+    assert config.hub.server_name == "interlink.mesh.example"
+    assert config.hub.pin == "pin-sha256:test" and config.node_id == 3  # identity unchanged
+    capsys.readouterr()
+    assert call(root, "--json", "set-hub-name", "bad name\n") != 0
+    assert load_config(root).hub.server_name == "interlink.mesh.example"

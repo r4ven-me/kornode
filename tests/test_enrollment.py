@@ -516,3 +516,13 @@ def test_enroll_recompiles_other_active_agents(env: Env) -> None:
     env.enroll(env.token())
 
     assert env.registry.get_node(2).desired_version == before + 1
+
+
+def test_renewal_window_follows_the_issued_certificate_not_the_current_setting(env: Env) -> None:
+    """Lowering cert_lifetime_days later must not refuse a renewal the agent is due
+    (the agent times it from its certificate's own validity)."""
+    env.enroll(env.token())  # 90-day certificate
+    env.config.control.cert_lifetime_days = 30
+    env.clock.now += timedelta(days=61)  # > 2/3 of the issued 90 days
+    result = env.service.renew(3, make_csr())
+    assert result["cert_pem"].startswith("-----BEGIN CERTIFICATE-----")

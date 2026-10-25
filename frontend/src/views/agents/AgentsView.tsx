@@ -93,7 +93,7 @@ export function AgentsView({ token, dryRun = false, active = true, onOpenSources
 
   const mutate: Mutate = async (suffix, method, body, confirmation) => {
     if (!selected) return false;
-    if (dryRun && !(suffix === "/revoke" || suffix === "/commands" || suffix === "" && method === "DELETE")) {
+    if (dryRun && !(suffix === "/revoke" || suffix === "/push" || suffix === "/commands" || suffix === "" && method === "DELETE")) {
       setError("Preview mode: this action has no dry-run. Disable preview to apply it."); return false;
     }
     if (!dryRun && confirmation && !window.confirm(confirmation)) return false;
@@ -159,6 +159,7 @@ export function AgentsView({ token, dryRun = false, active = true, onOpenSources
       <h2 ref={detailHeading} tabIndex={-1}>{selected} · node {detail?.agent.id ?? "…"}</h2>
       <p className="muted-line">{detail?.agent.description || "Manage this node’s settings, published networks and configuration delivery."}</p>
       {live && <p role="status">{live.online ? "Online" : "Offline"} · {live.state} · last seen {live.last_seen ?? "never"} · desired {live.desired_version} / reported {live.applied_version}{live.desired_version !== live.applied_version ? " · Configuration not yet applied" : ""}</p>}
+      {live?.upgrade_required && <p role="alert">Upgrade required: the agent reports version {live.agent_version}, below the minimum {live.min_agent_version}. It keeps its cached configuration until its image is upgraded.</p>}
     </section>}
     {selected && !detail && !error && <p role="status">Loading agent details…</p>}
     {detail && <>

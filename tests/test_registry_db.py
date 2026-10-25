@@ -170,3 +170,48 @@ def test_migration_with_trigger_applies(tmp_path: Path) -> None:
         migrate(conn, migrations=[(1, sql)])
         conn.execute("INSERT INTO t (v) VALUES ('a')")
         assert conn.execute("SELECT v FROM t").fetchone()[0] == "x;y"
+
+
+def test_upgrading_an_existing_registry_snapshots_it_first(tmp_path: Path) -> None:
+    db_path = tmp_path / "registry.db"
+    with open_registry(db_path) as conn:
+        migrate(conn, migrations=[(1, "CREATE TABLE a (id INTEGER)")])
+        conn.execute("INSERT INTO a VALUES (7)")
+        conn.commit()
+        migrate(
+            conn,
+            migrations=[(1, "CREATE TABLE a (id INTEGER)"), (2, "CREATE TABLE b (id INTEGER)")],
+        )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    (snapshot,) = (tmp_path / "backups" / "registry").glob("pre-migration-v1-*.db")
+    with sqlite3.connect(snapshot) as copy:
+        assert copy.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert copy.execute("SELECT id FROM a").fetchall() == [(7,)]
+
+
+def test_a_failed_pre_migration_snapshot_leaves_the_registry_unmigrated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kornode.registry import snapshot as snapshot_module
+
+    db_path = tmp_path / "registry.db"
+    with open_registry(db_path) as conn:
+        migrate(conn, migrations=[(1, "CREATE TABLE a (id INTEGER)")])
+
+        def fail(*_args: object, **_kwargs: object) -> Path:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(snapshot_module, "write_snapshot", fail)
+        with pytest.raises(RegistryError, match="not migrated"):
+            migrate(
+                conn,
+                migrations=[(1, "CREATE TABLE a (id INTEGER)"), (2, "CREATE TABLE b (id INTEGER)")],
+            )
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_a_fresh_registry_needs_no_snapshot(tmp_path: Path) -> None:
+    db_path = tmp_path / "registry.db"
+    with open_registry(db_path) as conn:
+        migrate(conn)
+    assert not (tmp_path / "backups").exists()

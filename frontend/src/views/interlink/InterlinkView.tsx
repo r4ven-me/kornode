@@ -40,7 +40,7 @@ export function InterlinkView({ token, agents, selected, busy, loading, active =
         {node && <span>{node.interlink_address} · {prefixes(node.prefixes)}</span>}
         {agent.description && <span>{agent.description}</span>}
         <span>desired {agent.desired_version} / reported {agent.applied_version}</span>
-        <span className="field-help">{agent.state === "pending" ? "Awaiting enrollment" : agent.state === "revoked" ? "Access revoked" : agent.desired_version !== agent.applied_version ? "Configuration pending" : "Configuration in sync"} · Open node →</span>
+        <span className="field-help">{agent.state === "pending" ? "Awaiting enrollment" : agent.state === "revoked" ? "Access revoked" : agent.upgrade_required ? `Upgrade required (agent ${agent.agent_version})` : agent.desired_version !== agent.applied_version ? "Configuration pending" : "Configuration in sync"} · Open node →</span>
       </button></li>;
     })}</ul>}
     <p className="field-help">Hub prefixes follow the client pool and exported hub sources. Edit sources in Network, not in the topology.</p>

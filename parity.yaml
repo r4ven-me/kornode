@@ -788,6 +788,11 @@ capabilities:
     cli: "agent token"
     api: "DELETE /api/agents/{name}/token"
     ui: agent.token.revoke
+  - id: agent.push
+    service: kornode.services.agents.AgentService.push
+    cli: "agent push"
+    api: "POST /api/agents/{name}/push"
+    ui: agent.push
   - id: agent.revoke
     service: kornode.services.agents.AgentService.revoke
     cli: "agent revoke"

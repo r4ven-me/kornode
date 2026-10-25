@@ -14,11 +14,12 @@ import tarfile
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import NameOID
 
@@ -140,9 +141,6 @@ class Agent:
     async def _run(self) -> int:
         self.loop = asyncio.get_running_loop()
         self.config: AgentConfig = load_config(self.root)
-        self.client = ControlClient.enrolled(
-            self.config.hub.control_url, self.root / "tls", self._interlink_address
-        )
         self.reconciler: Reconciler
         self.tunnels = TunnelManager(
             self.root,
@@ -181,6 +179,12 @@ class Agent:
         # Boot first: a reconciler pass before the cached bundle is active would
         # drop the kill-switches the kernel still holds (fail closed).
         await _worker(self.applier.boot)
+        # Only now the control client: its mTLS context is built on the first
+        # request, so missing or corrupt ca/cert/key files cost the control loops
+        # (which retry with backoff), never the boot from cache.
+        self.client = ControlClient.enrolled(
+            self.config.hub.control_url, self.root / "tls", self._interlink_address
+        )
         for target in (
             self.reconciler.run_forever,
             lambda: watch_netlink(self.reconciler, self._thread_stop),
@@ -244,6 +248,8 @@ class Agent:
             self._thread_stop.wait(1.0)
 
     def _hub_ping(self) -> bool:
+        if not hasattr(self, "client"):
+            return False  # still booting from cache: the hub is not consulted yet
         future = asyncio.run_coroutine_threadsafe(self.client.ping(), self.loop)
         try:
             future.result(15)
@@ -393,6 +399,15 @@ class Agent:
         # The key is kept: replacing only the certificate is one atomic rename,
         # whereas a new key would need two files to change together.
         cert_pem = await self.client.renew(csr.public_bytes(serialization.Encoding.PEM).decode())
+        # Whatever the hub returned must be a certificate this agent can use: a
+        # broken one written over cert.pem would lock the agent out of the hub.
+        validate_renewed_certificate(
+            cert_pem.encode(),
+            key,
+            (self.root / "tls" / "ca.pem").read_bytes(),
+            self.config.node_id,
+            now=now,
+        )
         atomic_write(self.root / "tls" / "cert.pem", cert_pem.encode(), 0o644)
         old = self.client
         self.client = ControlClient.enrolled(
@@ -423,6 +438,9 @@ class Agent:
             ok, output = False, str(exc)
         except (ValueError, KeyError, OSError):
             ok, output = False, "invalid command arguments or unavailable local data"
+        except Exception as exc:  # one broken command must not lose the rest of the batch
+            log.error("command %s (%s) failed: %s", command.id, command.type, type(exc).__name__)
+            ok, output, artefact = False, f"command failed: {type(exc).__name__}", None
         for attempt in range(3):
             try:
                 await self.client.command_result(
@@ -432,6 +450,9 @@ class Agent:
             except (ControlError, HubUnreachable) as exc:
                 log.warning("command result not delivered (%s)", exc)
                 await asyncio.sleep(2**attempt)
+            except Exception as exc:
+                log.warning("command result not delivered (%s)", type(exc).__name__)
+                break
         if command.type == "restart":
             self.exit_code = RESTART_EXIT_CODE
             self.stop.set()
@@ -710,6 +731,42 @@ def _add(archive: tarfile.TarFile, name: str, data: bytes) -> None:
     archive.addfile(info, io.BytesIO(data))
 
 
+class RenewalRejected(ValueError):
+    """The certificate returned by the hub is not usable; cert.pem is kept."""
+
+
+def validate_renewed_certificate(
+    cert_pem: bytes,
+    key: Any,
+    ca_pem: bytes,
+    node_id: int,
+    *,
+    now: datetime | None = None,
+) -> x509.Certificate:
+    """Parses; carries the public key of key.pem (same SPKI); is directly signed
+    by the enrolled CA; is CN=agent-<id>, OU=agents; and is valid now."""
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem)
+    except ValueError as exc:
+        raise RenewalRejected("renewed certificate does not parse") from exc
+    spki = serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    if cert.public_key().public_bytes(*spki) != key.public_key().public_bytes(*spki):
+        raise RenewalRejected("renewed certificate is not for this agent's key")
+    try:
+        cert.verify_directly_issued_by(x509.load_pem_x509_certificate(ca_pem))
+    except (InvalidSignature, ValueError, TypeError) as exc:
+        raise RenewalRejected("renewed certificate is not signed by the enrolled CA") from exc
+    names = [a.value for a in cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)]
+    units = [a.value for a in cert.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)]
+    if names != [f"agent-{node_id}"] or "agents" not in units:
+        raise RenewalRejected("renewed certificate names another identity")
+    moment = now or datetime.now(UTC)
+    skew = timedelta(minutes=5)  # the hub's clock may run slightly ahead
+    if cert.not_valid_before_utc > moment + skew or cert.not_valid_after_utc <= moment:
+        raise RenewalRejected("renewed certificate is not valid now")
+    return cert
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -724,4 +781,4 @@ def _log_outcome(outcome: Outcome) -> None:
     log.info("bundle %d: %s %s", outcome.version, outcome.result, outcome.error or "")
 
 
-__all__ = ["Agent", "AgentRuntime"]
+__all__ = ["Agent", "AgentRuntime", "RenewalRejected", "validate_renewed_certificate"]

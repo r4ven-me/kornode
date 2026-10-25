@@ -279,3 +279,24 @@ def test_a_crash_while_activating_rolls_back_instead_of_wedging(world: World) ->
     assert outcome.result == "rolled_back" and "disk full" in (outcome.error or "")
     state = world.store.load_state()
     assert state.pending is None and state.current == 5
+
+
+def test_corrupt_state_file_boots_to_bootstrap_instead_of_crash_looping(world: World) -> None:
+    world.applier.apply_bundle(*world.bundle(5))
+    world.store.state_path.write_text("{not json")
+
+    applier = world.restart()
+
+    assert applier.state.current == 0  # bootstrap: the hub serves a fresh bundle
+    assert list(world.store.state_path.parent.glob("state.json.corrupt-*"))  # kept aside
+    assert any(e["type"] == "skipped" and "corrupt" in e["error"] for e in world.events)
+
+
+def test_corrupt_trust_store_skips_the_cache_instead_of_crash_looping(world: World) -> None:
+    world.applier.apply_bundle(*world.bundle(5))
+    world.store.trust_path.write_text("{not json")
+
+    applier = world.restart()
+
+    assert applier.state.current == 0
+    assert any(e["type"] == "skipped" and e["version"] == 5 for e in world.events)

@@ -104,6 +104,12 @@ def specs_for(
         camouflage = validated.secrets.get("/tunnels/interlink/camouflage", camouflage)
         transport = interlink_cfg.transport
         pins = [(hub.host, hub.port, hub.pin, hub.server_name) for hub in bundle.hubs]
+        # agent.yaml stays the last resort: after a hub-side vhost rename (D-85 SNI
+        # flag day) the cached bundle still names the old vhost, and the operator
+        # points the agent at the new one with `kornode-agent set-hub-name`.
+        local = (config.hub.host, config.hub.port, config.hub.pin, config.hub.server_name)
+        if local not in pins:
+            pins.append(local)
     else:
         transport = interlink.transport
         pins = [(config.hub.host, config.hub.port, config.hub.pin, config.hub.server_name)]

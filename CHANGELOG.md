@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed (control plane review 2026-10-24)
+
+- **Re-push** (`korctl agent push`, `POST /api/agents/{name}/push`, Node → Activity & diagnostics): a bundle the agent marked failed was served forever while its content was unchanged (D-90).
+- Agents below the effective `min_agent_version` are flagged `upgrade_required` in the agent API, the panel and `korctl doctor` (D-91).
+- Upgrading an existing registry first writes a `VACUUM INTO` snapshot; a failed snapshot aborts the migration (D-92).
+- Agent boot no longer depends on control-plane files: the mTLS context is built lazily, a corrupt `state.json` is set aside and the agent falls back to bootstrap, an unreadable trust store skips the cache, and a renewed certificate is validated (key, CA, CN/OU, validity) before it replaces `cert.pem`.
+- Delivered commands whose result never arrives expire and no longer fill the 100-entry queue; one failing command no longer drops the rest of its batch.
+- The hub's renewal window follows the issued certificate's validity, like the agent's.
+- `kornode-agent set-hub-name` and an `agent.yaml` fallback dial: agents move to the renamed `interlink.<domain>` vhost without re-enrollment (D-93, `docs/runbooks/upgrade-2.0.md`). Agent version 2.2.0; minimum stays 2.1.0.
+
 ### Security hardening (review 2026-10-24)
 
 - `compose.web.yaml` / `compose.proxy.yaml` no longer default the panel password to `change-me`: `KORNODE_ADMIN_PASSWORD` is required; `.env.example` ships it empty. New admin passwords (`POST /api/auth/password`, `korctl web hash-password`) must be 12+ characters and not a placeholder; existing configs still load, and `korctl doctor` (`admin-password` check) warns about a placeholder.

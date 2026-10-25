@@ -195,6 +195,7 @@ the hub's next bundle is above `high_water` as usual.
 | Command | Purpose |
 | --- | --- |
 | `enroll <token>` | One-time enrollment (05). Refuses if already enrolled unless `--force`. |
+| `set-hub-name <name>` | Set the hub vhost name (SNI) in `agent.yaml` after a hub-side rename; identity, key and pin unchanged. Refused while the agent runs. |
 | `run` | Main process (used by supervisor). |
 | `status [--json]` | Applied/pending version, hub reachability, tunnels, sources, last errors. |
 | `explain <src> <dst> [--proto tcp --port 443]` | Local explain (04). |

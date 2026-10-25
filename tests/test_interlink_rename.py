@@ -337,7 +337,7 @@ def test_tampered_v1_cache_is_not_activated(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("configured", ["2.0.0", "2.1.0", "2.10.0"])
 def test_new_bundles_are_v2_and_require_at_least_agent_2_1(tmp_path: Path, configured: str) -> None:
-    assert __version__ == "2.1.0"
+    assert __version__ == "2.2.0"  # the agent; bundles still need only 2.1.0
     assert load_default_config().control.min_agent_version == "2.1.0"
     assert load_default_config().interlink.domain == "kornode.lan"
     env = Env(tmp_path)

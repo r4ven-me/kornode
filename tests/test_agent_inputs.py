@@ -189,3 +189,33 @@ def test_a_node_that_takes_interlink_traffic_routes_the_interlink_prefixes_in_ma
     assert {dev for _, dev in up.session_routes} == {"oc-hub0"}  # type: ignore[attr-defined]
     assert not facts(plain, {"oc-hub0": True}).session_routes  # type: ignore[attr-defined]
     assert not facts(taking, {"oc-hub0": False}).session_routes  # type: ignore[attr-defined]
+
+
+def test_agent_yaml_hub_is_the_last_dial_after_the_bundle_hubs(tmp_path: Path) -> None:
+    """D-85 SNI flag day: the cached bundle still names the old vhost; the name the
+    operator set in agent.yaml (`kornode-agent set-hub-name`) is tried after it."""
+    validated = _validated(tmp_path)
+    renamed = CONFIG.model_copy(
+        update={"hub": CONFIG.hub.model_copy(update={"server_name": "interlink.mesh.example"})}
+    )
+    dials = specs_for(validated, renamed, tmp_path)["interlink"].dials
+    names = [dial.server_name for dial in dials]
+    assert names[-1] == "interlink.mesh.example"
+    assert len(names) == len(validated.bundle.hubs) + 1
+    # Without an override that differs from the bundle, nothing is added.
+    first = validated.bundle.hubs[0]
+    same = CONFIG.model_copy(
+        update={
+            "hub": CONFIG.hub.model_copy(
+                update={
+                    "host": first.host,
+                    "port": first.port,
+                    "pin": first.pin,
+                    "server_name": first.server_name,
+                }
+            )
+        }
+    )
+    assert len(specs_for(validated, same, tmp_path)["interlink"].dials) == len(
+        validated.bundle.hubs
+    )

@@ -263,9 +263,14 @@ class EnrollmentService:
             node = self._node(registry, node_id)
             if node.state != "active" or node.cert_not_after is None:
                 raise EnrollmentError(409, "conflict", f"node {node_id} is {node.state}")
-            earliest = _parse_time(node.cert_not_after) - timedelta(
-                days=self.config.control.cert_lifetime_days * (1 - RENEW_AFTER_FRACTION)
+            # The window follows the certificate actually issued, like the agent's own
+            # timer: a later change of cert_lifetime_days must not refuse a renewal the
+            # agent is entitled to (or open one early).
+            not_after = _parse_time(node.cert_not_after)
+            lifetime = self._issued_lifetime(node) or timedelta(
+                days=self.config.control.cert_lifetime_days
             )
+            earliest = not_after - lifetime * (1 - RENEW_AFTER_FRACTION)
             if now < earliest:
                 raise EnrollmentError(409, "conflict", f"renewal opens at {_iso(earliest)}")
             public_key_pem = _validated_public_key(csr_pem)
@@ -400,6 +405,17 @@ class EnrollmentService:
             )
             raise EnrollmentError(403, "unauthorized", "invalid enrollment token")
         return token
+
+    def _issued_lifetime(self, node: Node) -> timedelta | None:
+        """Validity period of the node's current certificate, if its file is readable."""
+        if not node.cert_serial:
+            return None
+        path = self.certificates.cert_dir / "agents" / f"agent-{node.id}-{node.cert_serial}.crt"
+        try:
+            cert = x509.load_pem_x509_certificate(path.read_bytes())
+        except (OSError, ValueError):
+            return None
+        return cert.not_valid_after_utc - cert.not_valid_before_utc
 
     def _issue_certificate(self, node_id: int, public_key_pem: str) -> dict[str, str]:
         tmp = self.certificates.sign_agent_public_key(

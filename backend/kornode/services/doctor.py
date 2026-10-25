@@ -44,6 +44,7 @@ class DoctorService:
             ("nft-version", self._check_nft_version),
             ("carrier-exclusions", self._check_carrier_exclusions),
             ("access-certificates", self._check_access_certificates),
+            ("agent-versions", self._check_agent_versions),
             ("sources", self._check_sources),
             ("admin-password", self._check_admin_password),
         )
@@ -186,6 +187,49 @@ class DoctorService:
                 False,
             )
         return CommandResult(argv, 0, "web admin password is not a known placeholder", "", False)
+
+    def _check_agent_versions(self) -> CommandResult:
+        """Spec 12 "upgrade required": an agent whose newest report names a version
+        below the effective `min_agent_version` refuses the bundles the hub compiles,
+        so it stays on its cached configuration until its image is upgraded."""
+        argv = ("registry", "agent-versions")
+        path = self.config.system.data_dir / "registry.db"
+        if not path.exists():
+            return CommandResult(argv, 0, "no agents", "", False)
+        from kornode.registry.db import migrate, open_registry
+        from kornode.registry.repository import Registry
+        from kornode.services.bundle import effective_min_agent_version, upgrade_required
+
+        conn = open_registry(path)
+        try:
+            migrate(conn)
+            registry = Registry(conn)
+            nodes = registry.list_nodes()
+            versions = registry.last_agent_versions()
+        finally:
+            conn.close()
+        minimum = effective_min_agent_version(self.config)
+        outdated = [
+            f"{node.name} ({versions[node.id]})"
+            for node in nodes
+            if node.id != 1
+            and node.state != "revoked"
+            and upgrade_required(versions.get(node.id), minimum)
+        ]
+        if outdated:
+            return CommandResult(
+                argv,
+                1,
+                "",
+                f"upgrade required (agent below {minimum}): "
+                + "; ".join(outdated)
+                + ". Upgrade the agent image; it keeps its cached bundle until then.",
+                False,
+            )
+        reported = sum(1 for node in nodes if node.id in versions and node.state != "revoked")
+        return CommandResult(
+            argv, 0, f"{reported} reporting agent(s) at or above {minimum}", "", False
+        )
 
     def _check_sources(self) -> CommandResult:
         """Hub sources (D-72, D-68): the interface of every source exists, and no foreign NAT

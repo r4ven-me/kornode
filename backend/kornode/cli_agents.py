@@ -184,6 +184,11 @@ def register(app: typer.Typer, config: Callable[[], AppConfig]) -> None:
     def token(name: str, revoke: bool = False, json: Json = False) -> None:
         invoke(lambda: service().token(name, revoke=revoke), json)
 
+    @agent.command("push")
+    def push(name: str, dry_run: bool = False, json: Json = False) -> None:
+        """Compile and serve a new bundle version even if its content is unchanged."""
+        invoke(lambda: service().push(name, dry_run=dry_run), json)
+
     @agent.command("revoke")
     def revoke(name: str, yes: bool = False, dry_run: bool = False, json: Json = False) -> None:
         def action() -> dict[str, Any]:

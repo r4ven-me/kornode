@@ -372,3 +372,57 @@ def test_artifact_must_be_a_plain_flat_tar_gz(world, archive: bytes) -> None:  #
     with pytest.raises(ManagementError) as exc:
         service.artifact("node2", cmd["id"])
     assert exc.value.error == "invalid_artifact"
+
+
+def test_push_serves_a_new_version_of_unchanged_content(world) -> None:  # type: ignore[no-untyped-def]
+    """Spec 06: content dedup must not keep serving a version the agent marked failed."""
+    env, service, _, _ = world
+    env.add(3)
+    first = env.compile(3)
+    assert env.compile(3).version == first.version  # unchanged content: deduplicated
+
+    preview = service.push("node3", dry_run=True)
+    assert preview["dry_run"] and preview["version"] == first.version + 1
+    assert env.registry.latest_bundle(3).version == first.version  # preview stores nothing
+
+    pushed = service.push("node3")
+    assert pushed["pushed"] and pushed["version"] == first.version + 1
+    assert env.registry.latest_bundle(3).version == first.version + 1
+
+
+def test_push_requires_an_active_enrolled_agent(world) -> None:  # type: ignore[no-untyped-def]
+    env, service, _, _ = world
+    env.add(4, active=False)
+    with pytest.raises(ManagementError) as raised:
+        service.push("node4")
+    assert raised.value.status == 409
+
+
+def test_delivered_commands_without_result_expire_and_free_the_queue(world) -> None:  # type: ignore[no-untyped-def]
+    from kornode.registry.repository import DELIVERED_TTL_SECONDS
+
+    env, service, _, clock = world
+    env.add(3)
+    for _ in range(100):
+        env.registry.enqueue_command(3, "restart", now=clock[0])
+    env.registry.claim_commands(3, now=clock[0])  # delivered, results lost
+    with pytest.raises(ManagementError) as raised:
+        service.enqueue("node3", {"type": "restart"})
+    assert raised.value.error == "queue_full"
+
+    clock[0] += timedelta(seconds=DELIVERED_TTL_SECONDS + 1)
+    assert service.enqueue("node3", {"type": "restart"})["state"] == "queued"
+    assert len(env.registry.list_commands(3, "expired")) == 100
+
+
+def test_agent_below_the_minimum_version_is_flagged(world) -> None:  # type: ignore[no-untyped-def]
+    env, service, _, _ = world
+    env.add(3)
+    env.add(4)
+    assert service.show("node3")["upgrade_required"] is False  # no report: unknown
+    env.registry.add_report(3, {"applied_version": 1, "agent_version": "2.0.9"})
+    env.registry.add_report(4, {"applied_version": 1, "agent_version": "2.1.0"})
+    views = {agent["name"]: agent for agent in service.list()["agents"]}
+    assert views["node3"]["upgrade_required"] is True
+    assert views["node3"]["min_agent_version"] == "2.1.0"
+    assert views["node4"]["upgrade_required"] is False

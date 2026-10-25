@@ -46,6 +46,26 @@ _GATEWAY_RULE_ID = "gateway-local"
 _SECRET_UPSTREAM_FIELDS = ("password", "key", "camouflage")
 
 
+def version_tuple(value: str) -> tuple[int, ...]:
+    """`2.1.0` → (2, 1, 0); anything unparsable sorts below every release."""
+    try:
+        return tuple(int(part) for part in value.split("."))
+    except (AttributeError, ValueError):
+        return (-1,)
+
+
+def effective_min_agent_version(config: AppConfig) -> str:
+    """The minimum every compiled bundle imposes: the configured value, but never
+    below what the bundle format itself needs (D-85: v2 bundles need 2.1.0)."""
+    return max(config.control.min_agent_version, MIN_AGENT_VERSION, key=version_tuple)
+
+
+def upgrade_required(agent_version: str | None, minimum: str) -> bool:
+    """Spec 12 "upgrade required": the last report names a version below `minimum`.
+    No report yet means unknown, not outdated."""
+    return agent_version is not None and version_tuple(agent_version) < version_tuple(minimum)
+
+
 class BundleService:
     def __init__(
         self,
@@ -310,11 +330,7 @@ class BundleService:
             "node_id": node.id,
             "version": version,
             "generated_at": self._clock().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "min_agent_version": max(
-                self.config.control.min_agent_version,
-                MIN_AGENT_VERSION,
-                key=lambda value: tuple(int(part) for part in value.split(".")),
-            ),
+            "min_agent_version": effective_min_agent_version(self.config),
             "hubs": [
                 {
                     "host": self.config.server.cn,

@@ -36,6 +36,20 @@ describe("Agent management", () => {
     await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/agents/branch/access", "PUT", { hostname: "vpn.branch.example", port: 443, udp: false, reissue: false }, "session"));
   });
 
+  it("re-pushes a bundle from Activity and flags an agent below the minimum version", async () => {
+    const outdated = { ...agent, state: "active" as const, upgrade_required: true, agent_version: "2.0.3", min_agent_version: "2.1.0" };
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/interlink" ? interlink : { agents: [outdated] }));
+    mocks.detail.mockResolvedValue({ ...detail, agent: outdated });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<AgentsView token="session" />);
+    expect(await screen.findByText(/Upgrade required \(agent 2.0.3\)/)).toBeTruthy();
+    await userEvent.click(await screen.findByRole("button", { name: /branch · node 2/ }));
+    expect((await screen.findByRole("alert")).textContent).toContain("below the minimum 2.1.0");
+    await userEvent.click(screen.getByRole("button", { name: "Activity & diagnostics" }));
+    await userEvent.click(screen.getByRole("button", { name: "Re-push bundle" }));
+    await waitFor(() => expect(mocks.write).toHaveBeenCalledWith("/api/agents/branch/push", "POST", {}, "session"));
+  });
+
   it("opens a dedicated node workspace with tabs and retains settings drafts between tabs", async () => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path === "/api/control" ? status : path === "/api/interlink" ? interlink : { agents: [agent] }));
     render(<AgentsView token="session" />);

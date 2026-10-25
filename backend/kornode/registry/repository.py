@@ -30,6 +30,17 @@ from kornode.registry.models import (
     utc_now_iso,
 )
 
+# A delivered command whose result never arrives (the agent restarted, crashed or
+# lost the batch) is expired after the delivery TTL plus the longest confirm
+# window a rollback command may legitimately wait (bundle settings allow 600 s).
+COMMAND_TTL_SECONDS = 600
+MAX_CONFIRM_WINDOW_SECONDS = 600
+DELIVERED_TTL_SECONDS = COMMAND_TTL_SECONDS + MAX_CONFIRM_WINDOW_SECONDS
+
+
+def _parse_iso(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
 
 class RegistryConflict(RegistryError):
     pass
@@ -381,6 +392,20 @@ class Registry:
             for row in rows
         ]
 
+    def last_agent_versions(self) -> dict[int, str]:
+        """`agent_version` of each node's newest report (spec 12 "upgrade required")."""
+        rows = self.conn.execute(
+            """
+            SELECT node_id, json_extract(body, '$.agent_version') AS version FROM reports
+            WHERE rowid IN (SELECT MAX(rowid) FROM reports GROUP BY node_id)
+            """
+        ).fetchall()
+        return {
+            int(row["node_id"]): row["version"]
+            for row in rows
+            if isinstance(row["version"], str)
+        }
+
     def touch_node(self, node_id: int, *, seen_at: str | None = None) -> None:
         with self._write():
             self.conn.execute(
@@ -404,7 +429,7 @@ class Registry:
         type_: str,
         args: Mapping[str, Any] | None = None,
         *,
-        ttl_seconds: int = 600,
+        ttl_seconds: int = COMMAND_TTL_SECONDS,
         now: datetime | None = None,
     ) -> Command:
         moment = now or datetime.now(UTC)
@@ -449,13 +474,10 @@ class Registry:
 
     def claim_commands(self, node_id: int, *, now: datetime | None = None) -> list[Command]:
         """Expire stale queued commands, then mark the rest delivered (at most once)."""
-        stamp = iso_time(now or datetime.now(UTC))
+        moment = now or datetime.now(UTC)
+        stamp = iso_time(moment)
         with self._write():
-            self.conn.execute(
-                "UPDATE commands SET state = 'expired', finished_at = ? "
-                "WHERE node_id = ? AND state = 'queued' AND expires_at <= ?",
-                (stamp, node_id, stamp),
-            )
+            self._expire(node_id, moment)
             rows = self.conn.execute(
                 "SELECT id FROM commands WHERE node_id = ? AND state = 'queued' "
                 "ORDER BY created_at, id",
@@ -503,13 +525,26 @@ class Registry:
             raise RegistryNotFound(f"no delivered command {command_id} for node {node_id}")
         return self.get_command(command_id)
 
-    def expire_commands(self, node_id: int, now: str) -> None:
+    def expire_commands(self, node_id: int, now: str | datetime) -> None:
+        moment = now if isinstance(now, datetime) else _parse_iso(now)
         with self._write():
-            self.conn.execute(
-                "UPDATE commands SET state = 'expired', finished_at = ? "
-                "WHERE node_id = ? AND state = 'queued' AND expires_at <= ?",
-                (now, node_id, now),
-            )
+            self._expire(node_id, moment)
+
+    def _expire(self, node_id: int, now: datetime) -> None:
+        """Queued entries past `expires_at`, and delivered entries whose result never
+        arrived within DELIVERED_TTL_SECONDS (the agent restarted or lost the batch),
+        become `expired`: neither is pending any more nor counts toward the queue cap."""
+        stamp = iso_time(now)
+        self.conn.execute(
+            "UPDATE commands SET state = 'expired', finished_at = ? "
+            "WHERE node_id = ? AND state = 'queued' AND expires_at <= ?",
+            (stamp, node_id, stamp),
+        )
+        self.conn.execute(
+            "UPDATE commands SET state = 'expired', finished_at = ? "
+            "WHERE node_id = ? AND state = 'delivered' AND delivered_at <= ?",
+            (stamp, node_id, iso_time(now - timedelta(seconds=DELIVERED_TTL_SECONDS))),
+        )
 
     def quarantine_id(self, node_id: int, until_at: str) -> None:
         with self._write():

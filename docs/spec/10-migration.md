@@ -5,7 +5,8 @@ There are no v1 installations to carry over (D-70, 2026-10-21), so v2 does
 contains a removed key fails validation with an error naming the key and its
 v2 replacement below; nothing is rewritten automatically. There is no
 `korctl config migrate`, no `korctl migrate-to-agent` / `korctl agent import`
-and no deprecation period.
+and no deprecation period for v1 keys (the v2 renames below are a separate,
+time-limited compatibility).
 
 Compatibility that **does** stay: hub ⇄ agent version skew within v2 — the
 bundle `format` version, `control.min_agent_version` and the E2E-06 upgrade
@@ -42,12 +43,16 @@ new fields.
 ### Operational limits
 
 - **SNI flag day:** the hub vhost becomes `interlink.<configured-domain>`.
-  Existing enrolled agents/tokens and cached hub entries still naming
-  `fabric.<domain>` are not transparently upgraded. Re-enroll agents against the
-  updated hub and regenerate outstanding enrollment tokens. A preserved pin does
-  not make the old vhost name valid. Upgrade agent images to 2.1.0 first; new
-  bundles are v2 and impose at least that version regardless of a lower configured
-  minimum. Higher configured minimum versions remain effective.
+  Existing enrolled agents and cached hub entries still naming `fabric.<domain>`
+  are not transparently upgraded, and outstanding enrollment tokens must be
+  regenerated. Enrolled agents keep their identity: stop the agent, run
+  `kornode-agent set-hub-name interlink.<domain>` and start it again; the agent
+  dials the bundle's hubs first and its `agent.yaml` hub last, so it reaches the
+  renamed vhost and receives a bundle naming it (no re-enrollment, D-93). A
+  preserved pin does not make the old vhost name valid. Upgrade agent images (2.1.0 or later) first,
+  then the hub (spec 12, `docs/runbooks/upgrade-2.0.md`); new bundles are v2 and
+  impose at least 2.1.0 regardless of a lower configured minimum. Higher configured
+  minimum versions remain effective.
 - The default DNS zone is now `kornode.lan`. An explicit `kornode.internal`
   remains explicit: change it deliberately if desired, updating dependent DNS
   names and clients. No mass DNS or bootstrap SNI rewrite is performed.
