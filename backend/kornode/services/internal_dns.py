@@ -209,27 +209,27 @@ class InternalDnsService:
         )
 
     def ensure_listen_address(self, *, dry_run: bool = False) -> CommandResult:
-        """Assign the dnsmasq listen IP to the loopback interface (idempotent).
+        """Have the reconciler put the dnsmasq listen IP on the loopback interface.
 
         ocserv never puts the VPN gateway address on a host interface: it
-        creates one point-to-point tun device per client, so without this
-        step dnsmasq cannot bind to the address and host-originated packets
-        to it would follow the default route instead of local delivery.
+        creates one point-to-point tun device per client, so without it dnsmasq
+        cannot bind to the address and host-originated packets to it would
+        follow the default route instead of local delivery. The address is part
+        of the hub's `NodeFacts.local_addresses` (only `kornode.net` changes
+        kernel state, D-99), so this awaits one reconciler pass instead of
+        running `ip` itself. Addresses are add-only: disabling DNS leaves the
+        /32 on `lo` until the host restarts, which is harmless.
         """
-        listen = self.config.internal_dns.listen
-        return self.runner.run(
-            ["ip", "addr", "replace", f"{listen}/32", "dev", "lo"],
-            check=False,
-            dry_run=dry_run,
-        )
+        from kornode.services.net import NetApplyError, NetService
 
-    def remove_listen_address(self, *, dry_run: bool = False) -> CommandResult:
-        listen = self.config.internal_dns.listen
-        return self.runner.run(
-            ["ip", "addr", "del", f"{listen}/32", "dev", "lo"],
-            check=False,
-            dry_run=dry_run,
-        )
+        argv = ("korctl", "net", "apply")
+        try:
+            result = NetService(self.config).apply(dry_run=dry_run)
+        except NetApplyError as exc:
+            return CommandResult(argv, 1, "", str(exc), dry_run)
+        ok = dry_run or result.get("applied") is True
+        error = "" if ok else str((result.get("status") or {}).get("last_error") or "not applied")
+        return CommandResult(argv, 0 if ok else 1, "", error, dry_run)
 
     def dnsmasq_argv(self) -> list[str]:
         return [

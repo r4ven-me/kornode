@@ -151,6 +151,7 @@ class HubNetInputs:
             all_rp_filter=self._read_sysctl("net.ipv4.conf.all.rp_filter"),
             enroll=self._enroll_guard(),
             service_address=self._service_address(),
+            local_addresses=self._dns_listen_addresses(),
         )
 
     def compiled(self) -> Compiled:
@@ -385,6 +386,17 @@ class HubNetInputs:
             source_pool=self.config.interlink.source_pool,
             domain=self.config.interlink.domain,
         ).interlink_address
+
+    def _dns_listen_addresses(self) -> tuple[ipaddress.IPv4Address, ...]:
+        """The built-in resolver's listen IP lives on `lo` (D-99): dnsmasq binds it and
+        host-originated packets to it are delivered locally. Only the reconciler adds it."""
+        if not self.config.dns_tunnel_active():
+            return ()
+        try:
+            address = ipaddress.ip_address(self.config.internal_dns.listen)
+        except ValueError:
+            return ()
+        return (address,) if isinstance(address, ipaddress.IPv4Address) else ()
 
     def _service_address(self) -> ipaddress.IPv4Address | None:
         if not (self.config.control.enabled and self.config.node.id == 1):
