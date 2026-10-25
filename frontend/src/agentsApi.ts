@@ -6,6 +6,8 @@ export type Agent = {
   state: "pending" | "active" | "revoked"; online: boolean;
   desired_version: number; applied_version: number; last_seen: string | null;
   cert_not_after: string | null;
+  /** Spec 12: the newest report names a version below min_agent_version. */
+  agent_version?: string | null; min_agent_version?: string; upgrade_required?: boolean;
   transport: { transport?: string; dpd?: number; keepalive?: number; camouflage_set?: boolean };
 };
 export type Prefix = { prefix: string; kind: string; export: boolean };

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from kornode.net.lists import UrlListCache
-from kornode.net.model import EgressPolicy
+from kornode.net.model import EgressPolicy, InlineDest
 from kornode_agent.resolver import (
     MAX_INTERVAL_SECONDS,
     MIN_INTERVAL_SECONDS,
@@ -151,7 +151,7 @@ def test_refresh_records_every_dynamic_set_by_the_name_facts_read(tmp_path: Path
     assert resolver.read() == {
         "web": frozenset({"203.0.113.5", "2001:db8::1", "192.0.2.0/24"}),
         "feed": frozenset({"198.51.100.7"}),
-        "rule1": frozenset({"203.0.113.9"}),
+        InlineDest(domains=("inline.example",)).resolved_key(): frozenset({"203.0.113.9"}),
     }
     assert all(servers == ["10.100.1.1"] for servers in lookup.servers)  # via the hub resolver
 
@@ -201,7 +201,7 @@ def test_run_wakes_the_reconciler_only_when_addresses_change(tmp_path: Path) -> 
 
 
 def test_udp_lookup_queries_from_the_pinned_source_address() -> None:
-    """The hub drops fabric queries from any address but the node's fabric address (D-47,
+    """The hub drops interlink queries from any address but the node's interlink address (D-47,
     D-66), so the resolver must pin it; 127.0.0.2 stands in for that address."""
     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server.bind(("127.0.0.1", 0))

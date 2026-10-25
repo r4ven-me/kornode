@@ -147,20 +147,23 @@ class DynamicSet:
 
 def dynamic_sets(policy: EgressPolicy) -> dict[str, DynamicSet]:
     """Destinations that need resolving, keyed as NodeFacts.resolved is read: the set
-    name, or `rule<N>` for an inline destination (D-25)."""
+    name, or `InlineDest.resolved_key()` for an inline destination (D-25)."""
     found = {
         name: DynamicSet(tuple(dest.domains), tuple(dest.domain_urls), tuple(dest.route_urls))
         for name, dest in policy.sets.items()
         if dest.domains or dest.domain_urls or dest.route_urls
     }
-    for index, rule in enumerate(policy.egress):
+    for rule in policy.egress:
         if isinstance(rule.to, InlineDest) and rule.to.domains:
-            found[f"rule{index}"] = DynamicSet(tuple(rule.to.domains), (), ())
+            found[rule.to.resolved_key()] = DynamicSet(tuple(rule.to.domains), (), ())
     return found
 
 
 MAX_GATEWAY_SETS = 64
 MAX_GATEWAY_SET_ADDRESSES = 4096
+# A report cannot widen a set rule into `to: any` (or most of it): the hub would send
+# that traffic to the reporting node. Static routes come from the policy, not the report.
+MIN_GATEWAY_SET_PREFIXLEN = 8
 
 
 def parse_gateway_sets(value: object, *, strict: bool = False) -> dict[str, frozenset[str]]:
@@ -193,6 +196,12 @@ def parse_gateway_sets(value: object, *, strict: bool = False) -> dict[str, froz
             except ValueError:
                 if strict:
                     raise ValueError(f"gateway_sets[{key}]: {item!r} is not an address") from None
+                continue
+            if network.version == 4 and network.prefixlen < MIN_GATEWAY_SET_PREFIXLEN:
+                if strict:
+                    raise ValueError(
+                        f"gateway_sets[{key}]: {item!r} is wider than /{MIN_GATEWAY_SET_PREFIXLEN}"
+                    )
                 continue
             if network.version == 4:
                 addresses.add(str(network))

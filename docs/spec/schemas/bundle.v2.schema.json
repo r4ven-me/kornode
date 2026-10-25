@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kornode.r4ven.me/schemas/bundle.v2.schema.json",
+  "title": "kornode agent bundle v2",
+  "description": "Signed desired state compiled by the hub for one agent. Canonical form: UTF-8 JSON, sorted keys, no insignificant whitespace. Signature is detached (Ed25519 over the exact bytes).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "node_id", "version", "generated_at", "hubs", "node", "interlink", "tunnels", "policy"],
+  "properties": {
+    "format": { "const": "kornode.bundle/v2" },
+    "node_id": { "type": "integer", "minimum": 2, "maximum": 254 },
+    "version": { "type": "integer", "minimum": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "min_agent_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "next_signing_pubkey": { "type": "string", "description": "base64 Ed25519 public key during rotation" },
+    "hubs": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["host", "port", "pin", "control_url"],
+        "properties": {
+          "host": { "type": "string" },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "pin": { "type": "string", "pattern": "^pin-sha256:" },
+          "control_url": { "type": "string", "pattern": "^https://" },
+          "server_name": { "type": "string", "description": "TLS SNI of the interlink vhost (S-07, D-71); the agent dials `host` but presents this name" }
+        }
+      }
+    },
+    "node": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "roles", "interlink_address", "service_address", "client_pool"],
+      "properties": {
+        "name": { "type": "string" },
+        "roles": {
+          "type": "array", "items": { "enum": ["access", "gateway", "exit"] },
+          "uniqueItems": true,
+          "not": { "allOf": [{ "contains": { "const": "exit" } }, { "contains": { "const": "gateway" } }] },
+          "description": "Readers accept the D-84 alias exit; writers emit gateway. Aliases cannot duplicate a role."
+        },
+        "interlink_address": { "type": "string" },
+        "service_address": { "type": "string" },
+        "client_pool": { "type": "string" },
+        "source_range": { "type": "string" },
+        "uplink_hint": { "type": "string", "description": "interface name for exit 'local', or 'auto'" }
+      }
+    },
+    "interlink": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cidr", "domain", "prefixes"],
+      "properties": {
+        "cidr": { "type": "string" },
+        "domain": { "type": "string" },
+        "prefixes": {
+          "type": "array",
+          "description": "Every interlink prefix of OTHER nodes (routed via the interlink exit)",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["prefix", "node_id"],
+            "properties": {
+              "prefix": { "type": "string" },
+              "node_id": { "type": "integer" },
+              "kind": { "enum": ["pool", "source", "lan", "interlink"] }
+            }
+          }
+        }
+      }
+    },
+    "tunnels": {
+      "type": "object", "additionalProperties": false,
+      "required": ["interlink"],
+      "properties": {
+        "interlink": { "$ref": "#/$defs/interlinkTunnel" },
+        "upstreams": { "type": "array", "items": { "$ref": "#/$defs/upstreamTunnel" }, "default": [] }
+      }
+    },
+    "policy": {
+      "description": "Egress policy, see egress.v1.schema.json",
+      "$ref": "egress.v1.schema.json"
+    },
+    "dns": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "upstream_servers": { "type": "array", "items": { "type": "string" } },
+        "forward_zones": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["zone", "servers"],
+            "properties": { "zone": { "type": "string" }, "servers": { "type": "array", "items": { "type": "string" } } }
+          }
+        },
+        "local_records": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "type", "value"],
+            "properties": { "name": { "type": "string" }, "type": { "enum": ["A", "AAAA", "CNAME"] }, "value": { "type": "string" } }
+          }
+        },
+        "blocklist_domains": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "access": {
+      "description": "Present only with role 'access'",
+      "type": "object", "additionalProperties": false,
+      "required": ["port", "auth", "users", "ca_pem"],
+      "properties": {
+        "port": { "type": "integer" },
+        "udp": { "type": "boolean" },
+        "auth": { "type": "array", "items": { "enum": ["password", "certificate"] }, "minItems": 1 },
+        "camouflage": { "$ref": "#/$defs/sealed" },
+        "ca_pem": { "type": "string" },
+        "server_cert_pem": { "type": "string" },
+        "server_key": { "$ref": "#/$defs/sealed" },
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["username", "enabled"],
+            "properties": {
+              "username": { "type": "string" },
+              "pw_hash": { "type": "string" },
+              "groups": { "type": "array", "items": { "type": "string" } },
+              "enabled": { "type": "boolean" }
+            }
+          }
+        },
+        "groups": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "description": "config-per-group body" }
+        },
+        "crl_pem": { "type": "string" }
+      }
+    },
+    "settings": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "report_interval_seconds": { "type": "integer", "minimum": 5 },
+        "confirm_window_seconds": { "type": "integer", "minimum": 30, "maximum": 600 },
+        "log_level": { "enum": ["debug", "info", "warning", "error"] }
+      }
+    }
+  },
+  "$defs": {
+    "sealed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["alg", "epk", "nonce", "ct"],
+      "properties": {
+        "alg": { "const": "x25519-hkdf-sha256-chacha20poly1305" },
+        "epk": { "type": "string" },
+        "nonce": { "type": "string" },
+        "ct": { "type": "string" }
+      }
+    },
+    "interlinkTunnel": {
+      "type": "object", "additionalProperties": false,
+      "required": ["interface", "transport"],
+      "properties": {
+        "interface": { "type": "string", "default": "oc-hub0" },
+        "transport": { "enum": ["tcp", "auto"] },
+        "dpd": { "type": "integer", "minimum": 5 },
+        "keepalive": { "type": "integer", "minimum": 5 },
+        "camouflage": { "$ref": "#/$defs/sealed" }
+      }
+    },
+    "upstreamTunnel": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "interface", "server", "port", "auth_type"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,30}$" },
+        "interface": { "type": "string" },
+        "enabled": { "type": "boolean", "default": true },
+        "server": { "type": "string" },
+        "port": { "type": "integer" },
+        "transport": { "enum": ["tcp", "auto"] },
+        "auth_type": { "enum": ["password", "cert", "p12"] },
+        "username": { "type": "string" },
+        "password": { "$ref": "#/$defs/sealed" },
+        "cert_pem": { "type": "string" },
+        "key": { "$ref": "#/$defs/sealed" },
+        "server_cert_pin": { "type": "string" },
+        "camouflage": { "$ref": "#/$defs/sealed" },
+        "check_host": { "type": "string" },
+        "accept_server_routes": { "type": "boolean" },
+        "dns": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

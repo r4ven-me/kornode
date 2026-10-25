@@ -37,7 +37,7 @@ class DnsmasqConfigRenderer(TemplateRenderer):
             "forward_domain_names": set(forward_domains),
             "blocklist_conf": InternalDnsService(config).blocklist_conf_path(),
             "local_records": local_records,
-            "fabric_zone": _fabric_zone(config),
+            "interlink_zone": _interlink_zone(config),
         }
         return self.render_template("dnsmasq.conf.j2", context)
 
@@ -45,11 +45,11 @@ class DnsmasqConfigRenderer(TemplateRenderer):
         return config.generated_path("dnsmasq.conf")
 
 
-def _fabric_zone(config: AppConfig) -> dict[str, Any]:
-    """The hub answers the whole fabric zone from local data (D-66)."""
-    from kornode.services.fabric_dns import FabricDnsService, dnsmasq_lines
+def _interlink_zone(config: AppConfig) -> dict[str, Any]:
+    """The hub answers the whole interlink zone from local data (D-66)."""
+    from kornode.services.interlink_dns import InterlinkDnsService, dnsmasq_lines
 
     return {
-        "domain": config.fabric.domain,
-        "lines": dnsmasq_lines(FabricDnsService(config).hub_records()),
+        "domain": config.interlink.domain,
+        "lines": dnsmasq_lines(InterlinkDnsService(config).hub_records()),
     }

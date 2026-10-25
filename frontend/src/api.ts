@@ -649,7 +649,7 @@ export function saveGeneralSettings(
   });
 }
 
-export type FabricSettings = {
+export type InterlinkSettings = {
   node_id: number;
   cidr: string;
   client_pool: string;
@@ -659,11 +659,11 @@ export type FabricSettings = {
   reserved: string[];
 };
 
-export function saveFabricSettings(
+export function saveInterlinkSettings(
   token: string,
-  payload: FabricSettings
+  payload: InterlinkSettings
 ): Promise<unknown> {
-  return requestJson<unknown>("/api/fabric", token, {
+  return requestJson<unknown>("/api/interlink", token, {
     method: "PATCH",
     body: body(payload)
   });
@@ -685,6 +685,8 @@ export function saveWebSettings(
     client_sync_enabled: boolean;
     session_lifetime: number;
     session_cookie_secure: boolean;
+    current_password?: string;
+    totp_code?: string;
   }
 ): Promise<{ status: string }> {
   return requestJson<{ status: string }>("/api/web-config/settings", token, {

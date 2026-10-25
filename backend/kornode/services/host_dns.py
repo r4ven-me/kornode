@@ -5,7 +5,7 @@ Domain-based egress rules do NOT need this: DomainResolverService
 own schedule, independent of which resolver the host's own lookups go through --
 nftables marks traffic by destination IP. Enabling this gives the host's own
 traffic the blocklist/local-records effect the admin wants, the same as VPN
-clients get, and lets it resolve the fabric zone.
+clients get, and lets it resolve the interlink zone.
 
 Under network_mode: host the container shares the host's network namespace
 but not its files, so the host's resolver configuration is reached through

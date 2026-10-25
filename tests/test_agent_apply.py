@@ -18,7 +18,7 @@ from kornode.bundle.validator import Validated
 from kornode_agent.apply import Applier, Convergence
 from kornode_agent.store import State, Store, trust_from_enroll
 
-UP = {"fabric": True, "upstream:office": True}
+UP = {"interlink": True, "upstream:office": True}
 
 
 class Clock:
@@ -49,7 +49,7 @@ class FakeHealth:
     """checks() depends on the bundle in force: `plan[version]`; None = bootstrap."""
 
     def __init__(self) -> None:
-        self.plan: dict[int | None, dict[str, bool]] = {None: {"fabric": True}}
+        self.plan: dict[int | None, dict[str, bool]] = {None: {"interlink": True}}
 
     def checks(self, active: Validated | None) -> dict[str, bool]:
         version = active.bundle.version if active else None
@@ -80,7 +80,7 @@ class World:
             health=self.health,
             node_id=3,
             seal_key=self.seal,
-            agent_version="2.0.0",
+            agent_version="2.1.0",
             clock=self.clock,
             sleep=self.clock.sleep,
             on_event=self.events.append,
@@ -124,25 +124,25 @@ def test_healthy_bundle_is_confirmed_and_cached(world: World) -> None:
     assert world.runtime.activated == [None, 5]
 
 
-def test_unhealthy_fabric_rolls_back_and_blames_the_bundle(world: World) -> None:
+def test_unhealthy_interlink_rolls_back_and_blames_the_bundle(world: World) -> None:
     world.applier.apply_bundle(*world.bundle(5))
-    world.health.plan[6] = {"fabric": False, "upstream:office": True}
+    world.health.plan[6] = {"interlink": False, "upstream:office": True}
 
     outcome = world.applier.apply_bundle(*world.bundle(6))
 
-    assert outcome.result == "rolled_back" and "fabric" in outcome.failed_checks
+    assert outcome.result == "rolled_back" and "interlink" in outcome.failed_checks
     state = world.store.load_state()
     assert (state.current, state.high_water, state.pending) == (5, 6, None)
-    assert "fabric" in state.failed["6"]
+    assert "interlink" in state.failed["6"]
     assert state.deferred is None
     assert world.runtime.activated[-2:] == [6, 5]
     assert world.clock.t >= 60  # the whole window was used
 
 
-def test_fabric_down_under_previous_too_defers_instead_of_failing(world: World) -> None:
+def test_interlink_down_under_previous_too_defers_instead_of_failing(world: World) -> None:
     world.applier.apply_bundle(*world.bundle(5))
-    world.health.plan[5] = {"fabric": False, "upstream:office": True}
-    world.health.plan[6] = {"fabric": False, "upstream:office": True}
+    world.health.plan[5] = {"interlink": False, "upstream:office": True}
+    world.health.plan[6] = {"interlink": False, "upstream:office": True}
 
     world.applier.apply_bundle(*world.bundle(6))
 
@@ -159,7 +159,7 @@ def test_fabric_down_under_previous_too_defers_instead_of_failing(world: World) 
 
 def test_deferred_gives_up_after_three_attempts(world: World) -> None:
     world.applier.apply_bundle(*world.bundle(5))
-    down = {"fabric": False, "upstream:office": True}
+    down = {"interlink": False, "upstream:office": True}
     world.health.plan[5] = down
     world.health.plan[6] = down
     world.applier.apply_bundle(*world.bundle(6))
@@ -172,14 +172,14 @@ def test_deferred_gives_up_after_three_attempts(world: World) -> None:
 def test_new_upstream_must_be_healthy_but_a_preexisting_outage_is_tolerated(
     world: World,
 ) -> None:
-    world.health.plan[5] = {"fabric": True, "upstream:office": False}
+    world.health.plan[5] = {"interlink": True, "upstream:office": False}
     assert world.applier.apply_bundle(*world.bundle(5)).result == "rolled_back"  # new -> required
 
     world.health.plan[6] = UP
     assert world.applier.apply_bundle(*world.bundle(6)).result == "confirmed"
 
-    world.health.plan[6] = {"fabric": True, "upstream:office": False}  # outage under current
-    world.health.plan[7] = {"fabric": True, "upstream:office": False}
+    world.health.plan[6] = {"interlink": True, "upstream:office": False}  # outage under current
+    world.health.plan[7] = {"interlink": True, "upstream:office": False}
     outcome = world.applier.apply_bundle(*world.bundle(7))
     assert outcome.result == "confirmed"
     assert outcome.warnings == ("upstream:office is down (not required)",)
@@ -279,3 +279,24 @@ def test_a_crash_while_activating_rolls_back_instead_of_wedging(world: World) ->
     assert outcome.result == "rolled_back" and "disk full" in (outcome.error or "")
     state = world.store.load_state()
     assert state.pending is None and state.current == 5
+
+
+def test_corrupt_state_file_boots_to_bootstrap_instead_of_crash_looping(world: World) -> None:
+    world.applier.apply_bundle(*world.bundle(5))
+    world.store.state_path.write_text("{not json")
+
+    applier = world.restart()
+
+    assert applier.state.current == 0  # bootstrap: the hub serves a fresh bundle
+    assert list(world.store.state_path.parent.glob("state.json.corrupt-*"))  # kept aside
+    assert any(e["type"] == "skipped" and "corrupt" in e["error"] for e in world.events)
+
+
+def test_corrupt_trust_store_skips_the_cache_instead_of_crash_looping(world: World) -> None:
+    world.applier.apply_bundle(*world.bundle(5))
+    world.store.trust_path.write_text("{not json")
+
+    applier = world.restart()
+
+    assert applier.state.current == 0
+    assert any(e["type"] == "skipped" and e["version"] == 5 for e in world.events)

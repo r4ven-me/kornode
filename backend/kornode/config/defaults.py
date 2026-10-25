@@ -4,12 +4,12 @@ from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "node": {"id": 1},
-    "fabric": {
+    "interlink": {
         "cidr": "10.99.0.0/24",
         "client_pool": "10.100.{id}.0/24",
         "source_pool": "10.8.{id}.0/24",
         "enroll_pool": "10.99.255.240/28",
-        "domain": "kornode.internal",
+        "domain": "kornode.lan",
         "reserved": [],
     },
     "system": {

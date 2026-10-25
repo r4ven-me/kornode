@@ -26,7 +26,7 @@ from tests.netlab.kornode_nodes import (
 from tests.netlab.test_p3_enrollment import _enroll_agent, _http
 from tests.netlab.test_p3_groups import (  # noqa: F401 - fixtures
     CONTROL_PORT,
-    HUB_FABRIC_ADDR,
+    HUB_INTERLINK_ADDR,
     RenderedHub,
     node_tmp,
     rendered_hub,
@@ -43,7 +43,7 @@ def test_hub_wipe_restore_reconnects_without_reenrollment(
 ) -> None:
     hub = rendered_hub
     crt, key = _enroll_agent(hub, node_tmp)
-    assert hub.connect_fabric(hub.agent, cert=(crt, key))
+    assert hub.connect_interlink(hub.agent, cert=(crt, key))
     status, body = _http(hub, hub.agent.ns, "GET", "/agent/v1/poll?since=0", cert=(crt, key))
     assert status == 200, body
     initial_version = json.loads(body)["bundle"]["version"]
@@ -123,7 +123,7 @@ def test_hub_wipe_restore_reconnects_without_reenrollment(
     )
     hub.processes.append(control)
     _wait_until(
-        lambda: control.poll() is None and tcp_check(hub.hub, HUB_FABRIC_ADDR, CONTROL_PORT),
+        lambda: control.poll() is None and tcp_check(hub.hub, HUB_INTERLINK_ADDR, CONTROL_PORT),
         "restored control API",
     )
     ocserv = _popen_in_namespace(
@@ -137,7 +137,7 @@ def test_hub_wipe_restore_reconnects_without_reenrollment(
         "restored ocserv",
     )
     # No new token, CSR, or key: old pin + old certificate + old private key.
-    assert hub.connect_fabric(hub.agent, cert=(crt, key))
+    assert hub.connect_interlink(hub.agent, cert=(crt, key))
     assert _http(hub, hub.agent.ns, "GET", "/agent/v1/ping", cert=(crt, key))[0] == 204
     since = initial_version + 100
     status, body = _http(hub, hub.agent.ns, "GET", f"/agent/v1/poll?since={since}", cert=(crt, key))

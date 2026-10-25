@@ -382,7 +382,7 @@ def test_postcommit_failure_is_explicit_and_installs_validated_candidate(
     elif failure == "default-group":
         monkeypatch.setattr("kornode.services.users.UserService.ensure_default_group", fail)
     elif failure == "crl":
-        monkeypatch.setattr(ConfigService, "_ensure_fabric_crl", fail)
+        monkeypatch.setattr(ConfigService, "_ensure_interlink_crl", fail)
     else:
         monkeypatch.setattr(ConfigService, "_recompile_bundles", fail)
     response = client.patch(
@@ -747,7 +747,7 @@ def _additional_writer(path: Path, role: str, attempted: Any, acquired: Any) -> 
 
     from kornode.api.routes_logs import LogRotationSettingsRequest, save_rotation_settings
     from kornode.main import _persist_certificate_patch
-    from kornode.services.fabric import FabricService
+    from kornode.services.interlink import InterlinkService
 
     original = fcntl.flock
 
@@ -766,8 +766,8 @@ def _additional_writer(path: Path, role: str, attempted: Any, acquired: Any) -> 
             {"server_cert": str(path.parent / "issued.crt")},
             FileManager(),
         )
-    elif role == "fabric":
-        FabricService(load_config(path), path, sync=lambda _: None).set(
+    elif role == "interlink":
+        InterlinkService(load_config(path), path, sync=lambda _: None).set(
             {"domain": "latest.example"}
         )
     else:
@@ -777,7 +777,7 @@ def _additional_writer(path: Path, role: str, attempted: Any, acquired: Any) -> 
         )
 
 
-@pytest.mark.parametrize("role", ["startup", "fabric", "rotation"])
+@pytest.mark.parametrize("role", ["startup", "interlink", "rotation"])
 def test_additional_writers_wait_for_latest_config_and_preserve_raw_refs(
     path: Path,
     role: str,
@@ -813,8 +813,8 @@ def test_additional_writers_wait_for_latest_config_and_preserve_raw_refs(
     assert saved["upstream"]["profiles"][0]["password"] == "${SECRET:UPSTREAM}"
     if role == "startup":
         assert saved["certificates"]["server_cert"] == str(path.parent / "issued.crt")
-    elif role == "fabric":
-        assert saved["fabric"]["domain"] == "latest.example"
+    elif role == "interlink":
+        assert saved["interlink"]["domain"] == "latest.example"
     else:
         assert saved["system"]["log_rotation"]["keep_files"] == 3
 
@@ -865,15 +865,15 @@ def test_startup_persistence_failure_leaves_yaml_unchanged(
     assert config == load_config(path)
 
 
-def test_fabric_preflight_failure_does_not_install_or_sync(
+def test_interlink_preflight_failure_does_not_install_or_sync(
     path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kornode.services.agent_models import ManagementError
-    from kornode.services.fabric import FabricService
+    from kornode.services.interlink import InterlinkService
 
     installed, synced = [], []
-    service = FabricService(load_config(path), path, saved=installed.append, sync=synced.append)
+    service = InterlinkService(load_config(path), path, saved=installed.append, sync=synced.append)
     previous, before = service.config, path.read_bytes()
 
     def fail(*_: Any) -> Any:
@@ -889,19 +889,19 @@ def test_fabric_preflight_failure_does_not_install_or_sync(
     assert not installed and not synced
 
 
-def test_fabric_sync_failure_reports_saved_but_not_applied(
+def test_interlink_sync_failure_reports_saved_but_not_applied(
     path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kornode.services.agent_models import ManagementError
-    from kornode.services.fabric import FabricService
+    from kornode.services.interlink import InterlinkService
 
     installed = []
 
     def fail(*_: Any) -> Any:
         raise OSError("sensitive sync failure")
 
-    service = FabricService(load_config(path), path, saved=installed.append, sync=fail)
+    service = InterlinkService(load_config(path), path, saved=installed.append, sync=fail)
     monkeypatch.setattr(ConfigService, "write_rendered_files", lambda *_: [])
     with pytest.raises(ManagementError) as error:
         service.set({"domain": "latest.example"})
@@ -913,7 +913,7 @@ def test_fabric_sync_failure_reports_saved_but_not_applied(
     assert service.config == load_config(path)
     # The post-apply exception must release the lock as well.
     config, _ = mutate_config(path, lambda raw: raw, write_rendered=False)
-    assert config.fabric.domain == "latest.example"
+    assert config.interlink.domain == "latest.example"
 
 
 def test_atomic_replace_failure_keeps_source_state_and_cleans_temporary_file(

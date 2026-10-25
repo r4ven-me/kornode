@@ -59,7 +59,7 @@ def _first_overlap(items: Iterable[_Labelled]) -> tuple[_Labelled, _Labelled] | 
 
 def validate_templates(
     *,
-    fabric_cidr: str,
+    interlink_cidr: str,
     client_pool: str,
     source_pool: str,
     reserved: Iterable[str] = (),
@@ -67,9 +67,9 @@ def validate_templates(
 ) -> None:
     """Reject templates that are invalid for some id in 1..254 or that make
     any two derived prefixes (of any ids, of either template) overlap each
-    other, the fabric cidr, a reserved range or the enroll pool."""
+    other, the interlink cidr, a reserved range or the enroll pool."""
     items: list[_Labelled] = [
-        _Labelled(ipaddress.ip_network(fabric_cidr, strict=True), "fabric.cidr")
+        _Labelled(ipaddress.ip_network(interlink_cidr, strict=True), "interlink.cidr")
     ]
     items.extend(
         _Labelled(ipaddress.ip_network(cidr, strict=True), f"reserved {cidr}") for cidr in reserved
@@ -87,23 +87,25 @@ def validate_templates(
         try:
             enroll = _Labelled(
                 ipaddress.ip_network(enroll_pool, strict=True),
-                "fabric.enroll_pool",
+                "interlink.enroll_pool",
             )
         except ValueError as exc:
-            raise PolicyError(f"fabric.enroll_pool ({enroll_pool}) is not a valid network") from exc
+            raise PolicyError(
+                f"interlink.enroll_pool ({enroll_pool}) is not a valid network"
+            ) from exc
         enroll_clash = _first_overlap([enroll, *items])
         if enroll_clash is not None:
             first, second = enroll_clash
-            other = second if first.label == "fabric.enroll_pool" else first
+            other = second if first.label == "interlink.enroll_pool" else first
             raise PolicyError(
-                f"fabric.enroll_pool ({enroll.network}) overlaps {other.label} ({other.network})"
+                f"interlink.enroll_pool ({enroll.network}) overlaps {other.label} ({other.network})"
             )
 
 
 @dataclass(frozen=True, slots=True)
 class DerivedAddresses:
     node_id: int
-    fabric_address: ipaddress.IPv4Address
+    interlink_address: ipaddress.IPv4Address
     client_pool: ipaddress.IPv4Network
     service_address: ipaddress.IPv4Address
     source_pool: ipaddress.IPv4Network
@@ -113,23 +115,23 @@ class DerivedAddresses:
 def derive_addresses(
     node_id: int,
     *,
-    fabric_cidr: str,
+    interlink_cidr: str,
     client_pool: str,
     source_pool: str,
     domain: str,
 ) -> DerivedAddresses:
     if not NODE_ID_MIN <= node_id <= NODE_ID_MAX:
         raise PolicyError(f"node id {node_id} is outside {NODE_ID_MIN}..{NODE_ID_MAX}")
-    fabric = ipaddress.IPv4Network(fabric_cidr, strict=True)
-    fabric_address = fabric.network_address + node_id
-    if fabric_address >= fabric.broadcast_address:
-        raise PolicyError(f"fabric cidr {fabric} has no host address for node {node_id}")
+    interlink = ipaddress.IPv4Network(interlink_cidr, strict=True)
+    interlink_address = interlink.network_address + node_id
+    if interlink_address >= interlink.broadcast_address:
+        raise PolicyError(f"interlink cidr {interlink} has no host address for node {node_id}")
     pool = render_template(client_pool, node_id)
     if pool.num_addresses < 4:
         raise PolicyError(f"client pool {pool} is too small")
     return DerivedAddresses(
         node_id=node_id,
-        fabric_address=fabric_address,
+        interlink_address=interlink_address,
         client_pool=pool,
         service_address=pool.network_address + 1,
         source_pool=render_template(source_pool, node_id),
@@ -142,7 +144,7 @@ PrefixKind = Literal["client_pool", "source", "lan"]
 
 @dataclass(frozen=True, slots=True)
 class OwnedPrefix:
-    """A fabric prefix owned by a node. `adding` marks prefixes introduced
+    """An interlink prefix owned by a node. `adding` marks prefixes introduced
     by the mutation being validated (rule 3 is an error only for those)."""
 
     prefix: Network
@@ -190,21 +192,21 @@ class OverlapResult:
 def check_overlaps(
     prefixes: Iterable[OwnedPrefix],
     *,
-    fabric_cidr: str,
+    interlink_cidr: str,
     reserved: Iterable[str] = (),
     enroll_pool: str | None = None,
     local_networks: Iterable[LocalNetwork] = (),
 ) -> OverlapResult:
     owned = list(prefixes)
     locals_ = list(local_networks)
-    fabric = ipaddress.ip_network(fabric_cidr, strict=True)
+    interlink = ipaddress.ip_network(interlink_cidr, strict=True)
     reserved_networks = [ipaddress.ip_network(cidr, strict=True) for cidr in reserved]
     enroll_network = (
         ipaddress.ip_network(enroll_pool, strict=True) if enroll_pool is not None else None
     )
     result = OverlapResult()
 
-    # Rule 1: fabric prefixes of different nodes never overlap.
+    # Rule 1: interlink prefixes of different nodes never overlap.
     for index, first in enumerate(owned):
         for second in owned[index + 1 :]:
             if first.node != second.node and first.prefix.overlaps(second.prefix):
@@ -226,17 +228,19 @@ def check_overlaps(
                 )
 
     for item in owned:
-        # Rule 2: nothing overlaps the fabric cidr or a reserved range.
-        if item.prefix.overlaps(fabric):
-            result.errors.append(Conflict(str(item.prefix), item.node, str(fabric), "fabric.cidr"))
+        # Rule 2: nothing overlaps the interlink cidr or a reserved range.
+        if item.prefix.overlaps(interlink):
+            result.errors.append(
+                Conflict(str(item.prefix), item.node, str(interlink), "interlink.cidr")
+            )
         for network in reserved_networks:
             if item.prefix.overlaps(network):
                 result.errors.append(
-                    Conflict(str(item.prefix), item.node, str(network), "fabric.reserved")
+                    Conflict(str(item.prefix), item.node, str(network), "interlink.reserved")
                 )
         if enroll_network is not None and item.prefix.overlaps(enroll_network):
             result.errors.append(
-                Conflict(str(item.prefix), item.node, str(enroll_network), "fabric.enroll_pool")
+                Conflict(str(item.prefix), item.node, str(enroll_network), "interlink.enroll_pool")
             )
         # Rule 3: a node's prefix must not collide with another node's local
         # networks -- that node could not reach it.

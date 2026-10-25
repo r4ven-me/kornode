@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   saveAuthMethodsSettings,
-  saveFabricSettings,
+  saveInterlinkSettings,
   saveGeneralSettings,
   saveServerSettings,
   saveWebSettings,
@@ -11,13 +11,13 @@ import {
 import { syntheticCommand } from "../../lib/commands";
 import {
   type AuthMethodsDraft,
-  type FabricSettingsDraft,
+  type InterlinkSettingsDraft,
   type GeneralSettingsDraft,
   type ServerSettingsDraft,
   type WebSettingsDraft,
   authMethodsPayload,
   readAuthMethodsDraft,
-  readFabricSettingsDraft,
+  readInterlinkSettingsDraft,
   readGeneralSettingsDraft,
   readServerSettingsDraft,
   readWebSettingsDraft,
@@ -41,8 +41,8 @@ export function useSettings(core: PanelCore) {
   const [generalSettingsDraft, setGeneralSettingsDraft] = useState<GeneralSettingsDraft>(() =>
     readGeneralSettingsDraft({})
   );
-  const [fabricSettingsDraft, setFabricSettingsDraft] = useState<FabricSettingsDraft>(() =>
-    readFabricSettingsDraft({})
+  const [interlinkSettingsDraft, setInterlinkSettingsDraft] = useState<InterlinkSettingsDraft>(() =>
+    readInterlinkSettingsDraft({})
   );
 
   core.registerHydrator("settings", ({ config }) => {
@@ -53,7 +53,7 @@ export function useSettings(core: PanelCore) {
     setAuthMethodsDraft(readAuthMethodsDraft(config));
     setWebSettingsDraft(readWebSettingsDraft(config));
     setGeneralSettingsDraft(readGeneralSettingsDraft(config));
-    setFabricSettingsDraft(readFabricSettingsDraft(config));
+    setInterlinkSettingsDraft(readInterlinkSettingsDraft(config));
   });
 
   const saveServer = async () => {
@@ -156,7 +156,9 @@ export function useSettings(core: PanelCore) {
         terminal_max_sessions: webSettingsDraft.terminalMaxSessions,
         client_sync_enabled: webSettingsDraft.clientSyncEnabled,
         session_lifetime: webSettingsDraft.sessionLifetime,
-        session_cookie_secure: webSettingsDraft.sessionCookieSecure
+        session_cookie_secure: webSettingsDraft.sessionCookieSecure,
+        ...(webSettingsDraft.currentPassword ? { current_password: webSettingsDraft.currentPassword } : {}),
+        ...(webSettingsDraft.totpCode ? { totp_code: webSettingsDraft.totpCode } : {})
       })
     );
     if (result !== null) {
@@ -181,20 +183,20 @@ export function useSettings(core: PanelCore) {
     }
   };
 
-  const saveFabric = async () => {
-    const result = await runAction("fabric-settings", "Fabric settings saved", (token) =>
-      saveFabricSettings(token, {
-        node_id: fabricSettingsDraft.nodeId,
-        cidr: fabricSettingsDraft.cidr,
-        client_pool: fabricSettingsDraft.clientPool,
-        source_pool: fabricSettingsDraft.sourcePool,
-        enroll_pool: fabricSettingsDraft.enrollPool,
-        domain: fabricSettingsDraft.domain,
-        reserved: splitLines(fabricSettingsDraft.reserved)
+  const saveInterlink = async () => {
+    const result = await runAction("interlink-settings", "Interlink settings saved", (token) =>
+      saveInterlinkSettings(token, {
+        node_id: interlinkSettingsDraft.nodeId,
+        cidr: interlinkSettingsDraft.cidr,
+        client_pool: interlinkSettingsDraft.clientPool,
+        source_pool: interlinkSettingsDraft.sourcePool,
+        enroll_pool: interlinkSettingsDraft.enrollPool,
+        domain: interlinkSettingsDraft.domain,
+        reserved: splitLines(interlinkSettingsDraft.reserved)
       })
     );
     if (result !== null) {
-      recordCommand("config", syntheticCommand(["korctl", "fabric", "set"], "saved"));
+      recordCommand("config", syntheticCommand(["korctl", "interlink", "set"], "saved"));
     }
   };
 
@@ -207,14 +209,14 @@ export function useSettings(core: PanelCore) {
     setWebSettingsDraft,
     generalSettingsDraft,
     setGeneralSettingsDraft,
-    fabricSettingsDraft,
-    setFabricSettingsDraft,
+    interlinkSettingsDraft,
+    setInterlinkSettingsDraft,
     saveServer,
     saveAuthMethods,
     testEmail,
     testTelegram,
     saveWeb,
     saveGeneral,
-    saveFabric
+    saveInterlink
   };
 }

@@ -33,7 +33,7 @@
         "name": { "binding": "sources[].name", "label": "Source name", "control": "text", "sample": "branch" },
         "interface": { "binding": "sources[].interface", "label": "Source interface", "control": "text", "sample": "wg1" },
         "cidr": { "binding": "sources[].cidr", "label": "Source CIDR", "control": "text", "sample": "10.8.2.0/24" },
-        "export": { "binding": "sources[].export", "labels": { "hub-source": "Export to the fabric", "agent-source": "Export source" }, "control": "checkbox", "sample": false },
+        "export": { "binding": "sources[].export", "labels": { "hub-source": "Export to the interlink", "agent-source": "Export source" }, "control": "checkbox", "sample": false },
         "allow_outside_pool": { "binding": "sources[].allow_outside_pool", "label": "Allow outside derived source pool", "control": "checkbox", "sample": true },
         "description": { "binding": "sources[].description", "label": "Source description", "control": "text", "sample": "Branch attached VPN" }
       }

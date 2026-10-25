@@ -80,15 +80,15 @@ def _classify_source(
         for prefix in prefixes
     )
     if _within(address, others):
-        return "fabric", address
+        return "interlink", address
     return "host", address
 
 
 def _rule_dest(rule: Rule, index: int) -> str | None:
     if rule.to == "any":
         return None
-    if rule.to == "fabric":
-        return "fabric"
+    if rule.to == "interlink":
+        return "interlink"
     if isinstance(rule.to, SetRef):
         return rule.to.set
     if isinstance(rule.to, NodeRef):
@@ -150,18 +150,25 @@ def explain(
         dest = _rule_dest(rule, index)
         if dest is not None and not _within(destination, _set_members(compiled, dest)):
             continue
-        decision.matched_rule = _rule_json(rule, index)
         via = rule.parsed_via
         if via.kind == "drop":
+            decision.matched_rule = _rule_json(rule, index)
             decision.route = "reject (admin-prohibited)"
             return decision
         # Classification already resolved upstream:active to its concrete
         # identity; explain must report the same dataplane, not look up the alias.
         entries = compiled.classify_host if from_class == "host" else compiled.classify
         exit_ = next(
-            item.exit for item in entries if item.index == index and item.from_ == from_class
+            (item.exit for item in entries if item.index == index and item.from_ == from_class),
+            None,
         )
-        assert exit_ is not None
+        if exit_ is None:
+            # The compiler skipped it: a down upstream without kill switch (spec 02).
+            decision.warnings.append(
+                f"rule {index} skipped: {via.name} is down and kill_switch is false"
+            )
+            continue
+        decision.matched_rule = _rule_json(rule, index)
         decision.mark = f"0x{exit_.mark:08x}"
         decision.table = exit_.table if exit_.has_table else None
         decision.route = _route_for(exit_, compiled, destination)

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from kornode_agent.store import StoreError, atomic_write
 
@@ -24,7 +24,7 @@ class HubConfig(_Model):
     server_name: str | None = None
 
 
-class FabricConfig(_Model):
+class InterlinkConfig(_Model):
     interface: str = "oc-hub0"
     transport: Literal["tcp", "auto"] = "auto"
 
@@ -32,8 +32,18 @@ class FabricConfig(_Model):
 class AgentConfig(_Model):
     node_id: int
     hub: HubConfig
-    fabric: FabricConfig = FabricConfig()
+    interlink: InterlinkConfig = InterlinkConfig()
     log_level: Literal["debug", "info", "warning", "error"] = "info"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_section(cls, data: object) -> object:
+        # Enrolled before D-85: the tunnel section was called `fabric`.
+        if isinstance(data, dict) and "fabric" in data:
+            if "interlink" in data:
+                raise ValueError("both `fabric` and `interlink` are set; keep only `interlink`")
+            return {("interlink" if key == "fabric" else key): value for key, value in data.items()}
+        return data
 
 
 def load_config(root: Path) -> AgentConfig:

@@ -46,7 +46,7 @@ Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 @dataclass(frozen=True, slots=True)
 class TunnelFact:
     """An exit's tunnel as it is right now. `interface` is the device the
-    exit sends through (agent: tun to the hub for `fabric`; hub: an agent's
+    exit sends through (agent: tun to the hub for `interlink`; hub: an agent's
     vpnsN session for `node:<n>`)."""
 
     interface: str
@@ -97,7 +97,7 @@ class NodeFacts:
     active_upstream: str | None = None
     disabled_upstreams: tuple[str, ...] = ()
     node_prefixes: Mapping[int, tuple[Network, ...]] = field(default_factory=dict)
-    fabric_ifaces: tuple[str, ...] = ()
+    interlink_ifaces: tuple[str, ...] = ()
     # Hub: (exported agent prefix, ocserv session device) for connected agents;
     # installed in main since ocserv's iroute does not (S-03, D-63).
     session_routes: tuple[tuple[Network, str], ...] = ()
@@ -108,9 +108,9 @@ class NodeFacts:
     service_address: ipaddress.IPv4Address | None = None
     # Further addresses bound to `lo`, e.g. an agent's resolver address (D-66).
     local_addresses: tuple[ipaddress.IPv4Address, ...] = ()
-    # Hub: agent sessions are policed (D-69): traffic of an agent to a non-fabric
+    # Hub: agent sessions are policed (D-69): traffic of an agent to a non-interlink
     # destination is dropped unless an agent policy declares an exit for its source.
-    fabric_guard: bool = False
+    interlink_guard: bool = False
     transit_exits: tuple[TransitExit, ...] = ()
     # Globs of the agent's own ocserv session devices ("vpns*", role access):
     # the same strict reverse-path check as the hub's enroll guard (D-47, D-67).
@@ -177,12 +177,12 @@ class Compiled:
 def exit_mark(name: str) -> int:
     """Stable identity, not a policy position. The high index bit separates
     these marks from the legacy positional allocation (at most 99 exits).
-    Local/fabric marks are reserved, never candidates for upstream collisions.
+    Local/interlink marks are reserved, never candidates for upstream collisions.
     Conntrack labels disambiguate even a collision with a *deleted* identity.
     """
     if name == "local":
         slot = 0x8000
-    elif name == "fabric":
+    elif name == "interlink":
         slot = 0x8001
     else:
         digest = hashlib.sha256(name.encode("utf-8")).digest()
@@ -203,7 +203,7 @@ def _addresses(facts: NodeFacts) -> frozenset[Address]:
 
 def gateway_tunnels(policy: EgressPolicy, interface: str, up: bool) -> dict[str, TunnelFact]:
     """An agent reaches `node:<n>` through its tunnel to the hub (D-69): one tunnel
-    fact per gateway node named by the policy, all on the fabric interface."""
+    fact per gateway node named by the policy, all on the interlink interface."""
     return {
         rule.parsed_via.name: TunnelFact(interface=interface, up=up)
         for rule in policy.egress
@@ -215,8 +215,8 @@ def _dest_name(rule: Rule, index: int) -> str | None:
     to = rule.to
     if to == "any":
         return None
-    if to == "fabric":
-        return "fabric"
+    if to == "interlink":
+        return "interlink"
     if isinstance(to, SetRef):
         return to.set
     if isinstance(to, NodeRef):
@@ -230,7 +230,7 @@ def dest_members(
     """Destination elements (routes + resolved domain addresses) and whether
     the destination involves domains."""
     to = rule.to
-    if to == "fabric":
+    if to == "interlink":
         prefixes = {
             str(prefix)
             for node, items in facts.node_prefixes.items()
@@ -247,7 +247,7 @@ def dest_members(
             dest.domains or dest.domain_urls or dest.route_urls
         )
     assert isinstance(to, InlineDest)
-    resolved = facts.resolved.get(f"rule{index}", frozenset())
+    resolved = facts.resolved.get(to.resolved_key(), frozenset())
     return frozenset(to.routes) | resolved, bool(to.domains)
 
 
@@ -277,7 +277,7 @@ def _covers(earlier: Rule, later: Rule, policy: EgressPolicy) -> bool:
         return False
     if later.to == earlier.to:
         return not _has_domains(later, policy)
-    if earlier.to == "fabric" and isinstance(later.to, NodeRef):
+    if earlier.to == "interlink" and isinstance(later.to, NodeRef):
         return True
     if isinstance(later.to, InlineDest) and not later.to.domains and later.to.routes:
         earlier_routes = _static_routes(earlier, policy)
@@ -380,13 +380,17 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
             to_sets = (f"{dest}_v4", f"{dest}_v6")
         via = _resolved_via(rule.parsed_via, facts)
         exit_ = None if via.kind == "drop" else exits[via.name]
+        if exit_ is not None and falls_through(exit_):
+            # Spec 02: `kill_switch: false` means fall through to later rules while
+            # the upstream is down, not "leave through main un-NATed" (the throw route).
+            continue
         for source in rule.from_:
             target = classify_host if source == "host" else classify
             target.append(
                 ClassifyRule(index, source, _from_match(source, policy, facts), to_sets, exit_)
             )
 
-    if facts.fabric_guard:
+    if facts.interlink_guard:
         classify[:0] = _transit_head(facts, exits, sets, elements)
 
     # Appended implicit rule: nothing from clients/sources escapes unrouted.
@@ -395,14 +399,33 @@ def compile_policy(policy: EgressPolicy, facts: NodeFacts) -> Compiled:
         if name == "clients" and facts.client_pool is None:
             continue
         classify.append(ClassifyRule(tail_index, name, _from_match(name, policy, facts), (), None))
-    if facts.fabric_guard:
-        # Agents never reach a destination outside the fabric unless a policy says so
+    for item in policy.sources:
+        if ipaddress.ip_network(item.cidr).version == 4:
+            # An IPv4 source may still carry IPv6 (wg-easy hands out both by default):
+            # with no IPv6 policy it must not be forwarded unclassified. Link-local and
+            # multicast stay untouched (neighbour discovery on bridged interfaces).
+            classify.append(
+                ClassifyRule(
+                    tail_index,
+                    item.name,
+                    (
+                        f'iifname "{item.interface}"',
+                        "ip6 saddr != fe80::/10",
+                        "ip6 daddr != { fe80::/10, ff00::/8 }",
+                    ),
+                    (),
+                    None,
+                    label=f"source {item.name}: no IPv6 policy",
+                )
+            )
+    if facts.interlink_guard:
+        # Agents never reach a destination outside the interlink unless a policy says so
         # (spec 07: the hub accepts exit traffic only from nodes that declare it).
         classify.append(
             ClassifyRule(
                 tail_index,
-                "fabric-guard",
-                ("iifname @fabric_ifaces",),
+                "interlink-guard",
+                ("iifname @interlink_ifaces",),
                 (),
                 None,
                 label="agents: no exit declared",
@@ -454,13 +477,13 @@ def _transit_head(
     elements: dict[str, set[str]],
 ) -> list[ClassifyRule]:
     """Hub classification of agent traffic (D-69), before every other rule:
-    fabric destinations are left to routing, a declared exit marks the flow for its
+    interlink destinations are left to routing, a declared exit marks the flow for its
     per-node table, everything else from an agent falls to the guard at the end.
     Matching is by source prefix (strict reverse path guarantees that only the owning
     agent can send from it) so the script does not change when sessions come and go."""
     head: list[ClassifyRule] = []
     for family in (4, 6):
-        name = f"fabric_v{family}"
+        name = f"interlink_v{family}"
         sets.setdefault(name, DestSetDecl(name, family))
         elements.setdefault(name, set()).update(
             str(prefix)
@@ -471,12 +494,12 @@ def _transit_head(
     head.append(
         ClassifyRule(
             -1,
-            "fabric-guard",
-            ("iifname @fabric_ifaces",),
-            ("fabric_v4", "fabric_v6"),
+            "interlink-guard",
+            ("iifname @interlink_ifaces",),
+            ("interlink_v4", "interlink_v6"),
             None,
             verdict="return",
-            label="agents: fabric destinations are routed",
+            label="agents: interlink destinations are routed",
         )
     )
     # Rules are emitted in the order of the agent's policy, first match wins, exactly as
@@ -500,7 +523,7 @@ def _transit_head(
         used.add(name)
         sets.setdefault(name, DestSetDecl(name, 4))
         elements.setdefault(name, set()).update(nets)
-        match = ("iifname @fabric_ifaces", f"ip saddr @{name}")
+        match = ("iifname @interlink_ifaces", f"ip saddr @{name}")
         to_sets: tuple[str, ...] = ()
         if transit.dest is None:
             merged = (transit.node, name, set(nets))
@@ -525,6 +548,11 @@ def _transit_head(
             )
         )
     return head
+
+
+def falls_through(exit_: Exit) -> bool:
+    """A down upstream without kill switch: its rules are skipped (spec 02)."""
+    return exit_.kind == "upstream" and not exit_.up and not exit_.kill_switch
 
 
 def _make_exit(via: Via, index: int, policy: EgressPolicy, facts: NodeFacts) -> Exit:
@@ -554,8 +582,8 @@ def _from_match(source: str, policy: EgressPolicy, facts: NodeFacts) -> tuple[st
         return (f"ip saddr {facts.client_pool}",)
     if source == "host":
         return ()
-    if source == "fabric":
-        return ("iifname @fabric_ifaces",)
+    if source == "interlink":
+        return ("iifname @interlink_ifaces",)
     item = next(src for src in policy.sources if src.name == source)
     family = "ip" if ipaddress.ip_network(item.cidr).version == 4 else "ip6"
     return (f'iifname "{item.interface}"', f"{family} saddr {item.cidr}")
@@ -639,9 +667,9 @@ def _routes(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[Route]:
             )
         if not (exit_.up and exit_.interface):
             continue
-        if exit_.kind == "fabric":
-            # Agent: only fabric prefixes go through the hub tunnel. On the
-            # hub (no fabric tunnel of its own) the per-session routes live in
+        if exit_.kind == "interlink":
+            # Agent: only interlink prefixes go through the hub tunnel. On the
+            # hub (no interlink tunnel of its own) the per-session routes live in
             # main and rule 90 resolves them; the table only fails closed.
             for node, prefixes in sorted(facts.node_prefixes.items()):
                 if node == facts.node_id:
@@ -667,7 +695,11 @@ def _elements(
     items = {
         NftElements(family, table, name, frozenset(members)) for name, members in elements.items()
     }
-    items.add(NftElements(family, table, "fabric_ifaces", frozenset(facts.fabric_ifaces)))
+    items.add(NftElements(family, table, "interlink_ifaces", frozenset(facts.interlink_ifaces)))
+    nat_family, nat_table = NAT_TABLE
+    items.add(
+        NftElements(nat_family, nat_table, "interlink_ifaces", frozenset(facts.interlink_ifaces))
+    )
     if facts.transit_exits:
         items.add(
             NftElements(

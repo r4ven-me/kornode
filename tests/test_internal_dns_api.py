@@ -63,7 +63,7 @@ def test_internal_dns_status_defaults(tmp_path: Path) -> None:
     # The resolver is mandatory, not opt-in, while server.enabled (the
     # default) -- see AppConfig.dnsmasq_active_reasons().
     assert payload["effective"]["dnsmasq_active"] is True
-    assert payload["effective_reasons"] == ["server_enabled", "fabric_dns"]
+    assert payload["effective_reasons"] == ["server_enabled", "interlink_dns"]
     assert payload["client_dns"] == ["10.100.1.1"]
     assert payload["total"] == 0
 
@@ -94,7 +94,7 @@ def test_internal_dns_settings_enable_switches_client_dns(tmp_path: Path) -> Non
     assert payload["internal_dns"]["effective_reasons"] == [
         "server_enabled",
         "blocklist_enabled",
-        "fabric_dns",
+        "interlink_dns",
     ]
     assert payload["internal_dns"]["client_dns"] == ["10.100.1.2"]
     assert payload["internal_dns"]["blocklist_domains"] == ["ads.example.com"]
@@ -208,7 +208,7 @@ def test_forward_domains_change_reconnects_clients_and_feeds_split_dns(
     assert payload["internal_dns"]["effective_reasons"] == [
         "server_enabled",
         "forward_domains",
-        "fabric_dns",
+        "interlink_dns",
     ]
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))

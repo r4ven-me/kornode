@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from kornode.bundle.errors import BundleError
 from kornode.bundle.validator import Validated, validate
-from kornode_agent.store import Deferred, LastApply, Pending, State, Store
+from kornode_agent.store import Deferred, LastApply, Pending, State, Store, StoreError
 
 DEFAULT_CONFIRM_WINDOW = 60
 CHECK_INTERVAL = 3.0
@@ -47,7 +47,7 @@ class Runtime(Protocol):
 
 class Health(Protocol):
     def checks(self, active: Validated | None) -> dict[str, bool]:
-        """`fabric` and `upstream:<name>` checks for the bundle in force."""
+        """`interlink` and `upstream:<name>` checks for the bundle in force."""
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,17 @@ class Applier:
     def boot(self) -> State:
         """Lifecycle "start": recover from a crash inside a confirm window,
         then bring up the newest cached bundle that still verifies."""
-        state = self.store.load_state()
+        try:
+            state = self.store.load_state()
+        except StoreError as exc:
+            # A corrupt state file must not crash-loop the agent (data plane never
+            # depends on the control plane): set it aside and fall back to the
+            # bootstrap state; the hub serves a fresh bundle (spec 06 lifecycle).
+            moved = self.store.quarantine_state()
+            self.on_event(
+                {"type": "skipped", "version": 0, "error": f"{exc}; moved to {moved.name}"}
+            )
+            state = State()
         self.state = state
         if state.pending is not None:
             pending = state.pending
@@ -127,6 +137,10 @@ class Applier:
             return self._verify(cached.body, cached.signature, version=version)
         except BundleError as exc:
             self.on_event({"type": "skipped", "version": version, "error": f"{exc.code}: {exc}"})
+            return None
+        except StoreError as exc:
+            # Unreadable trust store: the cache cannot be verified, so it is not used.
+            self.on_event({"type": "skipped", "version": version, "error": str(exc)})
             return None
 
     def _verify(self, body: bytes, signature: str, *, version: int | None) -> Validated:
@@ -235,7 +249,7 @@ class Applier:
     def _required(
         self, target: Validated, previous: Validated | None, baseline: dict[str, bool]
     ) -> set[str]:
-        required = {"fabric", "reconciler"}
+        required = {"interlink", "reconciler"}
         old = _upstream_signatures(previous) if previous else {}
         new_sigs = _upstream_signatures(target)
         by_name = {u.name: u for u in target.bundle.tunnels.upstreams if u.enabled}
@@ -325,13 +339,13 @@ class Applier:
         return Outcome("rolled_back", version, error=error, failed_checks=failed, warnings=warnings)
 
     def _blame(self, version: int, previous: Validated | None, error: str, *, retry: bool) -> None:
-        """Fabric healthy under `previous` -> the bundle broke it (failed);
+        """Interlink healthy under `previous` -> the bundle broke it (failed);
         still down -> the hub or the path is down (deferred, bounded)."""
         state = self.state
         deadline = self.clock() + BLAME_SECONDS
         healthy = False
         while True:
-            if self.health.checks(previous).get("fabric", False):
+            if self.health.checks(previous).get("interlink", False):
                 healthy = True
                 break
             if self.clock() >= deadline:

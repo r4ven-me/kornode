@@ -257,6 +257,7 @@ def test_run_returns_every_check(tmp_path: Path) -> None:
     results = service.run()
 
     assert set(results) == {
+        "admin-password",
         "kernel-plan",
         "sysctl",
         "overlapping-subnets",
@@ -264,6 +265,7 @@ def test_run_returns_every_check(tmp_path: Path) -> None:
         "nft-version",
         "carrier-exclusions",
         "access-certificates",
+        "agent-versions",
         "sources",
     }
 

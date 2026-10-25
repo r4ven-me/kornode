@@ -6,7 +6,7 @@ const lines = (text: string) => text.split(/[\n,]+/).map(v => v.trim()).filter(B
 export function PrefixEditor({ prefixes, busy, mutate }: { prefixes: Prefix[]; busy: boolean; mutate: Mutate }) {
   const [prefix, setPrefix] = useState(""); const [exported, setExported] = useState(true);
   return <section className="panel">
-    <h2>Networks</h2><p className="field-help">Client pools are derived. Full fabric routing of exported networks is P4; registry changes are not proof of reachability.</p>
+    <h2>Networks</h2><p className="field-help">Client pools are derived. Full interlink routing of exported networks is P4; registry changes are not proof of reachability.</p>
     <ul className="agent-items" data-capability="agent.prefix.list">{prefixes.map(p => <li key={p.prefix}><span>{p.prefix} · {p.kind} · {p.export ? "export" : "local"}</span>{p.kind === "lan" && <button className="action-button" type="button" disabled={busy} data-capability="agent.prefix.delete" onClick={() => void mutate("/prefixes", "DELETE", { prefix: p.prefix }, `Remove exported network ${p.prefix}?`)}>Remove</button>}</li>)}</ul>
     <form onSubmit={e => { e.preventDefault(); void mutate("/prefixes", "POST", { prefix, kind: "lan", export: exported }); }}>
       <fieldset className="agent-fields" disabled={busy}><label>LAN prefix<input value={prefix} onChange={e => setPrefix(e.target.value)} required /></label><label className="agent-check"><input type="checkbox" checked={exported} onChange={e => setExported(e.target.checked)} /> Export prefix</label></fieldset>
@@ -18,7 +18,7 @@ export function PrefixEditor({ prefixes, busy, mutate }: { prefixes: Prefix[]; b
 export function SourceEditor({ sources, busy, mutate }: { sources: Source[]; busy: boolean; mutate: Mutate }) {
   const empty: Source = { name: "", interface: "", cidr: "", export: true, allow_outside_pool: false, description: "" };
   const [draft, setDraft] = useState<Source>(empty); const [editing, setEditing] = useState(false);
-  return <section className="panel"><h2>Attached sources</h2><p className="field-help">kornode does not create external VPN interfaces. Full source/fabric integration is P4.</p>
+  return <section className="panel"><h2>Attached sources</h2><p className="field-help">kornode does not create external VPN interfaces. Full source/interlink integration is P4.</p>
     <ul className="agent-items" data-capability="agent.source.list">{sources.map(s => <li key={s.name}><span>{s.name} · {s.interface} · {s.cidr}</span><div className="row-actions"><button className="action-button" type="button" onClick={() => { setDraft(s); setEditing(true); }}>Edit</button><button className="action-button" type="button" disabled={busy} data-capability="agent.source.delete" onClick={() => void mutate(`/sources/${encodeURIComponent(s.name)}`, "DELETE", undefined, `Remove source ${s.name}? Referencing rules must be removed first.`)}>Remove</button></div></li>)}</ul>
     <form data-capability="agent.source.set" onSubmit={e => { e.preventDefault(); const { name, ...data } = draft; void mutate(`/sources/${encodeURIComponent(name)}`, "PUT", data); }}>
       <fieldset className="agent-fields" disabled={busy}>

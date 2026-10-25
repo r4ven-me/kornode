@@ -70,7 +70,7 @@ def selected_profile(config: AppConfig, files: FileManager) -> UpstreamProfileCo
 
 
 @dataclass(frozen=True)
-class FabricView:
+class InterlinkView:
     """The registry and the connected sessions, read once per pass."""
 
     nodes: list[Node] = field(default_factory=list)
@@ -116,7 +116,7 @@ class HubNetInputs:
             upstreams.append(profile_slug(profile.name))
         active = selected_profile(config, self.files)
         tunnel_ifaces = {tunnel.interface for tunnel in tunnels.values()}
-        view = self._fabric_view()
+        view = self._interlink_view()
         policy = self.policy()
         # `node:<n>` of the hub's own policy leaves through node n's ocserv session; while
         # that session is down there is no fact and the exit only fails closed.
@@ -143,8 +143,8 @@ class HubNetInputs:
                 for source in policy.sources
             },
             node_prefixes=self._node_prefixes(pool, view),
-            fabric_ifaces=tuple(sorted(set(view.sessions.values()))),
-            fabric_guard=True,
+            interlink_ifaces=tuple(sorted(set(view.sessions.values()))),
+            interlink_guard=True,
             transit_exits=tuple(self._transit_exits(view, policy)),
             session_routes=tuple(self._session_routes(view)),
             uplink=NetworkStatsService(config, runner=self.runner).resolve_interface(),
@@ -177,17 +177,17 @@ class HubNetInputs:
             if link.get("ifname")
         }
 
-    def _fabric_view(self) -> FabricView:
+    def _interlink_view(self) -> InterlinkView:
         """Active nodes, their prefixes and the session device of each connected one.
 
-        A session is connected while the node's fabric address is a route on a `vpns*`
+        A session is connected while the node's interlink address is a route on a `vpns*`
         device in main (ocserv installs it from `explicit-ipv4`); the same fact removes
         the node's routes again when the session ends.
         """
         config = self.config
         db = config.system.data_dir / "registry.db"
         if not db.exists():
-            return FabricView()
+            return InterlinkView()
         result = self.runner.run(
             ["ip", "-j", "-4", "route", "show", "table", "main"], check=False, timeout=5
         )
@@ -217,26 +217,26 @@ class HubNetInputs:
             conn.close()
         sessions: dict[int, str] = {}
         for node in nodes:
-            device = device_of.get(str(self._fabric_address(node.id)))
+            device = device_of.get(str(self._interlink_address(node.id)))
             if device is not None and node.id != 1:
                 sessions[node.id] = device
-        return FabricView(
+        return InterlinkView(
             nodes=nodes, prefixes=prefixes, sessions=sessions, gateway_sets=gateway_sets
         )
 
-    def _fabric_address(self, node_id: int) -> ipaddress.IPv4Address:
-        fabric = self.config.fabric
+    def _interlink_address(self, node_id: int) -> ipaddress.IPv4Address:
+        interlink = self.config.interlink
         return derive_addresses(
             node_id,
-            fabric_cidr=fabric.cidr,
-            client_pool=fabric.client_pool,
-            source_pool=fabric.source_pool,
-            domain=fabric.domain,
-        ).fabric_address
+            interlink_cidr=interlink.cidr,
+            client_pool=interlink.client_pool,
+            source_pool=interlink.source_pool,
+            domain=interlink.domain,
+        ).interlink_address
 
-    def _node_prefixes(self, pool: Network, view: FabricView) -> dict[int, tuple[Network, ...]]:
-        """Every active node's exported prefixes; the hub's are its pool and the fabric."""
-        hub: list[Network] = [pool, ipaddress.ip_network(self.config.fabric.cidr, strict=False)]
+    def _node_prefixes(self, pool: Network, view: InterlinkView) -> dict[int, tuple[Network, ...]]:
+        """Every active node's exported prefixes; the hub's are its pool and the interlink."""
+        hub: list[Network] = [pool, ipaddress.ip_network(self.config.interlink.cidr, strict=False)]
         hub += [ipaddress.ip_network(cidr) for cidr in self.config.exported_source_cidrs()]
         result: dict[int, tuple[Network, ...]] = {1: tuple(hub)}
         active = {node.id for node in view.nodes}
@@ -251,12 +251,12 @@ class HubNetInputs:
                 )
         return result
 
-    def _transit_exits(self, view: FabricView, own: EgressPolicy) -> list[TransitExit]:
+    def _transit_exits(self, view: InterlinkView, own: EgressPolicy) -> list[TransitExit]:
         """Exits that agents declare for their own traffic (D-69): `from` classes of a
         rule `to: any via node:<n>` become the source prefixes the hub marks for node
         n's table. Only an active node with role `gateway` is honoured; anything else stays
         unmarked and is rejected by the agent guard."""
-        fabric = self.config.fabric
+        interlink = self.config.interlink
         roles = {node.id: node.roles for node in view.nodes}
         found: list[TransitExit] = []
         # The hub's own exits (egress.hub) have no agent sources to mark; they are listed
@@ -281,10 +281,10 @@ class HubNetInputs:
                 continue
             addresses = derive_addresses(
                 node.id,
-                fabric_cidr=fabric.cidr,
-                client_pool=fabric.client_pool,
-                source_pool=fabric.source_pool,
-                domain=fabric.domain,
+                interlink_cidr=interlink.cidr,
+                client_pool=interlink.client_pool,
+                source_pool=interlink.source_pool,
+                domain=interlink.domain,
             )
             cidrs = {
                 item.name: ipaddress.ip_network(item.cidr, strict=False) for item in policy.sources
@@ -311,16 +311,18 @@ class HubNetInputs:
                 if is_dest:
                     # The agent classified by the addresses it resolved itself: the hub
                     # matches the same ones (static routes come from the policy).
-                    reported = NodeFacts(
-                        node_id=node.id,
-                        client_pool=None,
-                        resolved=view.gateway_sets.get(node.id, {}),
-                    )
+                    sets = dict(view.gateway_sets.get(node.id, {}))
+                    if isinstance(rule.to, InlineDest):
+                        # Agents before 2.2 key inline destinations by rule position.
+                        legacy = sets.get(f"rule{index}")
+                        if legacy is not None:
+                            sets.setdefault(rule.to.resolved_key(), legacy)
+                    reported = NodeFacts(node_id=node.id, client_pool=None, resolved=sets)
                     dest, _ = dest_members(rule, index, policy, reported)
                 found.append(TransitExit(target, tuple(sources), view.sessions.get(target), dest))
         return found
 
-    def _session_routes(self, view: FabricView) -> list[tuple[Network, str]]:
+    def _session_routes(self, view: InterlinkView) -> list[tuple[Network, str]]:
         """Exported prefixes of connected agents -> their ocserv session device.
 
         ocserv does not install `iroute` routes itself (S-03), so the reconciler does.
@@ -375,24 +377,24 @@ class HubNetInputs:
         except OSError:
             return None
 
-    def _hub_fabric_address(self) -> ipaddress.IPv4Address:
+    def _hub_interlink_address(self) -> ipaddress.IPv4Address:
         return derive_addresses(
             1,
-            fabric_cidr=self.config.fabric.cidr,
-            client_pool=self.config.fabric.client_pool,
-            source_pool=self.config.fabric.source_pool,
-            domain=self.config.fabric.domain,
-        ).fabric_address
+            interlink_cidr=self.config.interlink.cidr,
+            client_pool=self.config.interlink.client_pool,
+            source_pool=self.config.interlink.source_pool,
+            domain=self.config.interlink.domain,
+        ).interlink_address
 
     def _service_address(self) -> ipaddress.IPv4Address | None:
         if not (self.config.control.enabled and self.config.node.id == 1):
             return None
-        return self._hub_fabric_address()
+        return self._hub_interlink_address()
 
     def _enroll_guard(self) -> EnrollGuard | None:
         return EnrollGuard(
-            pool=ipaddress.IPv4Network(self.config.fabric.enroll_pool, strict=True),
-            address=self._hub_fabric_address(),
+            pool=ipaddress.IPv4Network(self.config.interlink.enroll_pool, strict=True),
+            address=self._hub_interlink_address(),
             port=self.config.control.port,
             session_iface=f"{self.config.server.device}*",
         )

@@ -3,7 +3,7 @@ import type { ConfigSection } from "../../app/types";
 import { KorclientHint } from "../../components/KorclientHint";
 import { SettingsTabs } from "../../components/SettingsTabs";
 import { ActionButton, EmptyState, Pill } from "../../components/ui";
-import type { AuthMethodsDraft, FabricSettingsDraft, GeneralSettingsDraft, ServerSettingsDraft, WebSettingsDraft } from "../../lib/drafts";
+import type { AuthMethodsDraft, GeneralSettingsDraft, ServerSettingsDraft, WebSettingsDraft } from "../../lib/drafts";
 import { AdminTotpPanel } from "./AdminTotpPanel";
 import { AdminPasswordPanel } from "./AdminPasswordPanel";
 import { ControlSettingsPanel } from "./ControlSettingsPanel";
@@ -23,19 +23,16 @@ export function ConfigView({
   authMethodsDraft,
   webSettingsDraft,
   generalSettingsDraft,
-  fabricSettingsDraft,
   onServerSettingsDraftChange,
   onAuthMethodsDraftChange,
   onWebSettingsDraftChange,
   onGeneralSettingsDraftChange,
-  onFabricSettingsDraftChange,
   onSaveServerSettings,
   onSaveAuthMethodsSettings,
   onTestOtpEmail,
   onTestOtpTelegram,
   onSaveWebSettings,
   onSaveGeneralSettings,
-  onSaveFabricSettings,
   busy,
   onDraftChange,
   onReloadSource,
@@ -59,19 +56,16 @@ export function ConfigView({
   authMethodsDraft: AuthMethodsDraft;
   webSettingsDraft: WebSettingsDraft;
   generalSettingsDraft: GeneralSettingsDraft;
-  fabricSettingsDraft: FabricSettingsDraft;
   onServerSettingsDraftChange: (value: ServerSettingsDraft) => void;
   onAuthMethodsDraftChange: (value: AuthMethodsDraft) => void;
   onWebSettingsDraftChange: (value: WebSettingsDraft) => void;
   onGeneralSettingsDraftChange: (value: GeneralSettingsDraft) => void;
-  onFabricSettingsDraftChange: (value: FabricSettingsDraft) => void;
   onSaveServerSettings: () => void;
   onSaveAuthMethodsSettings: () => void;
   onTestOtpEmail: () => void;
   onTestOtpTelegram: () => void;
   onSaveWebSettings: () => void;
   onSaveGeneralSettings: () => void;
-  onSaveFabricSettings: () => void;
   busy: string | null;
   onDraftChange: (value: string) => void;
   onReloadSource: () => void;
@@ -356,6 +350,15 @@ export function ConfigView({
           </SettingsTabs>
         )}
 
+        {webSettingsDraft.enabled && (
+          <fieldset className="settings-grid nested-fieldset">
+            <legend>Confirm sensitive changes</legend>
+            <p className="field-help">Enabling the browser terminal, changing the admin username or trusted proxies, or turning off the secure session cookie needs your current password (and two-factor code when it is on). Other changes save without it. Nothing typed here is stored.</p>
+            <label><span>Current password to confirm sensitive changes</span><input type="password" autoComplete="current-password" value={webSettingsDraft.currentPassword} onChange={(event) => onWebSettingsDraftChange({ ...webSettingsDraft, currentPassword: event.target.value })} /></label>
+            <label><span>Two-factor code to confirm (if enabled)</span><input inputMode="numeric" autoComplete="one-time-code" value={webSettingsDraft.totpCode} onChange={(event) => onWebSettingsDraftChange({ ...webSettingsDraft, totpCode: event.target.value })} /></label>
+          </fieldset>
+        )}
+
         <div className="panel-footer config-save-footer">
           <ActionButton label="Save" icon={Save} primary busy={busy === "web-config-settings"} onClick={onSaveWebSettings} data-capability="web.settings" />
         </div>
@@ -440,35 +443,6 @@ export function ConfigView({
       </section>
       )}
 
-      {section === "fabric" && (
-      <section className="panel config-section-panel" data-capability="config.show">
-        <div className="panel-header config-section-header">
-          <div>
-            <h2>Fabric</h2>
-            <p className="muted-line">Node identity, derived pools and reserved address space.</p>
-          </div>
-        </div>
-
-        <SettingsTabs ariaLabel="Fabric settings">
-          <details className="settings-details" open>
-            <summary>Node &amp; pools</summary>
-            <div className="settings-grid settings-details-body">
-              <label><span>Node ID</span><input type="number" min={1} max={254} value={fabricSettingsDraft.nodeId} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, nodeId: Math.min(254, Math.max(1, Number(event.target.value) || 1)) })} /></label>
-              <label><span>Fabric CIDR</span><input value={fabricSettingsDraft.cidr} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, cidr: event.target.value })} /></label>
-              <label><span>Client pool template</span><input value={fabricSettingsDraft.clientPool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, clientPool: event.target.value })} /></label>
-              <label><span>Source pool template</span><input value={fabricSettingsDraft.sourcePool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, sourcePool: event.target.value })} /></label>
-              <label><span>Enroll pool</span><input value={fabricSettingsDraft.enrollPool} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, enrollPool: event.target.value })} /></label>
-              <label><span>DNS domain</span><input value={fabricSettingsDraft.domain} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, domain: event.target.value })} /></label>
-              <label><span>Reserved CIDRs (one per line)</span><textarea rows={4} value={fabricSettingsDraft.reserved} onChange={(event) => onFabricSettingsDraftChange({ ...fabricSettingsDraft, reserved: event.target.value })} /></label>
-            </div>
-          </details>
-        </SettingsTabs>
-
-        <div className="panel-footer config-save-footer">
-          <ActionButton label="Save" icon={Save} primary busy={busy === "fabric-settings"} onClick={onSaveFabricSettings} />
-        </div>
-      </section>
-      )}
 
       {section === "advanced" && (
       <SettingsTabs ariaLabel="Advanced configuration">
@@ -578,7 +552,7 @@ export function ConfigView({
       </details>
       <details>
         <summary>Effective config</summary>
-        <section className="panel">
+        <section className="panel" data-capability="config.show">
           <h2>Effective config</h2>
           <p className="muted-line">
             Read-only result after applying defaults, .env, environment, persistent YAML and CLI

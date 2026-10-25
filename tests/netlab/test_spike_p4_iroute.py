@@ -12,7 +12,7 @@ import pytest
 from tests.netlab.lab import Lab
 from tests.netlab.test_spike_p3_groups import (
     AGENT_ID,
-    FABRIC_CIDR,
+    INTERLINK_CIDR,
     GroupsLab,
     _start,
     spike_tmp,  # noqa: F401 - fixture
@@ -27,7 +27,7 @@ OTHER_PREFIX = "192.168.2.0/24"
 @pytest.fixture
 def groups_lab(lab: Lab, spike_tmp: Path) -> Iterator[GroupsLab]:  # noqa: F811
     handle = _start(lab, spike_tmp, guard=True)
-    # What FabricGroupsService renders for an agent with an exported LAN (P4-01).
+    # What InterlinkGroupsService renders for an agent with an exported LAN (P4-01).
     (spike_tmp / "users" / f"agent-{AGENT_ID}").write_text(
         f"explicit-ipv4 = 10.99.0.{AGENT_ID}\niroute = {OWN_PREFIX}\nroute = {OTHER_PREFIX}\n",
         encoding="utf-8",
@@ -60,7 +60,7 @@ def test_s03_ocserv_does_not_install_iroute_routes_itself(groups_lab: GroupsLab)
 def test_s03_explicit_ipv4_and_pushed_routes_survive_a_reconnect(groups_lab: GroupsLab) -> None:
     assert groups_lab.agent.connect(groups_lab.pin, cert=groups_lab.agent_cert)
     pushed = groups_lab.agent.pushed_routes()
-    assert FABRIC_CIDR in pushed and OTHER_PREFIX in pushed and OWN_PREFIX not in pushed
+    assert INTERLINK_CIDR in pushed and OTHER_PREFIX in pushed and OWN_PREFIX not in pushed
     assert groups_lab.agent.address() == f"10.99.0.{AGENT_ID}"
 
     groups_lab.agent.stop()

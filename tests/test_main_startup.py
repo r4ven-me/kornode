@@ -52,7 +52,7 @@ class QuietNetService:
 def test_initialize_runtime_leaves_everything_ocserv_needs_to_start(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The rendered ocserv.conf names the CA, the server and fabric certificates and the CRL
+    """The rendered ocserv.conf names the CA, the server and interlink certificates and the CRL
     (D-71): a fresh hub must have all of them once initialize_runtime returns."""
     config = AppConfig.model_validate(
         {
@@ -77,10 +77,10 @@ def test_initialize_runtime_leaves_everything_ocserv_needs_to_start(
     )
     initialize_runtime(tmp_path / "config.yaml")
 
-    for name in ("ca.crt", "ca.key", "server.crt", "fabric.crt", "fabric.key", "crl.pem"):
+    for name in ("ca.crt", "ca.key", "server.crt", "interlink.crt", "interlink.key", "crl.pem"):
         assert config.cert_path(name).is_file(), name
     rendered = (config.system.generated_dir / "ocserv.conf").read_text(encoding="utf-8")
-    assert f"[vhost:{config.fabric.server_name}]" in rendered
+    assert f"[vhost:{config.interlink.server_name}]" in rendered
 
 
 @pytest.mark.parametrize("existing", ["ca.key", "ca.crt"])

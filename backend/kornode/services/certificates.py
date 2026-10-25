@@ -154,6 +154,7 @@ class CertificateService:
         template: Path,
         *,
         reuse_key: bool = False,
+        legacy_key: Path | None = None,
         self_signed: bool = False,
         ecc: bool = False,
         replace: bool = True,
@@ -171,12 +172,17 @@ class CertificateService:
                 self._validate_pair(key.read_bytes(), crt.read_bytes(), ca=True)
                 return []
             with tempfile.TemporaryDirectory(prefix=".issue-", dir=key.parent) as directory:
-                stage_key = key if dry_run else Path(directory) / key.name
+                source_key = key if key.exists() or legacy_key is None else legacy_key
+                keep_key = reuse_key and source_key.exists()
+                stage_key = (
+                    (source_key if keep_key else key) if dry_run else Path(directory) / key.name
+                )
                 stage_crt = crt if dry_run else Path(directory) / crt.name
-                keep_key = reuse_key and key.exists()
                 results: list[CommandResult] = []
                 if not dry_run:
-                    self.files.atomic_write_bytes(stage_key, key.read_bytes() if keep_key else b"")
+                    self.files.atomic_write_bytes(
+                        stage_key, source_key.read_bytes() if keep_key else b""
+                    )
                     self.files.atomic_write_bytes(stage_crt, b"")
                 if not keep_key:
                     argv = ["certtool", "--generate-privkey"]
@@ -294,7 +300,7 @@ class CertificateService:
         return self._generate_pair(key, crt, template, reuse_key=True, dry_run=dry_run)
 
     def ensure_control_certificate(self, address: str, *, dry_run: bool = False) -> bool:
-        """Server certificate of the control API listener, IP SAN = the hub fabric
+        """Server certificate of the control API listener, IP SAN = the hub interlink
         address (agents pin the kornode CA and verify this address). Renewed
         when it has under 30 days left. True when a certificate was issued."""
         crt = self.config.cert_path("control.crt")
@@ -325,13 +331,14 @@ class CertificateService:
             template.unlink(missing_ok=True)
         return True
 
-    def ensure_fabric_certificate(self, *, dry_run: bool = False) -> bool:
-        """Server certificate of the fabric virtual host (S-07, D-71), signed by the hub
+    def ensure_interlink_certificate(self, *, dry_run: bool = False) -> bool:
+        """Server certificate of the interlink virtual host (S-07, D-71), signed by the hub
         CA with the vhost name as SAN. Agents pin its public key, so an existing key is
         kept when the certificate is renewed (under 30 days left). True when issued."""
-        crt = self.config.cert_path("fabric.crt")
-        key = self.config.cert_path("fabric.key")
-        name = self.config.fabric.server_name
+        crt = self.config.cert_path("interlink.crt")
+        key = self.config.cert_path("interlink.key")
+        name = self.config.interlink.server_name
+        legacy_key = self.config.cert_path("fabric.key")
         if crt.exists() and key.exists() and not dry_run:
             parsed = self._validate_pair(key.read_bytes(), crt.read_bytes())
             left = parsed.not_valid_after_utc - datetime.now(UTC)
@@ -339,7 +346,7 @@ class CertificateService:
                 return False
         self.files.ensure_dir(self.cert_dir, mode=0o700)
         template = self._write_template(
-            self._template_path("fabric.tmpl"),
+            self._template_path("interlink.tmpl"),
             "\n".join(
                 [
                     f"cn = {name}",
@@ -353,7 +360,11 @@ class CertificateService:
             ),
         )
         try:
-            self._generate_pair(key, crt, template, reuse_key=True, ecc=True, dry_run=dry_run)
+            # Stage a legacy key without publishing it until issuance and issuer
+            # validation succeed. The active interlink key always takes priority.
+            self._generate_pair(
+                key, crt, template, reuse_key=True, legacy_key=legacy_key, ecc=True, dry_run=dry_run
+            )
         finally:
             template.unlink(missing_ok=True)
         return True

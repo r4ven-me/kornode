@@ -14,8 +14,8 @@ import yaml
 
 from kornode.cli_agents import register as register_agent_commands
 from kornode.cli_egress import register as register_egress_commands
-from kornode.cli_fabric import register as register_fabric_commands
 from kornode.cli_hub import register as register_hub_commands
+from kornode.cli_interlink import register as register_interlink_commands
 from kornode.config.loader import (
     DEFAULT_CONFIG_PATH,
     deep_merge,
@@ -40,6 +40,7 @@ from kornode.services.logs import LogRotationService, LogService
 from kornode.services.net import NetApplyError, NetService, run_reconciler
 from kornode.services.otp import OtpService
 from kornode.services.password_hash import hash_password
+from kornode.services.password_policy import validate_new_admin_password
 from kornode.services.secrets import collect_config_secrets, mask_text
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificateService
@@ -850,8 +851,18 @@ def domains_watch() -> None:
         except Exception as exc:  # noqa: BLE001 - keep watching
             typer.echo(f"domain resolve failed: {exc}", err=True)
         deadline = time.monotonic() + interval
+        check_at = time.monotonic() + 10
         while not stopping and time.monotonic() < deadline:
             time.sleep(0.5)
+            if time.monotonic() < check_at:
+                continue
+            # A new set or inline rule must not wait up to an hour for addresses.
+            check_at = time.monotonic() + 10
+            try:
+                if DomainResolverService(get_config()).pending():
+                    break
+            except Exception:  # noqa: BLE001, S112 - the next cycle reports it
+                continue
 
 
 @internal_dns_app.command("status")
@@ -1178,6 +1189,29 @@ def net_explain(
             typer.echo(f"{key}: {value}")
 
 
+@net_app.command(
+    "wait-ready",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def net_wait_ready(
+    ctx: typer.Context,
+    timeout: float = typer.Option(0, "--timeout", help="Seconds; 0 waits forever."),
+) -> None:
+    """Wait until the reconciler converged the kernel once, then exec ARGS (supervisor).
+
+    Fail closed at boot: ocserv must not forward clients before the kill switch exists.
+    """
+    ready = NetService(get_config()).wait_ready(
+        timeout=timeout or None, report=lambda line: typer.echo(line, err=True)
+    )
+    if not ready:
+        typer.echo("error: reconciler did not converge", err=True)
+        raise typer.Exit(1)
+    argv = [arg for arg in ctx.args if arg != "--"]
+    if argv:
+        os.execv(argv[0], argv)  # noqa: S606 - explicit argv from the supervisor template
+
+
 @net_app.command("run")
 def net_run() -> None:
     """Run the reconciler (supervisor program; not a management action)."""
@@ -1274,6 +1308,11 @@ def registry_maintain_command() -> None:
 @web_app.command("hash-password")
 def web_hash_password() -> None:
     password = typer.prompt("Admin password", hide_input=True, confirmation_prompt=True)
+    try:
+        validate_new_admin_password(password)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
     typer.echo(hash_password(password))
 
 
@@ -1303,7 +1342,9 @@ app.add_typer(registry_app, name="registry")
 register_agent_commands(app, get_config)
 register_hub_commands(app, get_config)
 register_egress_commands(app, get_config, lambda: STATE.get("config_path"))
-register_fabric_commands(app, get_config, lambda: STATE.get("config_path"))
+register_interlink_commands(
+    app, get_config, lambda: STATE.get("config_path"), lambda: STATE.get("env_file")
+)
 
 
 if __name__ == "__main__":

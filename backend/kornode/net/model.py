@@ -3,6 +3,7 @@ docs/spec/schemas/egress.v1.schema.json). First match wins."""
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
@@ -12,12 +13,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 NAME_PATTERN = r"^[a-z][a-z0-9_-]{0,30}$"
 _DOMAIN_RE = re.compile(r"^(\*\.)?([A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,63}$")
-# `exit:<n>` is the spelling before D-84; it is read as `node:<n>` and written back as such.
+# Spellings before D-84/D-85 (`exit:<n>`, `fabric`) are read as `node:<n>` and `interlink`
+# and written back in the new form.
 _VIA_RE = re.compile(
-    r"^(local|fabric|drop|(?:node|exit):([1-9][0-9]{0,2})|upstream:([a-z][a-z0-9_-]{0,30}))$"
+    r"^(local|interlink|fabric|drop|(?:node|exit):([1-9][0-9]{0,2})"
+    r"|upstream:([a-z][a-z0-9_-]{0,30}))$"
 )
+LEGACY_KEYWORDS = {"fabric": "interlink"}
 
-BUILTIN_CLASSES = ("clients", "host", "fabric")
+BUILTIN_CLASSES = ("clients", "host", "interlink")
 
 Name = Annotated[str, Field(pattern=NAME_PATTERN)]
 
@@ -46,14 +50,14 @@ class Source(_Strict):
     @field_validator("name")
     @classmethod
     def _not_builtin(cls, value: str) -> str:
-        if value in BUILTIN_CLASSES:
+        if value in BUILTIN_CLASSES or value in LEGACY_KEYWORDS:
             raise ValueError(f"source name {value!r} is reserved")
         return value
 
 
 def _domains(values: list[str]) -> list[str]:
     for value in values:
-        if not _DOMAIN_RE.match(value):
+        if not _DOMAIN_RE.fullmatch(value):
             raise ValueError(f"invalid domain {value!r}")
     return values
 
@@ -111,25 +115,35 @@ class InlineDest(_Strict):
     def _valid_domains(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(_domains(list(value)))
 
+    def resolved_key(self) -> str:
+        """Key of this destination's resolved addresses (NodeFacts.resolved, files).
 
-To = Literal["any", "fabric"] | SetRef | NodeRef | InlineDest
+        Derived from the domains, never from the rule's position: resolution runs
+        on its own clock, so a positional key would hand one rule's addresses to
+        another after rules are inserted or reordered. `.` cannot occur in a set name.
+        """
+        digest = hashlib.sha256("\n".join(sorted(set(self.domains))).encode()).hexdigest()
+        return f"inline.{digest[:16]}"
+
+
+To = Literal["any", "interlink"] | SetRef | NodeRef | InlineDest
 
 
 @dataclass(frozen=True, slots=True)
 class Via:
-    kind: Literal["local", "fabric", "drop", "node", "upstream"]
+    kind: Literal["local", "interlink", "drop", "node", "upstream"]
     target: str | None = None
 
     @classmethod
     def parse(cls, value: str) -> Via:
-        match = _VIA_RE.match(value)
+        match = _VIA_RE.fullmatch(value)
         if match is None:
             raise ValueError(f"invalid via {value!r}")
         if match.group(2):
             return cls("node", match.group(2))
         if match.group(3):
             return cls("upstream", match.group(3))
-        return cls(value)  # type: ignore[arg-type]
+        return cls(LEGACY_KEYWORDS.get(value, value))  # type: ignore[arg-type]
 
     @property
     def name(self) -> str:
@@ -149,13 +163,27 @@ class Rule(_Strict):
     def _valid_via(cls, value: str) -> str:
         return Via.parse(value).name
 
+    @field_validator("from_", mode="before")
+    @classmethod
+    def _legacy_from(cls, value: object) -> object:
+        if isinstance(value, list | tuple):
+            return tuple(
+                LEGACY_KEYWORDS.get(item, item) if isinstance(item, str) else item for item in value
+            )
+        return value
+
+    @field_validator("to", mode="before")
+    @classmethod
+    def _legacy_to(cls, value: object) -> object:
+        return LEGACY_KEYWORDS.get(value, value) if isinstance(value, str) else value
+
     @field_validator("from_")
     @classmethod
     def _valid_from(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(value)) != len(value):
             raise ValueError("duplicate entries in from")
         for item in value:
-            if item not in BUILTIN_CLASSES and not re.match(NAME_PATTERN, item):
+            if item not in BUILTIN_CLASSES and not re.fullmatch(NAME_PATTERN, item):
                 raise ValueError(f"invalid from entry {item!r}")
         return value
 

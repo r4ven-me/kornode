@@ -1,4 +1,8 @@
-.agents-view { min-width: 0; }
+.agents-view, .nodes-view { min-width: 0; }
+.nodes-view > .subnav .subnav-item { min-height: 40px; border-radius: 6px; }
+.nodes-view .node-hub { display: grid; gap: 6px; padding: 12px; margin: 12px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); overflow-wrap: anywhere; }
+.nodes-view > .panel { margin-top: 16px; }
+.nodes-view button { white-space: normal; overflow-wrap: anywhere; }
 .agents-view button, .agent-enrollment button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; }
 .agents-view .agent-summary { display: grid; gap: 6px; width: 100%; padding: 12px; text-align: left; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .agents-view .agent-summary.active { border-color: var(--accent); }
@@ -9,11 +13,28 @@
 .agent-enrollment input { width: 100%; min-width: 0; min-height: 40px; box-sizing: border-box; }
 .agent-enrollment { width: min(620px, calc(100vw - 32px)); box-sizing: border-box; color: var(--text); }
 .agent-enrollment::backdrop { background: color-mix(in srgb, var(--sidebar) 70%, transparent); }
+.agents-view > div:not([hidden]) > .panel + .panel { margin-top: 16px; }
+.node-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.node-metrics > div { padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); min-width: 0; }
+.node-metrics dt { font-size: 13px; color: var(--muted); }
+.node-metrics dd { margin: 6px 0 0; font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
+.node-detail-header h2 { margin-top: 16px; overflow-wrap: anywhere; }
+.node-detail-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 3px 3px 12px; min-width: 0; border-bottom: 1px solid var(--border); }
+.node-detail-tabs .subnav-item { flex-shrink: 0; border-radius: 6px; }
+.nodes-view .agent-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+.nodes-view .agent-list li { display: flex; min-width: 0; }
+.nodes-view .agent-summary { height: 100%; }
+.agents-view [hidden] { display: none !important; }
+@media (max-width: 1180px) { .node-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) {
+  .node-metrics, .nodes-view .agent-list { grid-template-columns: minmax(0, 1fr); }
+  .node-detail-tabs { scroll-snap-type: x proximity; }
+  .node-detail-tabs .subnav-item { scroll-snap-align: start; }
   .agents-view button, .agent-enrollment button, .agents-view summary,
   .agents-view input:not([type="checkbox"]), .agents-view select,
   .agents-view .agent-check, .agents-view .agent-checks label { min-height: 44px; }
-  .agent-enrollment input { min-height: 44px; }
+  .agent-enrollment input, .nodes-view button, .nodes-view input:not([type="checkbox"]), .nodes-view select { min-height: 44px; }
+  .nodes-view > .panel .panel-footer { flex-direction: column; align-items: stretch; }
   .agents-view .row-actions { flex-wrap: wrap; }
   .agents-view .panel-footer { flex-direction: column; align-items: stretch; }
   .agents-view .agent-section { max-width: none; }

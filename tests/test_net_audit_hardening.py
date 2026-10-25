@@ -88,6 +88,42 @@ def test_reorder_edit_delete_and_restart_never_adopt_another_exits_flows() -> No
     assert not accepts_established(restarted, old_mark, "0x0")  # unlabeled cannot be adopted
 
 
+@pytest.mark.parametrize("spelling", ["interlink", "fabric"])
+def test_interlink_identity_is_reserved_stable_and_legacy_spelling_is_canonical(
+    spelling: str,
+) -> None:
+    node_facts = dataclasses.replace(
+        facts(),
+        tunnels={**facts().tunnels, "interlink": TunnelFact("oc-hub0", True)},
+        interlink_ifaces=("oc-hub0",),
+    )
+    before = compile_policy(policy(spelling, "local"), node_facts)
+    canonical = compile_policy(policy("interlink", "local"), node_facts)
+    assert before == canonical
+    mark, label = identities(before)["interlink"]
+    assert mark == 0x0C800100
+    assert len(label) == 34  # 0x followed by the full 128-bit conntrack identity
+    assert accepts_established(before, mark, label)
+    assert "fabric" not in before.script
+    assert "set interlink_ifaces {" in before.script
+    reordered = compile_policy(policy("local", "upstream:office", spelling), node_facts)
+    assert identities(reordered)["interlink"] == (mark, label)
+    assert accepts_established(reordered, mark, label)
+    removed = compile_policy(policy("local"), node_facts)
+    assert not accepts_established(removed, mark, label)
+    offline = compile_policy(
+        policy(spelling),
+        dataclasses.replace(node_facts, tunnels={"interlink": TunnelFact("oc-hub0", False)}),
+    )
+    assert identities(offline)["interlink"] == (mark, label)
+    for hook, action in (
+        ("forward", "reject with icmpx admin-prohibited"), ("postrouting", "drop")
+    ):
+        chain = offline.script.split(f"chain {hook} {{", 1)[1].split("\n  }", 1)[0]
+        assert f'meta mark & 0xffffff00 {{ 0x{mark:08x} }} oifname "eth0" {action}' in chain
+    assert {route.type for route in offline.desired.routes} == {"unreachable"}
+
+
 def test_node_gateway_identities_stay_pinned_across_reorder_and_fail_closed_after_removal() -> None:
     from tests.test_net_transit import hub_facts
 

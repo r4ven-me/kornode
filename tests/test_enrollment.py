@@ -98,7 +98,7 @@ class Env:
         certs = CertificateService(self.config, runner=self.runner)
         certs.init_ca()
         certs.create_server_certificate()
-        certs.ensure_fabric_certificate()
+        certs.ensure_interlink_certificate()
         conn = open_registry(self.config.system.data_dir / "registry.db")
         migrate(conn)
         self.registry = Registry(conn)
@@ -165,10 +165,10 @@ def test_issue_token_document_and_enroll_user(env: Env) -> None:
 
     assert doc["v"] == 1
     assert doc["hub"] == "vpn.example.com:443"
-    # The agent pins the fabric vhost certificate and presents its name as SNI (D-71).
-    assert doc["pin"] == certificate_file_pin(env.config.cert_path("fabric.crt")).pin
+    # The agent pins the interlink vhost certificate and presents its name as SNI (D-71).
+    assert doc["pin"] == certificate_file_pin(env.config.cert_path("interlink.crt")).pin
     assert doc["pin"] != certificate_file_pin(env.config.cert_path("server.crt")).pin
-    assert doc["sni"] == "fabric.kornode.internal"
+    assert doc["sni"] == "interlink.kornode.lan"
     assert doc["user"] == f"enroll-3-{doc['id']}"
     assert doc["exp"] == (env.clock.now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     assert env.passwd_lines() == [f"{doc['user']}:enroll:$hash"]
@@ -177,20 +177,35 @@ def test_issue_token_document_and_enroll_user(env: Env) -> None:
     assert doc["secret"] not in json.dumps(stored.__dict__)
 
 
-def test_fabric_certificate_keeps_its_key_and_pin_when_reissued(env: Env) -> None:
-    crt = env.config.cert_path("fabric.crt")
+def test_interlink_certificate_keeps_its_key_and_pin_when_reissued(env: Env) -> None:
+    crt = env.config.cert_path("interlink.crt")
     pin = certificate_file_pin(crt).pin
     parsed = x509.load_pem_x509_certificate(crt.read_bytes())
 
     assert parsed.extensions.get_extension_for_class(
         x509.SubjectAlternativeName
-    ).value.get_values_for_type(x509.DNSName) == ["fabric.kornode.internal"]
+    ).value.get_values_for_type(x509.DNSName) == ["interlink.kornode.lan"]
     # Valid and named correctly: nothing to do.
-    assert env.service.certificates.ensure_fabric_certificate() is False
+    assert env.service.certificates.ensure_interlink_certificate() is False
     # A renewal (here: forced by removing the certificate) keeps the key, hence the pin.
     crt.unlink()
-    assert env.service.certificates.ensure_fabric_certificate() is True
+    assert env.service.certificates.ensure_interlink_certificate() is True
     assert certificate_file_pin(crt).pin == pin
+
+
+def test_a_fabric_key_from_before_d85_is_kept_under_the_interlink_name(env: Env) -> None:
+    crt = env.config.cert_path("interlink.crt")
+    key = env.config.cert_path("interlink.key")
+    pin = certificate_file_pin(crt).pin
+    key.replace(env.config.cert_path("fabric.key"))
+    crt.replace(env.config.cert_path("fabric.crt"))
+
+    assert env.service.certificates.ensure_interlink_certificate() is True
+
+    assert certificate_file_pin(crt).pin == pin
+    assert key.read_bytes() == env.config.cert_path("fabric.key").read_bytes()
+    assert env.config.cert_path("fabric.crt").exists()
+    assert env.service.certificates.ensure_interlink_certificate() is False
 
 
 def test_issue_token_replaces_previous_and_requires_pending(env: Env) -> None:
@@ -237,7 +252,7 @@ def test_enroll_issues_cert_with_hub_chosen_subject(env: Env) -> None:
         bundle["signature"],
         trusted=trusted,
         high_water_version=0,
-        agent_version="2.0.0",
+        agent_version="2.1.0",
         expected_node_id=3,
     )
     assert checked.bundle.node_id == 3
@@ -501,3 +516,13 @@ def test_enroll_recompiles_other_active_agents(env: Env) -> None:
     env.enroll(env.token())
 
     assert env.registry.get_node(2).desired_version == before + 1
+
+
+def test_renewal_window_follows_the_issued_certificate_not_the_current_setting(env: Env) -> None:
+    """Lowering cert_lifetime_days later must not refuse a renewal the agent is due
+    (the agent times it from its certificate's own validity)."""
+    env.enroll(env.token())  # 90-day certificate
+    env.config.control.cert_lifetime_days = 30
+    env.clock.now += timedelta(days=61)  # > 2/3 of the issued 90 days
+    result = env.service.renew(3, make_csr())
+    assert result["cert_pem"].startswith("-----BEGIN CERTIFICATE-----")

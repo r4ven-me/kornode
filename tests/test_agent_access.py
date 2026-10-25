@@ -194,20 +194,20 @@ def _policy(world: World, roles: list[str], egress: list[dict[str, Any]]) -> lis
     return [rule.model_dump(by_alias=True) for rule in world.bundle().bundle.policy.egress]
 
 
-def test_clients_of_an_access_node_do_not_get_the_fabric_by_default(world: World) -> None:
+def test_clients_of_an_access_node_do_not_get_the_interlink_by_default(world: World) -> None:
     rules = _policy(world, ["access"], [])
-    implicit = next(rule for rule in rules if rule["id"] == "to-fabric")
+    implicit = next(rule for rule in rules if rule["id"] == "to-interlink")
     assert "clients" not in implicit["from"] and "host" in implicit["from"]
     # Other nodes keep the old behaviour: the bundle never cuts clients from the hub.
     rules = _policy(world, [], [])
-    assert "clients" in next(rule for rule in rules if rule["id"] == "to-fabric")["from"]
+    assert "clients" in next(rule for rule in rules if rule["id"] == "to-interlink")["from"]
 
 
-def test_an_explicit_client_fabric_rule_does_not_remove_the_hosts_path_to_the_hub(
+def test_an_explicit_client_interlink_rule_does_not_remove_the_hosts_path_to_the_hub(
     world: World,
 ) -> None:
-    explicit = {"id": "branch-hub", "from": ["clients"], "to": "fabric", "via": "fabric"}
+    explicit = {"id": "branch-hub", "from": ["clients"], "to": "interlink", "via": "interlink"}
     rules = _policy(world, ["access"], [explicit])
     ids = [rule["id"] for rule in rules]
-    assert ids == ["to-fabric", "branch-hub"]
+    assert ids == ["to-interlink", "branch-hub"]
     assert list(rules[0]["from"]) == ["host"]

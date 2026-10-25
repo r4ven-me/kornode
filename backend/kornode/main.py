@@ -48,7 +48,7 @@ def initialize_runtime(config_path: Path | None = None) -> None:
 
     certs = CertificateService(config, files=files)
     certs.init_ca()  # Idempotent; an existing CA is validated, never implicitly rotated.
-    certs.ensure_fabric_certificate()
+    certs.ensure_interlink_certificate()
     # ocserv refuses to start with `crl =` pointing at a missing file; the CA only exists now.
     certs.ensure_crl()
 

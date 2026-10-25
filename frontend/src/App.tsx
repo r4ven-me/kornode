@@ -28,8 +28,7 @@ import { InternalDnsView } from "./views/InternalDnsView";
 import { LoginScreen } from "./views/LoginScreen";
 import { LogsView } from "./views/LogsView";
 import { NetworkView } from "./views/NetworkView";
-import { AgentsView } from "./views/agents/AgentsView";
-import { FabricView } from "./views/fabric/FabricView";
+import { NodesView } from "./views/NodesView";
 import { SessionsView } from "./views/SessionsView";
 import { CertificatesView } from "./views/certificates/CertificatesView";
 import { ConfigSubnav } from "./views/config/ConfigSubnav";
@@ -57,6 +56,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [configSection, setConfigSection] = useState<ConfigSection>("server");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [networkFocus, setNetworkFocus] = useState<"sources" | undefined>();
   const { theme, toggleTheme } = useTheme();
   const core = usePanelCore();
   const {
@@ -126,6 +126,7 @@ export function App() {
   const activeTab = availableTabs.find((item) => item.id === tab) ?? availableTabs[0];
   const selectTab = (target: Tab) => {
     setTab(target);
+    if (target !== "network") setNetworkFocus(undefined);
     setMobileNavOpen(false);
   };
 
@@ -310,9 +311,16 @@ export function App() {
           />
         )}
 
-        {tab === "network" && <NetworkView token={authToken} />}
-        {tab === "agents" && <AgentsView token={authToken} dryRun={dryRun} />}
-        {tab === "fabric" && <FabricView token={authToken} />}
+        {tab === "network" && <NetworkView token={authToken} focus={networkFocus} />}
+        {tab === "nodes" && <NodesView
+          token={authToken}
+          dryRun={dryRun}
+          draft={settings.interlinkSettingsDraft}
+          busy={busy === "interlink-settings"}
+          onDraftChange={settings.setInterlinkSettingsDraft}
+          onSave={() => void settings.saveInterlink()}
+          onOpenSources={() => { setNetworkFocus("sources"); selectTab("network"); }}
+        />}
 
         {tab === "config" && (
           <ConfigSubnav active={configSection} onSelect={setConfigSection} />
@@ -472,19 +480,16 @@ export function App() {
             authMethodsDraft={settings.authMethodsDraft}
             webSettingsDraft={settings.webSettingsDraft}
             generalSettingsDraft={settings.generalSettingsDraft}
-            fabricSettingsDraft={settings.fabricSettingsDraft}
             onServerSettingsDraftChange={settings.setServerSettingsDraft}
             onAuthMethodsDraftChange={settings.setAuthMethodsDraft}
             onWebSettingsDraftChange={settings.setWebSettingsDraft}
             onGeneralSettingsDraftChange={settings.setGeneralSettingsDraft}
-            onFabricSettingsDraftChange={settings.setFabricSettingsDraft}
             onSaveServerSettings={() => void settings.saveServer()}
             onSaveAuthMethodsSettings={() => void settings.saveAuthMethods()}
             onTestOtpEmail={settings.testEmail}
             onTestOtpTelegram={settings.testTelegram}
             onSaveWebSettings={() => void settings.saveWeb()}
             onSaveGeneralSettings={() => void settings.saveGeneral()}
-            onSaveFabricSettings={() => void settings.saveFabric()}
             busy={busy}
             onDraftChange={configEditor.editDraft}
             onReloadSource={configEditor.reloadSource}

@@ -20,7 +20,7 @@ EXAMPLES = sorted((ROOT / "examples").glob("config.*.yaml"))
 
 
 @pytest.mark.parametrize("path", EXAMPLES, ids=lambda path: path.name)
-def test_example_converges_in_a_real_kernel(lab: Lab, path: Path) -> None:
+def test_example_converges_in_a_real_kernel(lab: Lab, path: Path, tmp_path: Path) -> None:
     ns = lab.add_namespace("example")
     env = {**os.environ, "PYTHONPATH": f"{ROOT / 'backend'}:{ROOT}"}
     names = json.loads(
@@ -32,6 +32,9 @@ def test_example_converges_in_a_real_kernel(lab: Lab, path: Path) -> None:
     ns.run(["ip", "addr", "add", "192.0.2.2/24", "dev", "uplink0"])
     ns.run(["ip", "route", "add", "default", "via", "192.0.2.1", "dev", "uplink0"])
 
-    result = ns.run([sys.executable, str(DRIVER), str(path)], env=env, timeout=60)
+    result = ns.run(
+            [sys.executable, str(DRIVER), str(path), "--state-dir", str(tmp_path)],
+            env=env, timeout=60,
+        )
 
     assert json.loads(result.stdout)["after"] == [], result.stdout

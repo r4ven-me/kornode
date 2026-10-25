@@ -1,7 +1,7 @@
 """Runs inside a netlab namespace (as root): converge the kernel of the hub or of the
 exit node of NL-17/NL-18 (hub source leaves through node 2).
 
-Usage: exit_set_driver.py hub|node2 set|full [--offline]
+Usage: exit_set_driver.py hub|node2 set|full|local [--offline]
 Prints the leftover plan (must be empty) as JSON.
 """
 
@@ -29,6 +29,8 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
             {"from": ["wgusers"], "to": "any", "via": "local"},
         ]
         if scenario == "set"
+        else [{"from": ["wgusers"], "to": "any", "via": "local"}]
+        if scenario == "local"
         else [{"from": ["wgusers"], "to": "any", "via": "node:2"}]
     )
     policy = EgressPolicy.model_validate(
@@ -44,8 +46,10 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
         tunnels={} if offline else {"node:2": TunnelFact("vpns1", True)},
         sources={"wgusers": SourceFact(present=True)},
         node_prefixes=PREFIXES,
-        fabric_ifaces=() if offline else ("vpns1",),
-        fabric_guard=True,
+        interlink_ifaces=() if offline else ("vpns1",),
+        interlink_guard=True,
+        # The hub routes node 2's prefixes into its session (proto-77 routes in main).
+        session_routes=() if offline else ((n("10.100.2.0/24"), "vpns1"),),
         uplink="eth0",
         all_rp_filter="1",
     )
@@ -54,14 +58,14 @@ def hub(scenario: str, offline: bool) -> tuple[EgressPolicy, NodeFacts]:
 
 def node2() -> tuple[EgressPolicy, NodeFacts]:
     policy = EgressPolicy.model_validate(
-        {"egress": [{"from": ["fabric"], "to": "any", "via": "local"}]}
+        {"egress": [{"from": ["interlink"], "to": "any", "via": "local"}]}
     )
     facts = NodeFacts(
         node_id=2,
         client_pool=n("10.100.2.0/24"),
-        tunnels={"fabric": TunnelFact("oc-hub0", True)},
+        tunnels={"interlink": TunnelFact("oc-hub0", True)},
         node_prefixes=PREFIXES,
-        fabric_ifaces=("oc-hub0",),
+        interlink_ifaces=("oc-hub0",),
         session_routes=((n("10.99.0.0/24"), "oc-hub0"), (n(SOURCE), "oc-hub0")),
         uplink="eth0",
         all_rp_filter="1",

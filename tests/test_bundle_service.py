@@ -59,7 +59,7 @@ class Env:
             stored.signature,
             trusted={key_id(key.public_key()): key.public_key()},
             high_water_version=high_water,
-            agent_version="2.0.0",
+            agent_version="2.1.0",
             expected_node_id=stored.node_id,
             seal_private_key=self.private,
         )
@@ -77,13 +77,13 @@ def test_compile_produces_valid_signed_bundle(env: Env) -> None:
     result = env.check(stored)
     assert stored.version == 1
     assert env.registry.get_node(3).desired_version == 1
-    assert result.bundle.node.fabric_address == "10.99.0.3"
+    assert result.bundle.node.interlink_address == "10.99.0.3"
     assert result.bundle.node.client_pool == "10.100.3.0/24"
     assert result.bundle.hubs[0].pin == PIN
     assert result.bundle.hubs[0].control_url == "https://10.99.0.1:8444"
-    assert result.bundle.policy.egress[0].via == "fabric"
-    kinds = {(p.node_id, p.kind) for p in result.bundle.fabric.prefixes}
-    assert kinds == {(1, "fabric"), (1, "pool")}
+    assert result.bundle.policy.egress[0].via == "interlink"
+    kinds = {(p.node_id, p.kind) for p in result.bundle.interlink.prefixes}
+    assert kinds == {(1, "interlink"), (1, "pool")}
 
 
 def test_unchanged_input_is_deduplicated(env: Env) -> None:
@@ -103,7 +103,7 @@ def test_change_creates_next_version_and_other_nodes_prefixes_appear(env: Env) -
     second = env.compile(3, "prefixes")
 
     assert second.version == first.version + 1
-    prefixes = {p.prefix for p in env.check(second).bundle.fabric.prefixes}
+    prefixes = {p.prefix for p in env.check(second).bundle.interlink.prefixes}
     assert "192.168.2.0/24" in prefixes
 
 
@@ -173,14 +173,16 @@ def test_invalid_output_is_refused_and_rolled_back(env: Env) -> None:
     assert env.registry.get_node(3).desired_version == 0
 
 
-def test_fabric_rule_id_does_not_clash_with_operator_rule(env: Env) -> None:
+def test_interlink_rule_id_does_not_clash_with_operator_rule(env: Env) -> None:
     env.add(3)
     env.registry.update_node(
         3,
-        policy={"egress": [{"id": "to-fabric", "from": ["clients"], "to": "any", "via": "local"}]},
+        policy={"egress": [
+            {"id": "to-interlink", "from": ["clients"], "to": "any", "via": "local"}
+        ]},
     )
 
-    assert env.check(env.compile(3)).bundle.policy.egress[0].via == "fabric"
+    assert env.check(env.compile(3)).bundle.policy.egress[0].via == "interlink"
 
 
 def test_compile_refuses_unenrolled_node(env: Env) -> None:
@@ -241,7 +243,7 @@ def test_rotated_seal_key_produces_new_version(env: Env) -> None:
     env.check(second)
 
 
-def test_exported_hub_sources_are_fabric_prefixes_of_node_1(env: Env) -> None:
+def test_exported_hub_sources_are_interlink_prefixes_of_node_1(env: Env) -> None:
     env.service.config = env.config.model_copy(
         update={
             "sources": (
@@ -254,5 +256,7 @@ def test_exported_hub_sources_are_fabric_prefixes_of_node_1(env: Env) -> None:
 
     result = env.check(env.compile(3))
 
-    hub = {(p.prefix, p.kind) for p in result.bundle.fabric.prefixes if p.node_id == 1}
-    assert hub == {("10.99.0.0/24", "fabric"), ("10.100.1.0/24", "pool"), ("10.8.1.0/24", "source")}
+    hub = {(p.prefix, p.kind) for p in result.bundle.interlink.prefixes if p.node_id == 1}
+    assert hub == {
+        ("10.99.0.0/24", "interlink"), ("10.100.1.0/24", "pool"), ("10.8.1.0/24", "source")
+    }

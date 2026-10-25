@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from kornode.api.auth import invalidate_auth_sessions, require_admin
 from kornode.config.env import config_environment
-from kornode.config.loader import deep_merge, validate_config_data
+from kornode.config.loader import deep_merge, rename_legacy_sections, validate_config_data
 from kornode.config.models import AppConfig
 from kornode.services.config import ConfigService
 from kornode.services.config_store import (
@@ -334,7 +334,7 @@ def _parse_yaml_mapping(content: str, path: Path) -> dict[str, Any]:
         return {}
     if not isinstance(loaded, dict):
         raise ValueError(f"configuration root must be a mapping: {path}")
-    return loaded
+    return rename_legacy_sections(loaded, str(path))
 
 
 def _load_existing_mapping(path: Path) -> dict[str, Any]:

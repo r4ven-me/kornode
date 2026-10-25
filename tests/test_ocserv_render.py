@@ -52,7 +52,7 @@ auth:
     assert "dns = 10.77.0.1" in rendered
     assert "route = 192.168.1.0/24" in rendered
     assert 'auth = "certificate"' in rendered
-    # Agent login belongs to the fabric vhost only (D-71), not to the client host.
+    # Agent login belongs to the interlink vhost only (D-71), not to the client host.
     client_host = rendered.partition("[vhost:")[0]
     assert "enable-auth" not in client_host
     assert "cert-group-oid" not in client_host
@@ -138,7 +138,7 @@ auth:
     assert "cert-user-oid = 0.9.2342.19200300.100.1.1" in rendered
 
 
-def _fabric_config(tmp_path: Path, **overrides: object) -> AppConfig:
+def _interlink_config(tmp_path: Path, **overrides: object) -> AppConfig:
     return load_config(
         tmp_path / "missing.yaml",
         cli_overrides={
@@ -153,8 +153,8 @@ def _fabric_config(tmp_path: Path, **overrides: object) -> AppConfig:
     )
 
 
-def test_ocserv_render_puts_agents_on_a_fabric_vhost(tmp_path: Path) -> None:
-    config = _fabric_config(
+def test_ocserv_render_puts_agents_on_a_interlink_vhost(tmp_path: Path) -> None:
+    config = _interlink_config(
         tmp_path,
         auth={
             "password": {"enabled": True},
@@ -164,9 +164,9 @@ def test_ocserv_render_puts_agents_on_a_fabric_vhost(tmp_path: Path) -> None:
     )
 
     rendered = OcservConfigRenderer().render(config)
-    head, _, vhost = rendered.partition("[vhost:fabric.kornode.internal]")
+    head, _, vhost = rendered.partition("[vhost:interlink.kornode.lan]")
 
-    # The client host keeps every client login method and none of the fabric ones.
+    # The client host keeps every client login method and none of the interlink ones.
     assert f'auth = "plain[passwd={config.secret_path("ocpasswd")}]"' in head
     assert 'auth = "certificate"' in head
     assert 'auth = "pam[' in head
@@ -178,7 +178,7 @@ def test_ocserv_render_puts_agents_on_a_fabric_vhost(tmp_path: Path) -> None:
     assert 'enable-auth = "certificate"' in vhost
     assert "cert-user-oid = 2.5.4.3" in vhost
     assert "cert-group-oid = 2.5.4.11" in vhost
-    assert f"server-cert = {config.cert_path('fabric.crt')}" in vhost
+    assert f"server-cert = {config.cert_path('interlink.crt')}" in vhost
     assert f"ca-cert = {config.cert_path('ca.crt')}" in vhost
     assert "pam[" not in vhost
     assert "[vhost:" not in vhost
@@ -187,7 +187,7 @@ def test_ocserv_render_puts_agents_on_a_fabric_vhost(tmp_path: Path) -> None:
 def test_ocserv_render_vhost_has_no_global_only_options(tmp_path: Path) -> None:
     """D-83: ocserv >= 1.4.2 (the image builds 1.5.0) refuses to start on a global-only
     option inside a vhost; the vhost inherits the ports (and DTLS) from the default host."""
-    config = _fabric_config(tmp_path)
+    config = _interlink_config(tmp_path)
 
     head, _, vhost = OcservConfigRenderer().render(config).partition("[vhost:")
 
@@ -196,13 +196,13 @@ def test_ocserv_render_vhost_has_no_global_only_options(tmp_path: Path) -> None:
         assert not re.search(rf"^{option}\s*=", vhost, re.MULTILINE), option
 
 
-def test_connect_script_fabric_guard(tmp_path: Path) -> None:
-    config = _fabric_config(tmp_path, auth={"password": {"enabled": True}})
+def test_connect_script_interlink_guard(tmp_path: Path) -> None:
+    config = _interlink_config(tmp_path, auth={"password": {"enabled": True}})
 
     rendered = OcservConfigRenderer().render_connect_script(config)
-    assert "# Fabric guard (D-43, D-71)" in rendered
+    assert "# Interlink guard (D-43, D-71)" in rendered
     assert "hook failures here are deliberately swallowed" in rendered
-    assert rendered.index("# Fabric guard") < rendered.index("korctl_bin=")
+    assert rendered.index("# Interlink guard") < rendered.index("korctl_bin=")
 
     script = tmp_path / "connect.sh"
     script.write_text(rendered, encoding="utf-8")
@@ -212,24 +212,31 @@ def test_connect_script_fabric_guard(tmp_path: Path) -> None:
     user_dir = tmp_path / "generated" / "config-per-user"
     user_dir.mkdir(parents=True)
     (user_dir / "agent-3").write_text("explicit-ipv4 = 10.99.0.3\n", encoding="utf-8")
-    fabric = config.fabric.server_name
+    interlink = config.interlink.server_name
     cases = [
-        # fabric vhost: only agents and enroll sessions
-        ({"VHOST": fabric, "GROUPNAME": ""}, 1),
-        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "agent-3"}, 0),
-        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "agent-4"}, 1),
-        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "alice"}, 1),
-        ({"VHOST": fabric, "GROUPNAME": "agents", "USERNAME": "agent-03"}, 1),
-        ({"VHOST": fabric, "GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 0),
-        ({"VHOST": fabric, "GROUPNAME": "enroll", "USERNAME": "bob"}, 1),
-        ({"VHOST": fabric, "GROUPNAME": "clients", "USERNAME": "alice"}, 1),
-        # client host: any login except a session in a fabric group; a user without
+        # interlink vhost: only agents and enroll sessions
+        ({"VHOST": interlink, "GROUPNAME": ""}, 1),
+        ({"VHOST": interlink, "GROUPNAME": "agents", "USERNAME": "agent-3"}, 0),
+        ({"VHOST": interlink, "GROUPNAME": "agents", "USERNAME": "agent-4"}, 1),
+        ({"VHOST": interlink, "GROUPNAME": "agents", "USERNAME": "alice"}, 1),
+        ({"VHOST": interlink, "GROUPNAME": "agents", "USERNAME": "agent-03"}, 1),
+        ({"VHOST": interlink, "GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 0),
+        ({"VHOST": interlink, "GROUPNAME": "enroll", "USERNAME": "bob"}, 1),
+        ({"VHOST": interlink, "GROUPNAME": "clients", "USERNAME": "alice"}, 1),
+        # client host: any login except a session in an interlink group; a user without
         # a group (OIDC) is fine there
         ({"VHOST": "", "GROUPNAME": "clients", "USERNAME": "alice"}, 0),
         ({"VHOST": "", "GROUPNAME": "", "USERNAME": "alice"}, 0),
         ({"GROUPNAME": "", "USERNAME": "alice"}, 0),
         ({"VHOST": "", "GROUPNAME": "agents", "USERNAME": "agent-3"}, 1),
         ({"VHOST": "", "GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 1),
+        # reserved user names are refused on the client host whatever the group: the
+        # agent-N config-per-user files (explicit-ipv4) are global to every vhost
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "agent-3"}, 1),
+        ({"VHOST": "", "GROUPNAME": "clients", "USERNAME": "agent-3"}, 1),
+        ({"GROUPNAME": "", "USERNAME": "agent-3"}, 1),
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "enroll-x"}, 1),
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "agentsmith"}, 0),
     ]
     for env, expected in cases:
         result = subprocess.run(

@@ -18,7 +18,7 @@ def _spec(**kw: object) -> DialSpec:
     return DialSpec(**base)  # type: ignore[arg-type]
 
 
-def test_fabric_argv_pins_forces_tcp_and_keeps_secrets_out() -> None:
+def test_interlink_argv_pins_forces_tcp_and_keeps_secrets_out() -> None:
     spec = _spec(
         auth_type="cert",
         cert_path=Path("/t/cert.pem"),
@@ -51,17 +51,17 @@ def test_carrier_literal_and_empty() -> None:
 
 
 def test_server_name_selects_the_vhost_by_sni_while_dialling_the_address() -> None:
-    """S-07/D-71: the hub is dialled at its address but presented under the fabric vhost name."""
-    spec = _spec(server="192.0.2.7", server_name="fabric.kornode.internal")
+    """S-07/D-71: the hub is dialled at its address but presented under the interlink vhost name."""
+    spec = _spec(server="192.0.2.7", server_name="interlink.kornode.lan")
     argv = openconnect_argv(spec)
-    assert "--resolve=fabric.kornode.internal:192.0.2.7" in argv
-    assert argv[-1] == "fabric.kornode.internal:443"
+    assert "--resolve=interlink.kornode.lan:192.0.2.7" in argv
+    assert argv[-1] == "interlink.kornode.lan:443"
 
 
 def test_server_name_with_camouflage_moves_into_the_config_file() -> None:
-    spec = _spec(server="192.0.2.7", server_name="fabric.kornode.internal", camouflage_secret="s")
-    assert config_lines(spec) == ["server=fabric.kornode.internal:443/?s"]
-    assert "--resolve=fabric.kornode.internal:192.0.2.7" in openconnect_argv(spec)
+    spec = _spec(server="192.0.2.7", server_name="interlink.kornode.lan", camouflage_secret="s")
+    assert config_lines(spec) == ["server=interlink.kornode.lan:443/?s"]
+    assert "--resolve=interlink.kornode.lan:192.0.2.7" in openconnect_argv(spec)
 
 
 def test_without_server_name_the_argv_is_unchanged() -> None:

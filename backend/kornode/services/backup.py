@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 
 from kornode import __version__
+from kornode.config.loader import rename_legacy_sections
 from kornode.config.models import AppConfig
 from kornode.registry.db import transaction
 from kornode.services.agent_models import ManagementError
@@ -145,7 +146,7 @@ class BackupService:
         with self._operation(), tempfile.TemporaryDirectory(prefix="kornode-restore-") as tmp:
             state = ArchiveState.model_validate_json(decrypt(archive, passphrase))
             decoded = state.decoded()
-            original = AppConfig.model_validate(state.config)
+            original = AppConfig.model_validate(rename_legacy_sections(state.config, "backup"))
             database_name = state.paths.get(str(absolute(original.system.data_dir / "registry.db")))
             if database_name != "data/registry.db":
                 raise invalid()

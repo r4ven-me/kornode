@@ -65,7 +65,7 @@ def test_delete_group_removes_config_policy_and_membership(tmp_path: Path) -> No
 
     # Cleared from alice's membership, bob untouched.
     passwd_content = passwd.read_text(encoding="utf-8")
-    # A user left without groups falls back to `clients` (the fabric hub always runs).
+    # A user left without groups falls back to `clients` (the interlink hub always runs).
     assert "alice:clients:$5$hash" in passwd_content
     assert "bob:sre:$5$hash" in passwd_content
 
@@ -92,7 +92,7 @@ def test_delete_group_rejects_invalid_name(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
-def test_generated_fabric_groups_are_not_listed_as_operator_groups(tmp_path: Path) -> None:
+def test_generated_interlink_groups_are_not_listed_as_operator_groups(tmp_path: Path) -> None:
     """The hub always renders config-per-group/agents and /enroll (D-71); listing the
     directory must not trip over those reserved names."""
     config_path = tmp_path / "config.yaml"

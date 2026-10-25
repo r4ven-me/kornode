@@ -27,7 +27,7 @@ def ping_through(interface: str, host: str) -> bool:
 
 
 class AgentHealth:
-    """`fabric` = tunnel up and an mTLS ping to the hub succeeds; `upstream:<name>` =
+    """`interlink` = tunnel up and an mTLS ping to the hub succeeds; `upstream:<name>` =
     tunnel up and, when set, `check_host` reachable through it."""
 
     def __init__(
@@ -41,7 +41,7 @@ class AgentHealth:
         self.probe = probe
 
     def checks(self, active: Validated | None) -> dict[str, bool]:
-        results = {"fabric": self.tunnels.is_up("fabric") and self.hub_ping()}
+        results = {"interlink": self.tunnels.is_up("interlink") and self.hub_ping()}
         if active is None:
             return results
         for upstream in active.bundle.tunnels.upstreams:

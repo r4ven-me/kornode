@@ -52,7 +52,7 @@ def test_a_cached_bundle_with_the_exit_role_still_loads() -> None:
         {
             "name": "out",
             "roles": ["exit"],
-            "fabric_address": "10.99.0.2",
+            "interlink_address": "10.99.0.2",
             "service_address": "10.100.2.1",
             "client_pool": "10.100.2.0/24",
         }

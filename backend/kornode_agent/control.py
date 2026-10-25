@@ -18,6 +18,13 @@ class HubUnreachable(RuntimeError):
     """Network-level failure: the hub or the path to it is down."""
 
 
+class TlsMaterialError(HubUnreachable):
+    """The local mTLS material (ca.pem, cert.pem, key.pem) cannot be loaded.
+
+    A subclass of HubUnreachable on purpose: only the control loops see it, and
+    they retry with backoff; the data plane never depends on these files."""
+
+
 class ControlError(RuntimeError):
     def __init__(self, status: int, code: str, message: str) -> None:
         super().__init__(f"{status} {code}: {message}")
@@ -71,21 +78,36 @@ class ControlClient:
         self,
         control_url: str,
         *,
-        ssl_context: ssl.SSLContext | bool,
+        ssl_context: ssl.SSLContext | bool | Callable[[], ssl.SSLContext],
         timeout: float = 10.0,
         local_address: Callable[[], str | None] = lambda: None,
     ) -> None:
         self._base = control_url.rstrip("/") + API
-        self._ssl = ssl_context
+        # A factory is called on the first request (and again after a failure):
+        # constructing the client never touches the TLS files.
+        self._ssl_factory = ssl_context if callable(ssl_context) else None
+        self._ssl: ssl.SSLContext | bool | None = None if callable(ssl_context) else ssl_context
         self._timeout = timeout
         self._local_address = local_address
         self._bound: str | None = None
-        self._http = self._build(None)
+        self._http: httpx.AsyncClient | None = None
+
+    def _context(self) -> ssl.SSLContext | bool:
+        if self._ssl is None:
+            assert self._ssl_factory is not None
+            try:
+                self._ssl = self._ssl_factory()
+            except (OSError, ssl.SSLError, ValueError) as exc:
+                # Never the file content: only which kind of failure it was.
+                raise TlsMaterialError(
+                    f"agent TLS material is unusable ({type(exc).__name__})"
+                ) from exc
+        return self._ssl
 
     def _build(self, address: str | None) -> httpx.AsyncClient:
-        # Traffic to the hub is marked into the fabric exit, which does not
-        # NAT: it must leave with the agent's fabric address as its source.
-        transport = httpx.AsyncHTTPTransport(verify=self._ssl, local_address=address)
+        # Traffic to the hub is marked into the interlink exit, which does not
+        # NAT: it must leave with the agent's interlink address as its source.
+        transport = httpx.AsyncHTTPTransport(verify=self._context(), local_address=address)
         return httpx.AsyncClient(base_url=self._base, transport=transport, timeout=self._timeout)
 
     @classmethod
@@ -95,7 +117,9 @@ class ControlClient:
         tls_dir: Path,
         local_address: Callable[[], str | None] = lambda: None,
     ) -> ControlClient:
-        return cls(control_url, ssl_context=mtls_context(tls_dir), local_address=local_address)
+        return cls(
+            control_url, ssl_context=lambda: mtls_context(tls_dir), local_address=local_address
+        )
 
     @classmethod
     def for_enroll(cls, control_url: str) -> ControlClient:
@@ -105,15 +129,19 @@ class ControlClient:
         return cls(control_url, ssl_context=False)
 
     async def aclose(self) -> None:
-        await self._http.aclose()
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
 
     async def _request(
         self, method: str, path: str, *, timeout: float | None = None, **kwargs: Any
     ) -> httpx.Response:
         address = self._local_address()
-        if address != self._bound:
-            old, self._http, self._bound = self._http, self._build(address), address
-            await old.aclose()
+        if self._http is None or address != self._bound:
+            fresh = self._build(address)  # TlsMaterialError leaves the old client in place
+            old, self._http, self._bound = self._http, fresh, address
+            if old is not None:
+                await old.aclose()
         try:
             response = await self._http.request(
                 method,

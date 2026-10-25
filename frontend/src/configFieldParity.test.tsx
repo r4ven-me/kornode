@@ -67,6 +67,23 @@ it.each(sourceModel.surfaces)("binds every Source field on $component with the e
   else expect(mutate).toHaveBeenCalledWith(`/sources/${name}`, "PUT", data);
 });
 
+it.each(["hub", "agent"])("keeps canonical interlink selectors alongside structured destination fields on %s", async surface => {
+  const agentPolicy = { ...policy, egress: [{ from: ["interlink"], to: "interlink", via: "interlink" }] };
+  mocks.get.mockResolvedValue({ policy: agentPolicy, warnings: [] });
+  const mutate = vi.fn().mockResolvedValue(true);
+  const { container } = render(surface === "hub" ? <HubEgress token="session" /> : <AgentPolicy policy={agentPolicy} busy={false} mutate={mutate} />);
+  if (surface === "hub") await screen.findByText(/wg · wg0/);
+  expect((screen.getByLabelText("Rule 1 to kind") as HTMLSelectElement).value).toBe("interlink");
+  expect((screen.getByLabelText("Rule 1 via kind") as HTMLSelectElement).value).toBe("interlink");
+  expect(container.querySelector('datalist option[value="interlink"]')).toBeTruthy();
+  expect(container.querySelector('option[value="fabric"]')).toBeNull();
+  expect(screen.getByLabelText("Set corp routes")).toBeTruthy();
+  const parent = container.querySelector("form")!;
+  fireEvent.submit(parent);
+  if (surface === "hub") expect(mocks.write).toHaveBeenCalledWith("/api/egress", "PUT", agentPolicy, "session");
+  else expect(mutate).toHaveBeenCalledWith("/policy", "PUT", agentPolicy);
+});
+
 const destModel = models.find(item => item.name === "DestSet")!;
 it.each(destModel.surfaces)("binds every DestSet field on $component without relying on raw JSON", async surface => {
   const mutate = vi.fn().mockResolvedValue(true);

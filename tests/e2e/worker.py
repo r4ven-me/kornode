@@ -96,10 +96,14 @@ async function call(method,path,body){
 })().catch(e=>{console.error(e.message);process.exit(1)});
 """
 AWG_CONNECT = """const o=JSON.parse(require("fs").readFileSync(0,"utf8"));
+const started=performance.now();let done=false;
 const s=require("net").connect({host:o.host,port:o.port,timeout:3000});
-s.on("connect",()=>{console.log(JSON.stringify({ok:true}));s.destroy()});
-const fail=()=>{console.log(JSON.stringify({ok:false}));s.destroy()};
-s.on("error",fail);s.on("timeout",fail);
+const finish=(ok,error)=>{
+ if(done)return;done=true;
+ console.log(JSON.stringify({ok,error,seconds:(performance.now()-started)/1000}));s.destroy();
+};
+s.on("connect",()=>finish(true,null));
+s.on("error",e=>finish(false,e.code));s.on("timeout",()=>finish(false,"TIMEOUT"));
 """
 PROBE = """import http.client, json, ssl, subprocess, sys
 from pathlib import Path
@@ -229,21 +233,35 @@ if o.get("full"):
  gw=json.loads(r.stdout)[0]["gateway"]
 script="\\n".join([
  "#!/bin/sh",
- '[ "$reason" = connect ] || exit 0',
+ 'case "$reason" in connect|reconnect) ;; *) exit 0 ;; esac',
  'ip link set dev "$TUNDEV" up mtu "${INTERNAL_IP4_MTU:-1400}"',
- 'ip addr add "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"',
- *["ip route add %s dev \\"$TUNDEV\\""%r for r in o["routes"]],
- *(["ip route add %s/32 via %s"%(o["host"],gw)] if gw else []),
+ 'ip addr replace "$INTERNAL_IP4_ADDRESS/32" dev "$TUNDEV"',
+ *["ip route replace %s dev \\"$TUNDEV\\""%r for r in o["routes"]],
+ *(["ip route replace %s/32 via %s"%(o["host"],gw)] if gw else []),
  *(['ip route replace default dev "$TUNDEV"'] if gw else []),
  ""])
 open(d+"/vpnc","w").write(script)
 os.chmod(d+"/vpnc",0o755)
 url="https://%s:%d"%(o["host"],o["port"])
-subprocess.run(["openconnect","--background","--pid-file="+d+"/pid",
+dial=["openconnect","--background","--pid-file="+d+"/pid",
  "--interface","kn-vpnc0","--script="+d+"/vpnc","--servercert",o["pin"],
- "--non-inter","--user",o["user"],"--passwd-on-stdin",url],
- input=(o["password"]+"\\n").encode(),stdout=open(d+"/log","ab"),
+ "--non-inter","--user",o["user"],"--passwd-on-stdin",url]
+for stale in ("stop",):
+ try: os.remove(d+"/"+stale)
+ except OSError: pass
+subprocess.run(dial,input=(o["password"]+"\\n").encode(),stdout=open(d+"/log","ab"),
  stderr=subprocess.STDOUT,timeout=60,check=True)
+# A VPN client application dials again when the server ends the session (a graceful
+# server restart makes openconnect exit with "Session terminated by server"). This
+# stands in for it: it redials the same account while the process is gone, until the
+# stop file appears. The password lives only in this disposable container (0600).
+pw=os.open(d+"/pw",os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+os.write(pw,(o["password"]+"\\n").encode()); os.close(pw)
+watch="d=$1; shift\\nwhile [ ! -e \\"$d/stop\\" ]; do\\n"\
+ " if ! kill -0 \\"$(cat \\"$d/pid\\" 2>/dev/null)\\" 2>/dev/null; then\\n"\
+ "  \\"$@\\" < \\"$d/pw\\" >> \\"$d/log\\" 2>&1\\n fi\\n sleep 1\\ndone\\n"
+subprocess.Popen(["sh","-c",watch,"kn-redial",d,*dial],stdin=subprocess.DEVNULL,
+ stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
 addr=None
 for _ in range(150):
  r=subprocess.run(["ip","-4","-j","addr","show","dev","kn-vpnc0"],capture_output=True)
@@ -254,6 +272,7 @@ if addr is None: raise SystemExit("no tunnel address")
 print(json.dumps({"address":addr}))
 """
 ACCESS_CLIENT_STOP = """import os,signal
+open("/tmp/kn-access/stop","w").close()
 try:
  os.kill(int(open("/tmp/kn-access/pid").read()),signal.SIGTERM)
 except (OSError,ValueError): pass
@@ -300,6 +319,116 @@ def atomic(path: Path, value: Any, mode: int = 0o600) -> None:
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+# These bounded observers live only in owned containers and disappear on case cleanup.
+UPGRADE_SERVER = """import socket,time
+end=time.monotonic()+600
+with socket.socket() as server:
+ server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+ server.bind(("0.0.0.0",9100));server.listen(16);server.settimeout(.5)
+ while time.monotonic()<end:
+  try:
+   conn,peer=server.accept()
+   with conn:
+    conn.settimeout(1);conn.sendall(peer[0].encode())
+  except (socket.timeout,OSError): pass
+"""
+FORWARD_OBSERVER = """import json,os,socket,subprocess,sys,time
+from pathlib import Path
+host,expected=sys.argv[1:]
+path=Path("/tmp/kn-upgrade-traffic.json")
+state={"successes":0,"failures":0,"wrong_peer":0,"max_gap_seconds":0.,"healthy":False}
+started=time.monotonic();last_good=None
+while time.monotonic()-started<600:
+ ok=False
+ try:
+  route=json.loads(subprocess.check_output(["ip","-j","route","get",host],timeout=2))
+  if route[0].get("dev")=="kn-vpnc0":
+   with socket.create_connection((host,9100),timeout=1) as s:
+    peer=s.recv(64).decode()
+   ok=peer==expected
+   if not ok: state["wrong_peer"]+=1
+ except (OSError,ValueError,subprocess.SubprocessError): pass
+ now=time.monotonic()
+ if last_good is not None:
+  state["max_gap_seconds"]=max(state["max_gap_seconds"],now-last_good)
+ if ok: last_good=now
+ state["successes" if ok else "failures"]+=1
+ state["healthy"]=ok
+ temp=path.with_suffix(".tmp")
+ temp.write_text(json.dumps(state));os.replace(temp,path)
+ time.sleep(.25)
+"""
+UPLINK_CAPTURE = r"""import json,os,socket,subprocess,sys,time
+from pathlib import Path
+host=sys.argv[1];target=socket.inet_aton(host)
+path=Path("/tmp/kn-nl05-capture.json");stop=path.with_suffix(".stop")
+route=json.loads(subprocess.check_output(["ip","-j","route","show","default"],timeout=5))
+iface=route[0]["dev"]
+state={"packets":0,"ready":True,"done":False,"trace":{}}
+def save():
+ temp=path.with_suffix(".tmp");temp.write_text(json.dumps(state));os.replace(temp,path)
+def matches(data,addr,target):
+ if addr[2]!=socket.PACKET_OUTGOING or len(data)<38 or data[12:14]!=b'\x08\x00': return False
+ ip=data[14:];ihl=(ip[0]&15)*4
+ return (ip[0]>>4==4 and ihl>=20 and len(ip)>=ihl+4 and ip[9]==6
+         and ip[16:20]==target and ip[ihl+2:ihl+4]==b'\x23\x8c')
+def trace_packet(ip,addr,target):
+ if len(ip)<20 or ip[0]>>4!=4: return None
+ ihl=(ip[0]&15)*4
+ if ihl<20 or len(ip)<ihl+4: return None
+ kind=None
+ if ip[9]==6 and ip[16:20]==target and ip[ihl+2:ihl+4]==b'\x23\x8c':
+  kind="tcp9100"
+ elif ip[9]==1 and len(ip)>=ihl+28:
+  inner=ip[ihl+8:];offset=(inner[0]&15)*4
+  if (inner[0]>>4==4 and offset>=20 and len(inner)>=offset+4 and inner[9]==6
+      and inner[16:20]==target and inner[offset+2:offset+4]==b'\x23\x8c'):
+   kind="icmp_%d_%d"%(ip[ihl],ip[ihl+1])
+ if kind is None: return None
+ direction="out" if addr[2]==socket.PACKET_OUTGOING else "in"
+ return addr[0]+":"+direction+":"+kind
+with socket.socket(socket.AF_PACKET,socket.SOCK_RAW,socket.htons(3)) as s, \
+     socket.socket(socket.AF_PACKET,socket.SOCK_DGRAM,socket.htons(3)) as trace:
+ s.bind((iface,0));s.settimeout(.1);trace.setblocking(False);save();end=time.monotonic()+180
+ while time.monotonic()<end and not stop.exists():
+  changed=False
+  try:
+   data,addr=s.recvfrom(65535)
+   if matches(data,addr,target): state["packets"]+=1;changed=True
+  except socket.timeout: pass
+  for _ in range(128):
+   try: ip,addr=trace.recvfrom(65535)
+   except BlockingIOError: break
+   key=trace_packet(ip,addr,target)
+   if key:
+    state["trace"][key]=state["trace"].get(key,0)+1;changed=True
+  if changed: save()
+ state["done"]=True;save()
+"""
+
+NL05_SNAPSHOT = """import json,os,subprocess
+from pathlib import Path
+def read(argv):
+ p=subprocess.run(argv,capture_output=True,text=True,timeout=5,check=True)
+ return json.loads(p.stdout)
+links={item["ifname"]: "UP" in item.get("flags",[]) for item in read(["ip","-j","link","show"])
+       if item["ifname"] in {"wg0","oc-office"}}
+routes=[{key:r[key] for key in ("table","dst","type","dev","metric") if key in r}
+        for r in read(["ip","-j","-4","route","show","table","all"])
+        if r.get("dst")=="default" or r.get("dev")=="oc-office"]
+rules=[{key:r[key] for key in ("priority","fwmark","fwmask","table") if key in r}
+       for r in read(["ip","-j","-4","rule","show"]) if "fwmark" in r]
+alive=False
+try:
+ pid=int(Path("/var/lib/kornode-agent/run/oc-office.pid").read_text());os.kill(pid,0);alive=True
+except (OSError,ValueError): pass
+ping=subprocess.run(["ping","-c","1","-W","1","-I","oc-office","10.8.0.1"],
+ stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3)
+print(json.dumps({"links":links,"routes":routes,"rules":rules,
+ "office_pid_alive":alive,"office_check_host_reachable":ping.returncode==0}))
+"""
 
 
 class Worker:
@@ -574,12 +703,12 @@ class Worker:
             },
         }
         if agent:
-            if self.role == "agent-a" and self.case == "routed":
+            if self.role == "agent-a" and self.case in {"routed", "upgrade"}:
                 # The access server of agent-a (P4-04, NL-03) and its wg-easy source (NL-05)
                 # must be reachable on the VM.
                 service["ports"] = [
                     f"{ACCESS_PORT}:{ACCESS_PORT}/tcp",
-                    f"{AWG_PORT}:{AWG_PORT}/udp",
+                    *([f"{AWG_PORT}:{AWG_PORT}/udp"] if self.case == "routed" else []),
                 ]
             if self.role == "agent-b" and self.case == "routed":
                 service["ports"] = ["9100:9100/tcp"]  # NL-05: the "internet" behind the upstream
@@ -609,13 +738,15 @@ class Worker:
                 )
             service["environment"] = {"KORNODE_CONFIG": str(config_path)}
             service["ports"] = ["443:443/tcp"] + (["18444:18444/tcp"] if self.role == "hub" else [])
-            if self.role in {"hub", "ext"} and self.case == "routed":
+            if self.case == "routed" or (self.role == "ext" and self.case == "upgrade"):
                 # NL-03: a client of agent-a reaches the hub test listener from outside;
                 # E2E-07: ext is the "internet" an exit node reaches.
                 service["ports"].append("9100:9100/tcp")
         services = {"node": service}
         compose: dict[str, Any] = {"services": services}
-        if self.role in {"agent-b", "hub"} and self.case == "routed":
+        if (self.role in {"agent-b", "hub"} and self.case == "routed") or (
+            self.role == "agent-b" and self.case == "upgrade"
+        ):
             # Throwaway VPN client of NL-03 and client behind a source of NL-06 / E2E-07: same
             # image, own network namespace, no kornode.
             source_cidr, node_address, client_address = self.source_network()
@@ -765,7 +896,7 @@ class Worker:
             raise ValueError("invalid dpd")
         return self.cli("agent", "set", self.payload["name"], "--dpd", str(dpd))
 
-    def fabric_address(self) -> Any:
+    def interlink_address(self) -> Any:
         if not self.role.startswith("agent-") or self.case != "routed":
             raise ValueError("routed case, agent only")
         out = self.execute(["ip", "-4", "-j", "addr", "show", "dev", "oc-hub0"])[1]
@@ -932,7 +1063,11 @@ class Worker:
 
     def access_setup(self) -> Any:
         """Role access + listener + one user on a case agent (hub only)."""
-        if self.role != "hub" or self.case != "routed" or self.payload["name"] != "agent-a":
+        if (
+            self.role != "hub"
+            or self.case not in {"routed", "upgrade"}
+            or self.payload["name"] != "agent-a"
+        ):
             raise ValueError("routed case, hub, agent-a only")
         host = str(ipaddress.ip_address(self.payload["host"]))
         port, user, password = self.payload["port"], self.payload["user"], self.payload["password"]
@@ -949,10 +1084,10 @@ class Worker:
         return self.cli("agent", "access", "show", "agent-a")
 
     def access_policy(self) -> Any:
-        """Clients of agent-a may use the fabric and leave through the node (fixed policy;
+        """Clients of agent-a may use the interlink and leave through the node (fixed policy;
         neither is implied for the clients of an access node)."""
-        if self.role != "hub" or self.case != "routed":
-            raise ValueError("routed case, hub only")
+        if self.role != "hub" or self.case not in {"routed", "upgrade"}:
+            raise ValueError("access policy case, hub only")
         path = self.directory / "access-policy.json"
         via = self.payload.get("via", "local")
         if via not in {"local", "node:3"}:  # node:3 is agent-b, the second enrolled agent
@@ -960,14 +1095,19 @@ class Worker:
         domain = self.payload.get("domain")
         to: Any = "any"
         if domain is not None:
-            # D-79: only this fabric-zone name leaves through the exit node.
-            if via == "local" or not re.fullmatch(r"[a-z0-9-]{1,63}\.kornode\.internal", domain):
+            # D-79: only this interlink-zone name leaves through the exit node.
+            if via == "local" or not re.fullmatch(r"[a-z0-9-]{1,63}\.kornode\.lan", domain):
                 raise ValueError("invalid domain exit")
             to = {"domains": [domain]}
         rules = [
-            {"id": "clients-fabric", "from": ["clients"], "to": "fabric", "via": "fabric"},
+            {"id": "clients-interlink", "from": ["clients"], "to": "interlink", "via": "interlink"},
             {"id": "clients-out", "from": ["clients"], "to": to, "via": via},
         ]
+        if self.case == "upgrade":
+            # Exercise the common v2 policy subset, not a rename compatibility shim.
+            if self.payload:
+                raise ValueError("upgrade uses a fixed local client policy")
+            rules = [{"id": "clients-out", "from": ["clients"], "to": "any", "via": "local"}]
         atomic(path, {"egress": rules})
         try:
             return self.cli("agent", "egress", "set", "agent-a", "--file", str(path))
@@ -981,8 +1121,8 @@ class Worker:
         return self.cli("agent", "set", "agent-b", "--role", "gateway")
 
     def access_client(self) -> Any:
-        if self.role != "agent-b" or self.case != "routed":
-            raise ValueError("routed case, agent-b only")
+        if self.role != "agent-b" or self.case not in {"routed", "upgrade"}:
+            raise ValueError("access client case, agent-b only")
         o = self.payload
         options = {
             "host": str(ipaddress.ip_address(o["host"])),
@@ -1121,6 +1261,9 @@ class Worker:
         o = self.payload
         endpoint = f"{ipaddress.ip_address(o['endpoint_host'])}:{AWG_PORT}"
         routes = [str(ipaddress.ip_network(route)) for route in o["routes"]]
+        # AllowedIPs filters decrypted source addresses as well as destinations.
+        # Keep the gateway subnet so its ICMP unreachable can reach this client.
+        allowed = list(dict.fromkeys([*routes, AWG_SOURCE_CIDR]))
         if not isinstance(o["config"], str):
             raise ValueError("invalid config")
         lines: list[str] = []
@@ -1137,7 +1280,7 @@ class Worker:
             if key == "PublicKey":
                 lines += [
                     f"Endpoint = {endpoint}",
-                    f"AllowedIPs = {', '.join(routes)}",
+                    f"AllowedIPs = {', '.join(allowed)}",
                     "PersistentKeepalive = 5",
                 ]
         self.compose("up", "-d", "awg-client", timeout=600)
@@ -1159,7 +1302,7 @@ class Worker:
         return {"stopped": True}
 
     def access_client_stop(self) -> Any:
-        if self.role != "agent-b" or self.case != "routed":
+        if self.role != "agent-b" or self.case not in {"routed", "upgrade"}:
             raise ValueError("routed case, agent-b only")
         self.compose("stop", "client")
         return {"stopped": True}
@@ -1187,7 +1330,7 @@ class Worker:
         )
         return json.loads(data)
 
-    def fabric_listen(self) -> Any:
+    def interlink_listen(self) -> Any:
         if self.role not in {"hub", "ext"} and not self.role.startswith("agent-"):
             raise ValueError("routed case only")
         if self.case != "routed":
@@ -1205,7 +1348,7 @@ class Worker:
             self.execute(["python", "-c", LISTEN], data=data, timeout=seconds + 20)[1]
         )
 
-    def fabric_connect(self) -> Any:
+    def interlink_connect(self) -> Any:
         if self.case != "routed":
             raise ValueError("routed case only")
         host = str(ipaddress.ip_address(self.payload["host"]))
@@ -1224,6 +1367,94 @@ class Worker:
             argv = ["docker", "exec", "-i", self.container("client"), "python", "-c", CONNECT]
             return json.loads(self.run(argv, data=data, timeout=20)[1])
         return json.loads(self.execute(["python", "-c", CONNECT], data=data, timeout=20)[1])
+
+    def upgrade_traffic_start(self) -> Any:
+        if self.case != "upgrade" or self.role not in {"ext", "agent-b"}:
+            raise ValueError("upgrade traffic: ext or agent-b only")
+        if self.role == "ext":
+            argv = ["docker", "exec", "-d", self.container(), "python", "-c", UPGRADE_SERVER]
+        else:
+            host = str(ipaddress.IPv4Address(self.payload["host"]))
+            expected = str(ipaddress.IPv4Address(self.payload["expected"]))
+            argv = [
+                "docker",
+                "exec",
+                "-d",
+                self.container("client"),
+                "python",
+                "-c",
+                FORWARD_OBSERVER,
+                host,
+                expected,
+            ]
+        self.run(argv, timeout=20)
+        return {"started": True}
+
+    def upgrade_traffic_status(self) -> Any:
+        if self.case != "upgrade" or self.role != "agent-b":
+            raise ValueError("upgrade traffic: agent-b only")
+        script = 'from pathlib import Path;print(Path("/tmp/kn-upgrade-traffic.json").read_text())'
+        _, data = self.run(
+            ["docker", "exec", self.container("client"), "python", "-c", script],
+            timeout=10,
+        )
+        return json.loads(data)
+
+    def uplink_capture(self) -> Any:
+        """NL-05 packet counts, never packet payloads or a host-netns capture."""
+        if self.case != "routed" or self.role != "agent-a":
+            raise ValueError("NL-05 capture: agent-a only")
+        phase = self.payload["phase"]
+        if phase == "start":
+            host = str(ipaddress.IPv4Address(self.payload["host"]))
+            self.run(
+                [
+                    "docker",
+                    "exec",
+                    "-d",
+                    self.container(),
+                    "python",
+                    "-c",
+                    UPLINK_CAPTURE,
+                    host,
+                ],
+                timeout=20,
+            )
+            return {"started": True}
+        if phase not in {"status", "stop"}:
+            raise ValueError("invalid capture phase")
+        script = 'from pathlib import Path;import json,time\np=Path("/tmp/kn-nl05-capture.json")\n'
+        if phase == "stop":
+            script += (
+                'p.with_suffix(".stop").touch()\n'
+                "for _ in range(50):\n"
+                ' if json.loads(p.read_text())["done"]: break\n'
+                " time.sleep(.1)\n"
+            )
+        script += "print(p.read_text())"
+        return json.loads(self.execute(["python", "-c", script], timeout=10)[1])
+
+    def nl05_snapshot(self) -> Any:
+        """Only routing/process/health metadata from the owned source node."""
+        if self.case != "routed" or self.role != "agent-a":
+            raise ValueError("NL-05 snapshot: agent-a only")
+        return json.loads(self.execute(["python", "-c", NL05_SNAPSHOT], timeout=30)[1])
+
+    def nl05_ext_kill(self) -> Any:
+        """Abrupt upstream loss, without ocserv's graceful session-termination message."""
+        if self.case != "routed" or self.role != "ext":
+            raise ValueError("NL-05 fault: ext only")
+        container = self.container()
+        self.run(["docker", "update", "--restart=no", container], timeout=20)
+        self.run(["docker", "kill", "--signal", "KILL", container], timeout=20)
+        return {"stopped": True}
+
+    def nl05_tunnel_down(self) -> Any:
+        """Diagnostic counterfactual only; never substitutes for the natural outage assertion."""
+        if self.case != "routed" or self.role != "agent-a":
+            raise ValueError("NL-05 diagnostic intervention: agent-a only")
+        self.execute(["ip", "link", "set", "dev", "oc-office", "down"], timeout=10)
+        return {"down": True}
 
     def repair_route(self) -> Any:
         if not self.role.startswith("agent-") or self.case != "route":
@@ -1518,7 +1749,13 @@ class Worker:
             "change",
             "revoke",
             "repair_route",
-            "fabric_address",
+            "upgrade_traffic_start",
+            "upgrade_traffic_status",
+            "uplink_capture",
+            "nl05_snapshot",
+            "nl05_ext_kill",
+            "nl05_tunnel_down",
+            "interlink_address",
             "lan_setup",
             "net_dump",
             "resolved_sets",
@@ -1542,8 +1779,8 @@ class Worker:
             "awg_policy",
             "awg_client",
             "awg_client_stop",
-            "fabric_listen",
-            "fabric_connect",
+            "interlink_listen",
+            "interlink_connect",
             "inject_bundle",
             "rejected",
             "rollback_report",

@@ -13,4 +13,4 @@ ENROLL_USER_RE = re.compile(r"enroll-[0-9]{1,3}-[A-Za-z0-9]{4,32}")
 
 def is_reserved_username(name: str) -> bool:
     lowered = name.lower()
-    return AGENT_USER_RE.match(name) is not None or lowered.startswith(ENROLL_USER_PREFIX)
+    return AGENT_USER_RE.fullmatch(name) is not None or lowered.startswith(ENROLL_USER_PREFIX)

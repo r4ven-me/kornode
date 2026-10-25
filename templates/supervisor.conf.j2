@@ -41,7 +41,10 @@ autostart={{ "true" if config.server.enabled else "false" }}
 ; Without it, ocserv logs to syslog by default, which bypasses supervisor's
 ; stdout capture entirely -- only the handful of messages printed before
 ; ocserv's logging init ever reach ocserv.log.
-command=/usr/sbin/ocserv -f --log-stderr -c {{ config.system.generated_dir }}/ocserv.conf
+; Started through `net wait-ready` (exec, no shell): clients are accepted only after
+; the reconciler converged the kernel once, so a reboot never forwards them before
+; the kill switch and classification exist (fail closed).
+command=/usr/local/bin/korctl net wait-ready -- /usr/sbin/ocserv -f --log-stderr -c {{ config.system.generated_dir }}/ocserv.conf
 autorestart=true
 stdout_logfile={{ config.system.log_dir }}/ocserv.log
 stdout_logfile_maxbytes=0
@@ -129,7 +132,7 @@ redirect_stderr=true
 
 {% if config.control.enabled %}
 [program:control-api]
-; Agent-facing mTLS API on the hub fabric address. Independent of web.enabled.
+; Agent-facing mTLS API on the hub interlink address. Independent of web.enabled.
 ; The address is bound to lo by the reconciler: until it exists the bind
 ; fails and supervisor retries.
 command=/usr/local/bin/python -m kornode.control

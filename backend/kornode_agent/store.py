@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -192,6 +193,13 @@ class Store:
     def load_state(self) -> State:
         state: State = self._read_model(self.state_path, State)
         return state
+
+    def quarantine_state(self) -> Path:
+        """Move a corrupt state file aside (kept for diagnosis, never deleted)."""
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        target = self.state_path.with_name(f"{self.state_path.name}.corrupt-{stamp}")
+        os.replace(self.state_path, target)
+        return target
 
     def save_state(self, state: State) -> None:
         atomic_write(self.state_path, state.model_dump_json(indent=1).encode(), 0o600)

@@ -1,4 +1,21 @@
-# Prompt for the next session — зелёный `e2e.yml`, netlab NL-17/NL-18, «Готово, когда» фазы 4
+# Следующая сессия — интеграционная ветка Interlink / Nodes
+
+> **Текущий приоритет:** читать [INTEGRATION.md](INTEGRATION.md).
+> Работа сохранена в `redesign/interlink-nodes-integration` (checkpoint `9b9ee4d`)
+> и совмещена с аудитным `main` на `33df415`. Проверки объединения:
+> **2014 backend, 84 frontend, 49 Playwright**, lint/typecheck/build/render/parity.
+> Локально исправлен reconnect hook тестового клиента; VM-причина E2E-06
+> не подтверждена, runtime-приёмка остаётся открытой.
+>
+> **Актуальное указание владельца: VPS не трогать.** Не использовать SSH,
+> удалённые логи, старый VM-стенд, деплой, публикацию образов или merge в main.
+> Сначала дальнейшие замечания по UI и согласование scope. Известный дефект
+> применения нового certificate path через reload вместо restart — отдельная
+> задача с регрессией; не менять ради него серверы.
+>
+> Старые разрешения на SSH/push/деплой и списки ниже — история, не текущая команда.
+
+## Историческая передача — зелёный `e2e.yml`, netlab и фазы 4–5
 
 > **Восьмая сессия (2026-10-22), всё влито в `main`:** полный `e2e.yml` зелёный (18 passed / 6 skipped); заглушка E2E-07 снята; netlab NL-17/NL-18, NL-09, `test_examples_kernel.py` (79 passed на hub-VM); E2E NL-13-forwarding и восстановление после 60 с разрыва (passed на четырёх VM); doctor хаба проверяет источники; форма политики агента — общий редактор правил; решения D-80, D-81. NL-05 теперь реальный сценарий (wg-easy 15.4.0 + AmneziaWG userspace, passed на четырёх VM), E2E-06-clients и E2E `examples/` закрыты решением D-82. Полный `e2e.yml` run 39831107108: 20 passed / 1 failed / 2 skipped — упал `test_e2e_04_revoke_...` на действии `hub revoke` («SSH action failed»); отдельно на hub-VM проходит (2 из 3 запусков, третий — известная нестабильность сборки образа). **Открыто:** эта нестабильность E2E-04 в полном прогоне (снять `audit.jsonl` хаба по ходу, если вернётся). Остальное из списка «Что делать дальше» ниже выполнено — читать его как историю.
 >
@@ -69,6 +86,29 @@
 Прочитай по порядку: `CLAUDE.md`, `AGENTS.md`, `docs/redesign/ROADMAP.md` (фаза P4), раздел «Дальнейшие
 действия» в `docs/redesign/PLAN.ru.md`, `docs/redesign/DECISIONS.md` (D-55…D-79, S-07), `docs/spec/07-fabric.md`,
 `docs/runbooks/vm-e2e.md`. Активируй проект Serena `kornode` до поиска по коду.
+
+## Актуальная передача — 2026-10-23 (важнее исторических списков ниже)
+
+В рабочем дереве завершены D-85 (interlink, `kornode.lan`, bundle/v2,
+агент 2.1.0, совместимость YAML/env/.env/правил/agent.yaml/подписанного v1-кэша)
+и раздел Nodes (Overview/Settings/DNS, без Config → Interlink).
+NL-05 исправлен в `backend/kornode_agent/tunnels.py`: три последовательных
+провала существующего check_host останавливают зависший retrying openconnect,
+reconciler вызывается до нового дозвона. Два реальных abrupt-loss прогона прошли.
+
+Проверки: backend lint/mypy; pytest **1334 passed / 104 skipped**; render/parity;
+frontend **48 passed**, build, Playwright **44 passed**. Netlab — **83 unique passed**
+за несколько bounded-прогонов, не один полный запуск.
+
+**Осталось:** новый `test_e2e_06_upgrade_under_interlink_and_client_traffic_gap_at_most_30_seconds`
+падает на восстановлении клиентского трафика после upgrade. Флаг-день SNI
+не объясняет повторное падение на новой базе: совместимая отличающаяся база из
+`15b87a6` собрана под новыми тегами; digest refs и результаты зафиксированы в
+`tests/e2e/ACCEPTANCE-2026-10-23.md`. Старые registry refs и `~/.e2e/env.sh`
+не менялись. Финальный VM-прогон остановлен владельцем из-за длительности;
+run `3168f99d0b3d4658ce3519b0` очищен и закрыт. Новые длинные прогоны без
+отдельного запроса не запускать. Код не коммитился, ветки/push/PR не создавались.
+Сначала разобрать сохранённые diagnostics upgrade, а не повторять полный набор.
 
 ## Что уже сделано (не переделывай)
 - **P2 tails, P3-07…P3-10** (D-55…D-62): CLI агента, управление агентами на хабе (CLI/API/панель), backup/restore,

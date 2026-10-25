@@ -15,23 +15,32 @@ Rootless Docker and non-host networking are unsupported for hub and agents.
 
 ## Upgrades
 
-- Hub first, then agents. The hub serves bundle format versions it knows
-  agents support (`agent_version` from reports); a bundle feature requiring a
-  newer agent is withheld (and the agent is flagged "upgrade required") rather
-  than sent.
-- `bundle.format` is semver-major in the schema id (`bundle.v1`); additive
-  fields only within v1; agents ignore unknown fields marked `x-optional`.
-- Data migrations: registry migrations are forward-only; a pre-upgrade
-  snapshot (`VACUUM INTO`) is taken automatically.
+- **Agents first, then the hub.** An agent of a given release reads the bundle
+  format of the previous hub release and its own (the 2.x agents accept signed
+  `kornode.bundle/v1` on receipt and from cache, and v2), so agents can be upgraded
+  while the old hub still serves them. The hub's writer emits only the current
+  format and stamps `min_agent_version` (never below what the format needs, D-85).
+- An agent below that minimum refuses the new bundles, **keeps forwarding with its
+  cached bundle**, and is flagged `upgrade_required` in the agent API/panel and by
+  `korctl doctor` (`agent-versions`), computed from the `agent_version` of its last
+  report. The hub does not down-compile bundles for old agents.
+- Release-specific steps (e.g. the D-85 SNI flag day: `kornode-agent set-hub-name`, D-93)
+  are in `docs/runbooks/upgrade-2.0.md` and spec 10.
+- `bundle.format` is semver-major in the schema id (`bundle.v2`); additive
+  fields only within a major; agents ignore unknown fields marked `x-optional`.
+- Data migrations: registry migrations are forward-only. Before upgrading an
+  existing registry the migrator writes a `VACUUM INTO` snapshot
+  `data_dir/backups/registry/pre-migration-v<N>-<UTC>.db` under a file lock; if
+  the snapshot fails, nothing is migrated. Rolling back the image means restoring
+  that snapshot (`docs/runbooks/hub-recovery.md`).
 
 ## Observability
 
-- Hub `/metrics` (Prometheus, admin-auth or bound to fabric address):
-  agents online/offline, applied vs desired lag, rollbacks, reconciler drift
-  events, tunnel up/down, bundle compile duration.
-- Agents expose the same reconciler/tunnel metrics only via reports (no
-  listening port); the hub re-exports them per agent label.
-- Logs: JSON lines option (`system.log_format: json`) for both images.
+- Today: agent reports (state, versions, tunnels, drift, errors) in the agent API
+  and panel, `korctl doctor`, the reconciler status (`korctl net status` via the
+  API/panel), and plain-text logs per supervisor program.
+- Planned, not in 2.0: a hub `/metrics` endpoint (Prometheus) re-exporting agent
+  metrics per agent label, and a JSON log format option.
 
 ## Operational runbooks (written in P3–P5 under `docs/runbooks/`)
 

@@ -5,10 +5,11 @@ import {
   applyNetPlan,
   login,
   saveAuthMethodsSettings,
-  saveFabricSettings,
+  saveInterlinkSettings,
   saveInternalDnsSettings,
   saveRoutingSettings,
   saveUpstreamProfile,
+  saveWebSettings,
   setCsrfToken,
   testOtpEmail,
   testOtpTelegram,
@@ -131,8 +132,8 @@ describe("OTP delivery settings API", () => {
   });
 });
 
-describe("saveFabricSettings", () => {
-  it("sends the structured fabric payload", async () => {
+describe("saveInterlinkSettings", () => {
+  it("sends the structured interlink payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "saved" }), {
         status: 200,
@@ -141,18 +142,18 @@ describe("saveFabricSettings", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await saveFabricSettings("session", {
+    await saveInterlinkSettings("session", {
       node_id: 3,
       cidr: "10.99.0.0/24",
       client_pool: "10.100.{id}.0/24",
       source_pool: "10.8.{id}.0/24",
       enroll_pool: "10.99.255.240/28",
-      domain: "kornode.internal",
+      domain: "kornode.lan",
       reserved: ["10.200.0.0/16"]
     });
 
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(path).toBe("/api/fabric");
+    expect(path).toBe("/api/interlink");
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(String(init.body))).toEqual({
       node_id: 3,
@@ -160,7 +161,7 @@ describe("saveFabricSettings", () => {
       client_pool: "10.100.{id}.0/24",
       source_pool: "10.8.{id}.0/24",
       enroll_pool: "10.99.255.240/28",
-      domain: "kornode.internal",
+      domain: "kornode.lan",
       reserved: ["10.200.0.0/16"]
     });
   });
@@ -293,5 +294,24 @@ describe("network view helpers", () => {
 
   it("sums reconciler drift counters", () => {
     expect(netDriftCount({ running: true, drift: { rules: 2, routes: 3 } })).toBe(5);
+  });
+});
+
+describe("web settings reauthentication", () => {
+  const base = {
+    enabled: true, listen: "127.0.0.1", port: 8443, tls: true, allow_insecure_http: false,
+    trusted_proxies: [], admin_user: "admin", terminal_enabled: true, terminal_idle_timeout: 900,
+    terminal_max_sessions: 2, client_sync_enabled: false, session_lifetime: 43200,
+    session_cookie_secure: true
+  };
+  it("sends the confirmation password and code only in the request body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "saved" }), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await saveWebSettings("session", { ...base, current_password: "secret", totp_code: "123456" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/web-config/settings");
+    expect(JSON.parse(init.body)).toMatchObject({ terminal_enabled: true, current_password: "secret", totp_code: "123456" });
   });
 });

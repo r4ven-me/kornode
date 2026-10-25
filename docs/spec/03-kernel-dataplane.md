@@ -27,7 +27,7 @@ A dotted device name is a literal `/proc/sys` component, e.g.
 
 | Priority | Rule | Purpose |
 | --- | --- | --- |
-| 90 | `lookup main suppress_prefixlength 0` | Connected/specific routes (LAN, docker, fabric sessions on hub) beat policies; only the default route of main is suppressed. |
+| 90 | `lookup main suppress_prefixlength 0` | Connected/specific routes (LAN, docker, interlink sessions on hub) beat policies; only the default route of main is suppressed. |
 | 95 | `to <carrier addr>/32 lookup main` (one per active tunnel endpoint) | Tunnel carrier never enters its own tunnel. |
 | 100+i | `fwmark <mark_i>/0xffffff00 lookup <12000+i>` | One per exit. |
 
@@ -38,9 +38,11 @@ Exit table contents:
 - `unreachable default metric 4096` — permanent; when the exit device
   disappears the kernel removes the first route and the second one rejects
   traffic. This is the routing-layer kill switch (D-11).
-- Exits with `kill_switch: false` get `throw default metric 4096` instead
-  (falls back to further rules / main).
-- On the hub, the `fabric` exit has no default: its table is populated with
+- Exits with `kill_switch: false` get `throw default metric 4096` instead.
+  The throw alone would send a flow to main un-NATed; the fall-through to later
+  rules is done by classification (spec 02): a down kill-switch-free upstream
+  marks nothing new, and its old marks are rejected in forward/postrouting.
+- On the hub, the `interlink` exit has no default: its table is populated with
   `<prefix> dev vpnsN` copies maintained from ocserv `iroute` sessions — in
   practice rule 90 already resolves them via main; the table exists for
   marking symmetry and holds `unreachable default`.
@@ -49,7 +51,7 @@ Exit table contents:
 
 ```
 table inet kornode {
-  set fabric_ifaces   { type ifname; }                     # tun to hub / vpns* of agents
+  set interlink_ifaces   { type ifname; }                     # tun to hub / vpns* of agents
   set <set>_v4 / _v6  { type ipv4_addr; flags interval, timeout; auto-merge; }
   map exit_ok         { type mark : ifname; }              # mark → expected oif
 
@@ -63,7 +65,8 @@ table inet kornode {
   chain validate_connection {
                        ct mark & 0xffffff00 == <mark_i> ct label == <parenthesized OR of identity bit indices> return  # per current exit
                        drop }
-  chain egress_classify       { … compiled rules for clients/sources/fabric … }
+  chain egress_classify       { … compiled rules for clients/sources/interlink … }
+
   chain egress_classify_host  { … compiled rules for host … }
   chain input        { type filter hook input priority mangle; policy accept;
                        ct state new iifname @tunnel_ifaces ct mark set <mark of that iface's exit>
@@ -123,7 +126,7 @@ Notes:
   replies use the same tunnel (existing behaviour, kept).
 - The `local` exit also gets a mark (no ip rule needed: unmatched marks fall
   through to main). NAT is decided by the mark alone, never by source
-  address, so traffic arriving from the fabric (`from: fabric`, exit-via-node)
+  address, so traffic arriving from the interlink (`from: interlink`, exit-via-node)
   is masqueraded on the gateway node exactly like local clients.
 - Replies destined to this node's client pool or sources are never marked
   (implicit rule 1/2 in 02).
@@ -139,7 +142,7 @@ Notes:
 - MSS clamp to route MTU in `forward` and `postrouting` for all traffic
   leaving or entering tunnel/source interfaces.
 - openconnect tun MTU: as negotiated; agents report it in status.
-- Fabric over TCP adds ~60–100 bytes; documented recommended client MTU for
+- Interlink over TCP adds ~60–100 bytes; documented recommended client MTU for
   sources is 1280.
 
 ## Hub specifics
@@ -147,7 +150,7 @@ Notes:
 - Forwarding between `vpns*` devices is allowed (agent ↔ agent via hub).
 - ocserv `restrict-user-to-*` is not used (it shells out to iptables,
   D-44). `enroll` sessions are limited by a static rule set: from
-  `fabric.enroll_pool` only `tcp` to the hub fabric address on `control.port`
+  `interlink.enroll_pool` only `tcp` to the hub interlink address on `control.port`
   is accepted in `input`; `forward` drops the pool in both directions.
 - Those rules match by source address, so they only hold if a session cannot
   forge one. `prerouting` therefore starts with a strict reverse-path check

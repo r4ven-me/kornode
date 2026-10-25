@@ -31,7 +31,7 @@ test("Config hub exposes every config sub-section behind its own sub-nav pill", 
     ["Authentication", "Authentication methods"],
     ["Certificates", "Authority certificates"],
     ["Identity · Experimental", "Group routing"],
-    ["Upstream", "Upstream"],
+    ["Upstream", "Upstream profiles"],
     ["DNS", "DNS"],
     ["Web / API", "Web / API panel"],
     ["Advanced", "Persistent YAML"]
@@ -115,12 +115,11 @@ test("DNS Save persists one atomic draft and applies it", async ({ page }) => {
 
   await page.getByRole("button", { name: "Config", exact: true }).click();
   await page.getByRole("button", { name: "DNS", exact: true }).click();
-  await expect(page.getByLabel("DNS request path")).toContainText("Direct server DNS");
-
-  await page.getByLabel("Use built-in resolver").check();
+  await expect(page.getByLabel("DNS request path")).toContainText("Built-in resolver");
+  await expect(page.getByLabel("Use built-in resolver")).toHaveCount(0);
   await page.getByLabel("Enable local records").check();
   await page.getByLabel("Enable blocklist").check();
-  await page.getByLabel("Default upstream DNS servers").fill("9.9.9.1");
+  await page.getByLabel("Upstream DNS servers", { exact: true }).fill("9.9.9.1");
   await page.getByLabel("DNS servers (same as Server)").fill("9.9.9.9\n1.1.1.1");
   await page.getByRole("tab", { name: "DNS forwarding", exact: true }).click();
   await page.getByLabel("DNS servers", { exact: true }).fill("1.1.1.1\n8.8.8.8");
@@ -133,12 +132,12 @@ test("DNS Save persists one atomic draft and applies it", async ({ page }) => {
     mutations.find((entry) => entry.path === "/api/internal-dns/settings")?.body ?? "{}"
   );
   expect(body).toMatchObject({
-    resolver_enabled: true,
+
     listen: "10.10.10.1",
     port: 53,
     blocklist_enabled: true,
     local_records_enabled: true,
-    default_upstreams: ["9.9.9.1"],
+    upstreams: ["9.9.9.1"],
     server_dns: ["9.9.9.9", "1.1.1.1"],
     forward_upstreams: ["1.1.1.1", "8.8.8.8"],
     forward_domains: ["example.com", "example.net"]
@@ -147,69 +146,33 @@ test("DNS Save persists one atomic draft and applies it", async ({ page }) => {
     .toBe(false);
 });
 
-test("routing controls are inert until Upstream profiles are enabled", async ({ page }) => {
-  // Regression test: routing.mode/host_traffic/host_mode and the Routes/
-  // Domains lists have no effect at all while upstream.enabled is false
-  // (VPN users just get plain NAT through the host regardless) -- the UI
-  // used to leave them fully interactive anyway, inviting an admin to
-  // "set" something that silently does nothing.
-  await mockApi(page, {
-    upstreamEnabled: false,
-    upstreamProfiles: [
-      {
-        name: "alpha",
-        server: "alpha.example.com",
-        port: "443",
-        auth_type: "password",
-        username: "user",
-        enabled: true
-      }
-    ]
-  });
+test("Upstream profiles stay manageable while disabled and routing belongs in Network", async ({ page }) => {
+  await mockApi(page, { upstreamEnabled: false, upstreamProfiles: [{ name: "alpha", server: "alpha.example.com", port: "443", auth_type: "password", username: "user", enabled: true }] });
   await signIn(page);
-
   await page.getByRole("button", { name: "Config", exact: true }).click();
   await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  await page.getByRole("tab", { name: "Routing", exact: true }).click();
-  await expect(page.getByText("Profiles disabled", { exact: true })).toBeVisible();
-  // Not getByLabel("Mode"): the select's accessible name includes its selected option.
-  await expect(
-    page.locator("label").filter({ hasText: "Mode" }).first().locator("select")
-  ).toBeDisabled();
-
-  await page.getByRole("tab", { name: "Profiles", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Upstream profiles", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Routing", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("tab", { name: "Host traffic" }).click();
-  await expect(
-    dialog.locator("label").filter({ hasText: "Route this host" }).locator("input")
-  ).toBeDisabled();
-  // Host mode only appears once Host traffic is checked -- it can't be, so
-  // it isn't rendered at all while Upstream profiles are off.
-  await expect(
-    dialog.locator("label").filter({ hasText: "Host mode" }).locator("select")
-  ).toHaveCount(0);
-  // Infrastructure settings that matter regardless of Upstream profiles
-  // (plain NAT through the host uses main_interface/fwmark/table_id/
-  // nft_prefix too) live under the collapsed "Advanced" details and stay
-  // editable.
-  await dialog.getByText("Advanced", { exact: true }).click();
+  await dialog.getByRole("tab", { name: "Host DNS & uplink" }).click();
   await expect(dialog.getByLabel("Main interface", { exact: true })).toBeEnabled();
-  await expect(dialog.getByLabel("fwmark", { exact: true })).toBeEnabled();
+  await expect(dialog.getByRole("combobox", { name: "Host DNS", exact: true })).toBeEnabled();
+  await expect(dialog.getByText("Host mode", { exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Egress rules", exact: true })).toBeVisible();
 });
 
-test("Upstream asks for a profile first when none exists", async ({ page }) => {
-  await mockApi(page, { upstreamEnabled: false });
+test("Upstream with no profiles offers creation without obsolete routing controls", async ({ page }) => {
+  await mockApi(page);
   await signIn(page);
-
   await page.getByRole("button", { name: "Config", exact: true }).click();
   await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  await page.getByRole("tab", { name: "Routing", exact: true }).click();
-  await expect(page.getByText("Upstream needs at least one profile")).toBeVisible();
-  await expect(page.locator("label").filter({ hasText: "Mode" })).toHaveCount(0);
-
-  await page.getByRole("button", { name: "Go to Profiles", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Upstream profiles", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add profile", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Routing", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Add profile", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "New profile" })).toBeVisible();
 });
 
 test("shows the lazy xterm view only when terminal access is enabled", async ({ page }) => {
@@ -262,7 +225,9 @@ test("core management buttons call expected API endpoints with CSRF", async ({ p
   await page.getByRole("button", { name: "Start", exact: true }).click();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await page.getByRole("button", { name: "Render configs", exact: true }).click();
-  await page.getByRole("button", { name: "Apply firewall/NAT", exact: true }).click();
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  await page.getByRole("button", { name: "Kernel diagnostics", exact: true }).click();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
   await page.getByLabel("Username").fill("bob");
@@ -276,10 +241,11 @@ test("core management buttons call expected API endpoints with CSRF", async ({ p
 
   await page.getByRole("button", { name: "Config", exact: true }).click();
   await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  await page.getByRole("tab", { name: "Routing", exact: true }).click();
-  const routesPanel = page.getByRole("heading", { name: "Routes", exact: true }).locator("../..");
-  await routesPanel.locator("textarea").fill("10.30.0.0/16\n203.0.113.9");
-  await routesPanel.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  await page.getByRole("tab", { name: "JSON (advanced)", exact: true }).click();
+  await page.getByLabel("Policy (JSON: sources, sets, egress)").fill(JSON.stringify({ sources: [], sets: {}, egress: [{ from: ["clients"], to: "any", via: "local" }] }));
+  await page.getByRole("button", { name: "Save policy", exact: true }).click();
+  await expect.poll(() => mutations.some(m => m.path === "/api/egress" && m.method === "PUT")).toBe(true);
 
   const observed = mutations.map(({ method, path, csrf }) => ({ method, path, csrf }));
   expect(observed).toEqual(
@@ -291,7 +257,7 @@ test("core management buttons call expected API endpoints with CSRF", async ({ p
       { method: "POST", path: "/api/users", csrf: "csrf" },
       { method: "DELETE", path: "/api/users/alice", csrf: "csrf" },
       { method: "POST", path: "/api/sessions/alice/kick", csrf: "csrf" },
-      { method: "PUT", path: "/api/routing/routes", csrf: "csrf" }
+      { method: "PUT", path: "/api/egress", csrf: "csrf" }
     ])
   );
 });
@@ -343,69 +309,18 @@ test("group membership dialogs fetch fresh data instead of trusting stale state"
   await expect(devopsRow.locator("input[type=checkbox]")).not.toBeChecked();
 });
 
-test("a profile's relay lists are edited in Upstream's Routing tab and sent as arrays", async ({
-  page
-}) => {
-  // The per-profile relay lists (route_clients_enabled/routes/domains) moved
-  // from the profile dialog to Config → Upstream's Routing tab; they still
-  // save through the profile endpoint, with the CSV/newline lists split
-  // into arrays.
-  const mutations: MockOptions["mutations"] = [];
-  await mockApi(page, {
-    mutations,
-    upstreamEnabled: true,
-    upstreamProfiles: [
-      {
-        name: "finance",
-        server: "finance.example.com",
-        port: "443",
-        auth_type: "password",
-        username: "finance-user",
-        route_clients_enabled: false,
-        enabled: true
-      }
-    ]
-  });
+test("Network stores named route/domain sets and upstream rules as arrays", async ({ page }) => {
+  const mutations: NonNullable<MockOptions["mutations"]> = [];
+  await mockApi(page, { mutations });
   await signIn(page);
-
-  await page.getByRole("button", { name: "Config", exact: true }).click();
-  await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  await page.getByRole("tab", { name: "Routing", exact: true }).click();
-  await page.getByRole("button", { name: "Edit relay lists of finance", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Relay through finance" })).toBeVisible();
-
-  await page.getByLabel("Relay VPN users’ traffic through this profile", { exact: true }).check();
-  await page.getByLabel("Relay routes", { exact: true }).fill("10.50.0.0/16, 10.60.0.0/16");
-  await page
-    .getByLabel("Relay domains", { exact: true })
-    .fill("internal.example.com\ncorp.example.com");
-  await page.getByLabel("Route files", { exact: true }).fill("/lists/routes.txt");
-  await page
-    .getByLabel("Route URLs", { exact: true })
-    .fill("https://lists.example.com/routes.txt");
-  await page.getByLabel("Domain files", { exact: true }).fill("/lists/domains.txt");
-  await page
-    .getByLabel("Domain URLs", { exact: true })
-    .fill("https://lists.example.com/domains.txt");
-  await page.getByRole("button", { name: "Save relay lists", exact: true }).click();
-
-  await expect(page.getByRole("heading", { name: "Relay through finance" })).toHaveCount(0);
-  const saved = mutations.find(
-    (mutation) => mutation.method === "POST" && mutation.path === "/api/upstream/profiles"
-  );
-  expect(saved).toBeDefined();
-  const payload = JSON.parse(saved?.body ?? "{}");
-  expect(payload.name).toBe("finance");
-  expect(payload.server).toBe("finance.example.com");
-  expect(payload.route_clients_enabled).toBe(true);
-  expect(payload.routes).toEqual(["10.50.0.0/16", "10.60.0.0/16"]);
-  expect(payload.domains).toEqual(["internal.example.com", "corp.example.com"]);
-  expect(payload.routes_files).toEqual(["/lists/routes.txt"]);
-  expect(payload.routes_urls).toEqual(["https://lists.example.com/routes.txt"]);
-  expect(payload.domains_files).toEqual(["/lists/domains.txt"]);
-  expect(payload.domains_urls).toEqual(["https://lists.example.com/domains.txt"]);
-  // Write-only secrets are never resent -- the server keeps the stored ones.
-  expect(payload.password).toBeNull();
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  await page.getByRole("tab", { name: "JSON (advanced)", exact: true }).click();
+  const policy = { sources: [], sets: { finance: { routes: ["10.50.0.0/16", "10.60.0.0/16"], domains: ["corp.example.com"], route_files: ["/lists/routes.txt"], route_urls: ["https://lists.example.com/routes.txt"], domain_files: ["/lists/domains.txt"], domain_urls: ["https://lists.example.com/domains.txt"] } }, egress: [{ from: ["clients"], to: { set: "finance" }, via: "upstream:finance", kill_switch: true }] };
+  await page.getByLabel("Policy (JSON: sources, sets, egress)").fill(JSON.stringify(policy));
+  await page.getByRole("button", { name: "Save policy", exact: true }).click();
+  await expect.poll(() => mutations.find(m => m.method === "PUT" && m.path === "/api/egress")).toBeTruthy();
+  expect(JSON.parse(mutations.find(m => m.path === "/api/egress")?.body ?? "{}")).toEqual(policy);
+  expect(mutations.some(m => m.path.startsWith("/api/routing/"))).toBe(false);
 });
 
 test("a new profile starts with every toggle off", async ({ page }) => {
@@ -422,26 +337,23 @@ test("a new profile starts with every toggle off", async ({ page }) => {
   const dialog = page.getByRole("dialog");
 
   for (const label of [
-    "Turn on upstream profiles (all profiles)",
+
     "This profile enabled",
     "No cert check"
   ]) {
     await expect(dialog.getByLabel(label, { exact: true })).not.toBeChecked();
   }
-  await dialog.getByRole("tab", { name: "Host traffic & sync" }).click();
-  await expect(
-    dialog.getByLabel("Route this host’s traffic through this profile", { exact: true })
-  ).not.toBeChecked();
+  await expect(dialog.getByRole("tab", { name: "Host traffic & sync" })).toHaveCount(0);
+  await expect(dialog.getByLabel("Route this host’s traffic through this profile", { exact: true })).toHaveCount(0);
 });
 
 test("editing an existing profile keeps the actual profiles-enabled state, not a hardcoded default", async ({
   page
 }) => {
-  // Regression test: editing any profile used to always show "Turn on
-  // Upstream (all profiles)" as checked regardless of the real
-  // upstream.enabled, so saving an unrelated edit while Upstream was
-  // deliberately off would silently turn it back on.
+  // Editing a profile must not silently enable the upstream feature.
+  const mutations: NonNullable<MockOptions["mutations"]> = [];
   await mockApi(page, {
+    mutations,
     upstreamEnabled: false,
     upstreamProfiles: [
       {
@@ -460,118 +372,36 @@ test("editing an existing profile keeps the actual profiles-enabled state, not a
   await page.getByRole("button", { name: "Upstream", exact: true }).click();
   await page.getByRole("button", { name: "Edit profile" }).first().click();
 
-  await expect(
-    page.getByRole("dialog").getByLabel("Turn on upstream profiles (all profiles)", { exact: true })
-  ).not.toBeChecked();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("This profile enabled", { exact: true })).toBeChecked();
+  await expect(dialog.getByLabel("Turn on upstream profiles (all profiles)", { exact: true })).toHaveCount(0);
+  await dialog.getByLabel("Server", { exact: true }).fill("new.example.com");
+  await dialog.getByRole("button", { name: "Save profile", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Profiles disabled", { exact: true })).toBeVisible();
+  expect(mutations.some(m => m.path === "/api/upstream/settings")).toBe(false);
+  expect(JSON.parse(mutations.find(m => m.path === "/api/upstream/profiles")?.body ?? "{}")).toMatchObject({ name: "alpha", server: "new.example.com", enabled: true });
 });
 
-test("creating a profile can route host traffic, including server-pushed lists", async ({
-  page
-}) => {
-  const mutations: MockOptions["mutations"] = [];
+test("creating a profile saves connection fields without removed relay/sync controls", async ({ page }) => {
+  const mutations: NonNullable<MockOptions["mutations"]> = [];
   await mockApi(page, { mutations });
   await signIn(page);
-
   await page.getByRole("button", { name: "Config", exact: true }).click();
   await page.getByRole("button", { name: "Upstream", exact: true }).click();
   await page.getByRole("button", { name: "Add profile", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "New profile" })).toBeVisible();
-  // Relaying VPN users' traffic is configured in the Routing tab, not here.
-  await expect(page.getByLabel("Relay routes", { exact: true })).toHaveCount(0);
-
-  await page.getByLabel("Name", { exact: true }).fill("finance");
-  await page.getByLabel("Server", { exact: true }).fill("finance.example.com");
-  await page.getByLabel("Username", { exact: true }).fill("finance-user");
-  await page.getByLabel("Password", { exact: true }).fill("finance-pass");
-  await page.getByRole("tab", { name: "Host traffic & sync" }).click();
-  await page.getByLabel("Route this host’s traffic through this profile", { exact: true }).check();
-  await page.getByLabel("Host routes", { exact: true }).fill("10.90.0.0/16");
-  await page.getByLabel("Host domains", { exact: true }).fill("finance-internal.corp");
-  await page.getByLabel("Use routes and domains pushed by the server", { exact: true }).check();
-  await page.getByLabel("Sync URL", { exact: true }).fill("https://10.10.10.1:8443");
-  await page.getByLabel("Sync interval (s)", { exact: true }).fill("120");
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
-
-  await expect(page.getByRole("heading", { name: "New profile" })).toHaveCount(0);
-  const saved = mutations.find(
-    (mutation) => mutation.method === "POST" && mutation.path === "/api/upstream/profiles"
-  );
-  expect(saved).toBeDefined();
-  const payload = JSON.parse(saved?.body ?? "{}");
-  expect(payload.route_host_enabled).toBe(true);
-  expect(payload.host_routes).toEqual(["10.90.0.0/16"]);
-  expect(payload.host_domains).toEqual(["finance-internal.corp"]);
-  expect(payload.accept_server_routes).toBe(true);
-  expect(payload.sync_url).toBe("https://10.10.10.1:8443");
-  expect(payload.sync_interval).toBe(120);
-  expect(payload.sync_verify_tls).toBe(false);
-  // route_clients_enabled left at its default draft state (false).
-  expect(payload.route_clients_enabled).toBe(false);
-});
-
-test("the profiles table shows server-pushed lists and syncs them on demand", async ({
-  page
-}) => {
-  const mutations: MockOptions["mutations"] = [];
-  await mockApi(page, {
-    mutations,
-    upstreamEnabled: true,
-    upstreamProfiles: [
-      {
-        name: "office",
-        server: "vpn.example.com",
-        port: "443",
-        auth_type: "password",
-        username: "user",
-        route_host_enabled: true,
-        accept_server_routes: true,
-        sync_url: "https://10.10.10.1:8443",
-        enabled: true
-      }
-    ],
-    upstreamStatus: {
-      active_profile: "office",
-      connections: [
-        {
-          profile: "office",
-          interface: "oc-middle0",
-          connected: true,
-          local_ip: "10.10.10.7",
-          remote: "203.0.113.9",
-          server_routing: {
-            accept: true,
-            active: true,
-            routes: ["10.20.0.0/16", "10.30.0.0/16"],
-            domains: ["corp.example.com"],
-            dns: ["10.10.10.1"],
-            source: "handshake",
-            version: "",
-            updated_at: 1,
-            synced_at: 0,
-            sync_error: "",
-            warnings: []
-          }
-        }
-      ]
-    }
-  });
-  await signIn(page);
-
-  await page.getByRole("button", { name: "Config", exact: true }).click();
-  await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  const row = page.locator(".upstream-profiles-panel tbody tr", { hasText: "office" });
-  await expect(row.getByText("2 routes / 1 domains")).toBeVisible();
-  await expect(row.locator(".pill", { hasText: "received" })).toBeVisible();
-
-  await row.getByRole("button", { name: "Sync server lists now", exact: true }).click();
-  await expect
-    .poll(() =>
-      mutations.some(
-        (mutation) =>
-          mutation.method === "POST" && mutation.path === "/api/upstream/profiles/office/sync"
-      )
-    )
-    .toBe(true);
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Name", { exact: true }).fill("finance");
+  await dialog.getByLabel("Server", { exact: true }).fill("finance.example.com");
+  await dialog.getByLabel("Username", { exact: true }).fill("finance-user");
+  await dialog.getByLabel("Password", { exact: true }).fill("finance-pass");
+  await expect(dialog.getByRole("tab", { name: "Host traffic & sync" })).toHaveCount(0);
+  await expect(dialog.getByLabel("Relay routes", { exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Save profile", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const payload = JSON.parse(mutations.find(m => m.path === "/api/upstream/profiles")?.body ?? "{}");
+  expect(payload).toMatchObject({ name: "finance", server: "finance.example.com", username: "finance-user", password: "finance-pass", enabled: false });
+  for (const removed of ["host_routes", "host_domains", "sync_url", "route_host_enabled", "route_clients_enabled", "accept_server_routes"]) expect(payload).not.toHaveProperty(removed);
 });
 
 test("profile list shows the default profile first, then connected profiles, then the rest in order", async ({
@@ -694,203 +524,34 @@ test("making a different profile default asks for confirmation before switching"
   expect(JSON.parse(saved?.body ?? "{}").profile).toBe("bravo");
 });
 
-test("toggling host-traffic routing sends host_traffic/host_mode to the API", async ({
-  page
-}) => {
-  const mutations: MockOptions["mutations"] = [];
+test("Host DNS and uplink save through the current routing settings endpoint", async ({ page }) => {
+  const mutations: NonNullable<MockOptions["mutations"]> = [];
   await mockApi(page, { mutations, upstreamEnabled: true });
   await signIn(page);
-
   await page.getByRole("button", { name: "Config", exact: true }).click();
   await page.getByRole("button", { name: "Upstream", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByText("Host traffic", { exact: true }).click();
-  await dialog
-    .locator("label")
-    .filter({ hasText: "Route this host" })
-    .locator("input")
-    .check();
-  // Not getByLabel: this <select>'s computed accessible name concatenates
-  // the label text with its own currently-selected option ("Host
-  // modeFull (all host traffic)"), so an exact label match never hits.
-  await dialog
-    .locator("label")
-    .filter({ hasText: "Host mode" })
-    .locator("select")
-    .selectOption("split");
-  await dialog
-    .locator("label")
-    .filter({ hasText: "Host DNS" })
-    .locator("select")
-    .selectOption("resolv_conf");
-  await dialog.locator('button[type="submit"]').click();
-  // onSave awaits three sequential saves (upstream settings, check host,
-  // routing settings) before closing the dialog -- wait for that instead of
-  // a fixed timeout, since the routing/settings POST is the last of the three.
+  await dialog.getByRole("tab", { name: "Host DNS & uplink" }).click();
+  await dialog.getByRole("combobox", { name: "Host DNS", exact: true }).selectOption("resolv_conf");
+  await dialog.getByLabel("Main interface", { exact: true }).fill("eth1");
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-
-  const saved = mutations.find(
-    (mutation) => mutation.method === "POST" && mutation.path === "/api/routing/settings"
-  );
-  expect(saved).toBeDefined();
-  const payload = JSON.parse(saved?.body ?? "{}");
-  expect(payload.host_traffic).toBe(true);
-  expect(payload.host_mode).toBe("split");
-  expect(payload.host_dns).toBe("resolv_conf");
+  const saved = mutations.find(m => m.path === "/api/routing/settings");
+  expect(saved?.csrf).toBe("csrf");
+  expect(JSON.parse(saved?.body ?? "{}")).toEqual({ host_dns: "resolv_conf", main_interface: "eth1" });
 });
 
-test("host split routing saves to its own dedicated routes endpoint, not the profile's", async ({
-  page
-}) => {
-  const mutations: MockOptions["mutations"] = [];
-  await mockApi(page, { mutations, upstreamEnabled: true });
+test("Network stores host routing in egress rather than removed host split endpoints", async ({ page }) => {
+  const mutations: NonNullable<MockOptions["mutations"]> = [];
+  await mockApi(page, { mutations });
   await signIn(page);
-
-  await page.getByRole("button", { name: "Config", exact: true }).click();
-  await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByText("Host traffic", { exact: true }).click();
-
-  // Host routes/domains fields only appear once host traffic + split mode
-  // are both on -- same progressive-disclosure pattern as the profile's.
-  await expect(dialog.getByRole("heading", { name: "Host routes" })).toHaveCount(0);
-  await dialog
-    .locator("label")
-    .filter({ hasText: "Route this host" })
-    .locator("input")
-    .check();
-  await dialog
-    .locator("label")
-    .filter({ hasText: "Host mode" })
-    .locator("select")
-    .selectOption("split");
-  await dialog.getByRole("tab", { name: "Host routes" }).click();
-
-  const hostRoutesPanel = dialog
-    .getByRole("heading", { name: "Host routes", exact: true })
-    .locator("../..");
-  await hostRoutesPanel.locator("textarea").fill("10.90.0.0/16");
-  // Saving triggers a PUT followed by a full state reload, which -- since
-  // the mock's /api/config never reflects host_traffic -- resets the draft
-  // and makes this whole panel disappear again; wait for the PUT response
-  // itself rather than any UI state that won't survive that reload.
-  await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/routing/host-routes") && response.request().method() === "PUT"
-    ),
-    hostRoutesPanel.getByRole("button", { name: "Save", exact: true }).click()
-  ]);
-
-  const savedRoutes = mutations.find(
-    (mutation) => mutation.method === "PUT" && mutation.path === "/api/routing/host-routes"
-  );
-  expect(JSON.parse(savedRoutes?.body ?? "{}").items).toEqual(["10.90.0.0/16"]);
-  // Never touched the profile's own routes endpoint.
-  expect(
-    mutations.some((mutation) => mutation.path === "/api/routing/routes" && mutation.method === "PUT")
-  ).toBe(false);
-});
-
-test("host split domains save to their own dedicated endpoint, not the profile's", async ({
-  page
-}) => {
-  const mutations: MockOptions["mutations"] = [];
-  await mockApi(page, { mutations, upstreamEnabled: true });
-  await signIn(page);
-
-  await page.getByRole("button", { name: "Config", exact: true }).click();
-  await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByText("Host traffic", { exact: true }).click();
-
-  await dialog
-    .locator("label")
-    .filter({ hasText: "Route this host" })
-    .locator("input")
-    .check();
-  await dialog
-    .locator("label")
-    .filter({ hasText: "Host mode" })
-    .locator("select")
-    .selectOption("split");
-  await dialog.getByRole("tab", { name: "Host routes" }).click();
-
-  const hostDomainsPanel = dialog
-    .getByRole("heading", { name: "Host domains", exact: true })
-    .locator("../..");
-  await hostDomainsPanel.locator("textarea").fill("intranet.example");
-  await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/routing/host-domains") &&
-        response.request().method() === "PUT"
-    ),
-    hostDomainsPanel.getByRole("button", { name: "Save", exact: true }).click()
-  ]);
-
-  const savedDomains = mutations.find(
-    (mutation) => mutation.method === "PUT" && mutation.path === "/api/routing/host-domains"
-  );
-  expect(JSON.parse(savedDomains?.body ?? "{}").items).toEqual(["intranet.example"]);
-  expect(
-    mutations.some(
-      (mutation) => mutation.path === "/api/routing/domains" && mutation.method === "PUT"
-    )
-  ).toBe(false);
-});
-
-test("turning off relaying to the default profile sends client_traffic: false", async ({
-  page
-}) => {
-  const mutations: MockOptions["mutations"] = [];
-  await mockApi(page, {
-    mutations,
-    upstreamEnabled: true,
-    upstreamProfiles: [
-      {
-        name: "alpha",
-        server: "alpha.example.com",
-        port: "443",
-        auth_type: "password",
-        username: "user",
-        enabled: true
-      }
-    ]
-  });
-  await signIn(page);
-
-  await page.getByRole("button", { name: "Config", exact: true }).click();
-  await page.getByRole("button", { name: "Upstream", exact: true }).click();
-  await page.getByRole("tab", { name: "Routing", exact: true }).click();
-  const form = page.locator(".upstream-settings-form");
-
-  // On by default -- Mode select starts visible.
-  await expect(
-    form.locator("label").filter({ hasText: "Mode" }).first().locator("select")
-  ).toBeVisible();
-  await form
-    .locator("label")
-    .filter({ hasText: "Relay VPN users" })
-    .locator("input")
-    .uncheck();
-  // Unchecking hides the now-irrelevant Mode select.
-  await expect(
-    form.locator("label").filter({ hasText: "Mode" }).first().locator("select")
-  ).toHaveCount(0);
-  await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/routing/settings") && response.request().method() === "POST"
-    ),
-    form.getByRole("button", { name: "Save", exact: true }).click()
-  ]);
-
-  const saved = mutations.find(
-    (mutation) => mutation.method === "POST" && mutation.path === "/api/routing/settings"
-  );
-  expect(JSON.parse(saved?.body ?? "{}").client_traffic).toBe(false);
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  await page.getByRole("tab", { name: "JSON (advanced)", exact: true }).click();
+  const policy = { sources: [], sets: { office: { routes: ["10.90.0.0/16"], domains: ["intranet.example"] } }, egress: [{ from: ["host"], to: { set: "office" }, via: "upstream:office", kill_switch: true }, { from: ["clients"], to: "any", via: "local" }] };
+  await page.getByLabel("Policy (JSON: sources, sets, egress)").fill(JSON.stringify(policy));
+  await page.getByRole("button", { name: "Save policy", exact: true }).click();
+  await expect.poll(() => mutations.find(m => m.path === "/api/egress")).toBeTruthy();
+  expect(JSON.parse(mutations.find(m => m.path === "/api/egress")?.body ?? "{}")).toEqual(policy);
+  expect(mutations.some(m => m.path.startsWith("/api/routing/"))).toBe(false);
 });

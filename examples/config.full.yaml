@@ -196,7 +196,7 @@ routing:
   main_interface: auto
 
 # Destination sets and egress rules (docs/spec/02-egress-and-sources.md): first match wins,
-# traffic of clients and sources that no rule matches is dropped. `via` is local, fabric,
+# traffic of clients and sources that no rule matches is dropped. `via` is local, interlink,
 # drop, upstream:<profile> or node:<n>.
 sets:
   private:

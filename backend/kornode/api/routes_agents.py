@@ -79,6 +79,12 @@ def agent_token_revoke(name: str, request: Request) -> dict[str, Any]:
     return service(request).token(name, revoke=True)
 
 
+@router.post("/{name}/push")
+async def agent_push(name: str, request: Request) -> dict[str, Any]:
+    dry_run = flags(await payload(request))
+    return await run_in_threadpool(service(request).push, name, dry_run=dry_run)
+
+
 @router.post("/{name}/revoke")
 async def agent_revoke(name: str, request: Request) -> dict[str, Any]:
     dry_run = flags(await payload(request))

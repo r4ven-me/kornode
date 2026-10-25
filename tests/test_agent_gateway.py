@@ -17,6 +17,9 @@ from kornode.services.command import CommandResult
 from kornode.services.netinputs import HubNetInputs
 
 OUT = {"id": "out", "from": ["clients"], "to": "any", "via": "node:3"}
+from kornode.net.model import InlineDest  # noqa: E402
+
+INLINE = InlineDest(domains=("example.net",)).resolved_key()
 
 
 def make(world: Any) -> Any:  # type: ignore[no-untyped-def]
@@ -40,7 +43,7 @@ def test_an_exit_rule_is_accepted_for_an_active_agent_with_the_exit_role(world: 
     env, service = make(world)
     service.set_policy("node2", {"egress": [OUT]})
     own = env.check(env.registry.latest_bundle(2)).bundle
-    assert [rule.id for rule in own.policy.egress] == ["to-fabric", "out"]
+    assert [rule.id for rule in own.policy.egress] == ["to-interlink", "out"]
     assert own.policy.egress[1].via == "node:3"
 
 
@@ -49,17 +52,22 @@ def test_the_exit_node_gets_the_nat_rule_for_what_the_hub_sends_it(world: Any) -
     env.compile(3)
     rules = env.check(env.registry.latest_bundle(3)).bundle.policy.egress
     assert [(rule.id, rule.from_, rule.to, rule.via) for rule in rules] == [
-        ("to-fabric", ("clients", "host"), "fabric", "fabric"),
-        ("gateway-local", ("fabric",), "any", "local"),
+        ("to-interlink", ("clients", "host"), "interlink", "interlink"),
+        ("gateway-local", ("interlink",), "any", "local"),
     ]
 
 
-def test_an_operators_own_fabric_rule_is_not_duplicated(world: Any) -> None:  # type: ignore[no-untyped-def]
+def test_an_operators_own_interlink_rule_is_not_duplicated(world: Any) -> None:  # type: ignore[no-untyped-def]
     env, service = make(world)
-    own = {"id": "mine", "from": ["fabric"], "to": {"routes": ["198.51.100.0/24"]}, "via": "local"}
+    own = {
+        "id": "mine",
+        "from": ["interlink"],
+        "to": {"routes": ["198.51.100.0/24"]},
+        "via": "local",
+    }
     service.set_policy("node3", {"egress": [own]})
     rules = env.check(env.registry.latest_bundle(3)).bundle.policy.egress
-    assert [rule.id for rule in rules] == ["to-fabric", "mine"]
+    assert [rule.id for rule in rules] == ["to-interlink", "mine"]
 
 
 @pytest.mark.parametrize(
@@ -68,7 +76,7 @@ def test_an_operators_own_fabric_rule_is_not_duplicated(world: Any) -> None:  # 
         ([{"from": ["clients"], "to": "any", "via": "node:9"}], "gateway_node"),
         ([{"from": ["clients"], "to": "any", "via": "node:2"}], "gateway_node"),
         ([{"from": ["host"], "to": "any", "via": "node:3"}], "runtime_unsupported"),
-        ([{"from": ["clients"], "to": "fabric", "via": "node:3"}], "runtime_unsupported"),
+        ([{"from": ["clients"], "to": "interlink", "via": "node:3"}], "runtime_unsupported"),
         ([{"from": ["clients"], "to": {"node": 3}, "via": "node:3"}], "runtime_unsupported"),
     ],
 )
@@ -141,7 +149,7 @@ def test_the_hub_derives_transit_exits_from_the_agents_policies(
             return super().run(argv, **kwargs)
 
     facts = HubNetInputs(env.config, runner=Runner(), proc_sys=tmp_path).facts()
-    assert facts.fabric_guard and facts.fabric_ifaces == ("vpns0", "vpns1")
+    assert facts.interlink_guard and facts.interlink_ifaces == ("vpns0", "vpns1")
     (transit,) = facts.transit_exits
     assert transit.node == 3 and transit.exit_iface == "vpns1"
     assert set(transit.sources) == {
@@ -160,7 +168,7 @@ def test_the_hub_derives_transit_exits_from_the_agents_policies(
             return FakeRunner.run(self, argv, **kwargs)
 
     facts = HubNetInputs(env.config, runner=Offline(), proc_sys=tmp_path).facts()
-    assert facts.transit_exits[0].exit_iface is None and facts.fabric_ifaces == ("vpns0",)
+    assert facts.transit_exits[0].exit_iface is None and facts.interlink_ifaces == ("vpns0",)
 
 
 def test_the_hub_ignores_an_exit_whose_target_is_not_an_exit_node(
@@ -231,7 +239,7 @@ def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rul
         set_resolver=SimpleNamespace(
             read=lambda: {
                 "web": frozenset({"203.0.113.9", "198.51.100.1"}),
-                "rule1": frozenset({"192.0.2.5"}),
+                INLINE: frozenset({"192.0.2.5"}),
                 "lan": frozenset({"10.1.1.1"}),
             }
         ),
@@ -239,7 +247,7 @@ def test_the_agent_reports_the_addresses_behind_the_destinations_of_its_exit_rul
 
     assert Agent._gateway_sets(stub) == {  # type: ignore[arg-type]
         "web": ["198.51.100.1", "203.0.113.9"],
-        "rule1": ["192.0.2.5"],
+        INLINE: ["192.0.2.5"],
     }
 
     stub.inputs.active = None
@@ -250,8 +258,8 @@ def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implic
     world: Any,  # type: ignore[no-untyped-def]
     tmp_path: Path,
 ) -> None:
-    """The bundle gets `to-fabric` in front of the operator's rules, so the agent reports its
-    inline destination as `rule1`; the hub must read the same key (D-79)."""
+    """Agents before 2.2 key an inline destination by its bundle position (`rule1`: the bundle
+    gets `to-interlink` in front of the operator's rules); the hub still reads that key (D-79)."""
     env, service = make(world)
     service.set_policy(
         "node2",
@@ -262,3 +270,34 @@ def test_the_hub_indexes_inline_destinations_like_the_agent_does_with_the_implic
     facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
 
     assert [t.dest for t in facts.transit_exits] == [frozenset({"203.0.113.9/32"})]
+
+
+def test_the_hub_reads_content_keyed_inline_destinations_whatever_their_position(
+    world: Any,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    env, service = make(world)
+    key = InlineDest(domains=("example.org",)).resolved_key()
+    service.set_policy(
+        "node2",
+        {
+            "egress": [
+                {"from": ["clients"], "to": {"routes": ["198.51.100.0/24"]}, "via": "local"},
+                {"from": ["clients"], "to": {"domains": ["example.org"]}, "via": "node:3"},
+            ]
+        },
+    )
+    env.registry.add_report(2, {"applied_version": 1, "gateway_sets": {key: ["203.0.113.9"]}})
+
+    facts = HubNetInputs(env.config, runner=FakeRunner(), proc_sys=tmp_path).facts()
+
+    assert [t.dest for t in facts.transit_exits] == [frozenset({"203.0.113.9/32"})]
+
+
+def test_a_report_cannot_widen_a_set_into_any() -> None:
+    from kornode.net.lists import parse_gateway_sets
+
+    report = {"web": ["0.0.0.0/0", "10.0.0.0/7", "10.0.0.0/8", "203.0.113.9"]}
+    assert parse_gateway_sets(report) == {"web": frozenset({"10.0.0.0/8", "203.0.113.9/32"})}
+    with pytest.raises(ValueError, match="wider than /8"):
+        parse_gateway_sets(report, strict=True)

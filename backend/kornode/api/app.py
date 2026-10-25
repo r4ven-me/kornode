@@ -23,10 +23,10 @@ from kornode.api import (
     routes_diagnostics,
     routes_dns,
     routes_egress,
-    routes_fabric,
     routes_groups,
     routes_hub,
     routes_identity,
+    routes_interlink,
     routes_internal_dns,
     routes_logs,
     routes_net,
@@ -60,7 +60,14 @@ def create_app(
     if config is None:
         config = load_config(resolved_config_path)
 
-    app = FastAPI(title="Korvus Node API", version=__version__)
+    # The schema and interactive docs would expose the whole admin surface unauthenticated.
+    app = FastAPI(
+        title="Korvus Node API",
+        version=__version__,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.config = config
     app.state.config_path = resolved_config_path
     # Embedded callers may supply an unsaved initialization candidate. Only
@@ -207,7 +214,7 @@ def create_app(
     app.include_router(routes_net.router, prefix="/api/net", tags=["net"])
     app.include_router(routes_hub.router, prefix="/api/hub", tags=["hub"])
     app.include_router(routes_egress.router, prefix="/api/egress", tags=["egress"])
-    app.include_router(routes_fabric.router, prefix="/api/fabric", tags=["fabric"])
+    app.include_router(routes_interlink.router, prefix="/api/interlink", tags=["interlink"])
     app.include_router(routes_egress.sources_router, prefix="/api/sources", tags=["sources"])
     app.include_router(routes_agents.router, prefix="/api/agents", tags=["agents"])
     app.include_router(routes_agents.control_router, prefix="/api/control", tags=["control"])

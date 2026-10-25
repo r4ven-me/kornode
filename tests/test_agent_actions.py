@@ -29,7 +29,7 @@ def fake_agent(tmp_path: Path) -> tuple[Agent, World]:
     agent.config = load_config(root)
     agent.inputs = SimpleNamespace(active=None)  # type: ignore[assignment]
     agent.tunnels = SimpleNamespace(  # type: ignore[assignment]
-        specs=lambda: {"fabric": object()}, errors={}, reconnect=lambda name: True
+        specs=lambda: {"interlink": object()}, errors={}, reconnect=lambda name: True
     )
     return agent, w
 
@@ -74,10 +74,10 @@ def test_cancel_does_not_release_mutation_lock_before_worker_finishes(tmp_path: 
             return {"reconnected": [name]}
 
         agent._reconnect = reconnect  # type: ignore[method-assign]
-        first = asyncio.create_task(agent.perform(Request(op="reconnect", tunnel="fabric")))
+        first = asyncio.create_task(agent.perform(Request(op="reconnect", tunnel="interlink")))
         await asyncio.to_thread(entered.wait, 3)
         first.cancel()
-        second = asyncio.create_task(agent.perform(Request(op="reconnect", tunnel="fabric")))
+        second = asyncio.create_task(agent.perform(Request(op="reconnect", tunnel="interlink")))
         await asyncio.sleep(0.03)
         assert agent._apply_lock.locked() and len(calls) == 1
         release.set()
@@ -95,7 +95,7 @@ def test_reconnect_dry_run_revoked_unknown_and_failed(tmp_path: Path) -> None:
         calls = []
         agent.tunnels.reconnect = calls.append  # type: ignore[method-assign, assignment]
         assert (await agent.perform(Request(op="reconnect", dry_run=True)))["would_reconnect"] == [
-            "fabric"
+            "interlink"
         ]
         assert calls == []
         with pytest.raises(LocalError) as exc:
@@ -103,12 +103,12 @@ def test_reconnect_dry_run_revoked_unknown_and_failed(tmp_path: Path) -> None:
         assert exc.value.exit_code == 3
         agent.revoked = True
         with pytest.raises(LocalError, match="revoked"):
-            await agent.perform(Request(op="reconnect", tunnel="fabric"))
+            await agent.perform(Request(op="reconnect", tunnel="interlink"))
         assert calls == []
         agent.revoked = False
-        agent.tunnels.errors["fabric"] = "failed"
+        agent.tunnels.errors["interlink"] = "failed"
         with pytest.raises(LocalError, match="dial failed"):
-            await agent.perform(Request(op="reconnect", tunnel="fabric"))
+            await agent.perform(Request(op="reconnect", tunnel="interlink"))
 
     asyncio.run(run())
 

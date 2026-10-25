@@ -84,9 +84,10 @@ def _classify_lines(rule: ClassifyRule) -> list[str]:
 
 
 def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> list[str]:
-    down = [
-        exit_ for exit_ in exits if exit_.kill_switch and exit_.kind == "upstream" and not exit_.up
-    ]
+    # A down upstream without kill switch marks no new flows (its rules fall through);
+    # flows it marked before going down are refused too, so they reconnect and are
+    # classified again instead of leaving through main un-NATed.
+    down = [exit_ for exit_ in exits if exit_.kind == "upstream" and not exit_.up]
     blocked = [f"    meta mark & {MARK_MASK} == {_hex(exit_.mark)} {action}" for exit_ in down]
     guarded = [exit_ for exit_ in exits if exit_.kill_switch and exit_ not in down]
     if not guarded:
@@ -104,6 +105,29 @@ def _kill_switch(exits: tuple[Exit, ...], uplink: str | None, action: str) -> li
         f'oifname != "{_ifname(exit_.interface)}" {action}'
         for exit_ in guarded
         if exit_.interface
+    ]
+
+
+def _local_icmp_errors(uplink: str | None) -> list[str]:
+    """ICMP errors this node sends back toward a client must not die with the flow.
+
+    When an exit is down its table answers with ``unreachable`` and the kernel
+    (or a forward ``reject``) sends an ICMP error. ``icmp_send`` attaches the
+    flow's conntrack, so output restores the dead exit's mark onto the error
+    and the unconditional postrouting drop for that mark would swallow it:
+    the promised fast failure (D-28) becomes a silent timeout. Errors that
+    originate here and leave through anything but the uplink are let through
+    before the kill switch; toward the uplink, and when the uplink is unknown,
+    the kill switch still applies (fail closed).
+    """
+    if not uplink:
+        return []
+    out = f'oifname != "{_ifname(uplink)}"'
+    return [
+        "    meta l4proto icmp icmp type { destination-unreachable, time-exceeded, "
+        f"parameter-problem }} fib saddr type local {out} accept",
+        "    meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, "
+        f"time-exceeded, parameter-problem }} fib saddr type local {out} accept",
     ]
 
 
@@ -161,7 +185,7 @@ def _session_rpf(facts: NodeFacts) -> list[str]:
 
 def _access_input(facts: NodeFacts) -> list[str]:
     """VPN clients of an access node reach the node's own services only for DNS and
-    ping (D-67); forwarded traffic (LAN, fabric, exits) is governed by the egress
+    ping (D-67); forwarded traffic (LAN, interlink, exits) is governed by the egress
     policy as usual. Anything else addressed to the host is dropped."""
     lines: list[str] = []
     for glob in facts.access_ifaces:
@@ -185,7 +209,7 @@ def render_script(
     policy: EgressPolicy,
 ) -> str:
     lines: list[str] = ["table inet kornode {"]
-    lines += _set_decl("fabric_ifaces", "ifname")
+    lines += _set_decl("interlink_ifaces", "ifname")
     if facts.transit_exits:
         lines += _set_decl("transit_ifaces", "ifname")
     for name, kind in (
@@ -244,14 +268,14 @@ def render_script(
         "    type filter hook input priority mangle; policy accept;",
     ]
     # Connections arriving through a tunnel are answered through it too. One mark per
-    # interface (the first exit wins: on an agent `fabric` precedes `node:<n>`, which
+    # interface (the first exit wins: on an agent `interlink` precedes `node:<n>`, which
     # shares the hub tunnel); a hub transit exit's session device changes with every
     # connect and its main-table routes already answer the node.
     answered: set[str] = set()
     for exit_ in exits:
         if exit_.kind == "local" or not exit_.interface or exit_.interface in answered:
             continue
-        if exit_.kind == "node" and facts.fabric_guard:
+        if exit_.kind == "node" and facts.interlink_guard:
             continue
         answered.add(exit_.interface)
         lines.append(
@@ -292,20 +316,27 @@ def render_script(
         "  chain postrouting {",
         "    type filter hook postrouting priority filter; policy accept;",
         '    oifname "lo" accept',
+        *_local_icmp_errors(facts.uplink),
         f"    {MSS_CLAMP}",
         *kill_postrouting,
         "  }",
         "}",
         "table ip kornode_nat {",
+        # Sets are per table: the NAT table needs its own copy of the interlink
+        # interfaces. Nothing that leaves into the interlink is masqueraded:
+        # `local` means main + NAT to the uplink, but main also holds the routes
+        # to interlink sessions and prefixes (spec 02/03, "no NAT inside the interlink").
+        *_set_decl("interlink_ifaces", "ifname"),
         "  chain postrouting {",
         "    type nat hook postrouting priority srcnat; policy accept;",
     ]
+    not_interlink = "oifname != @interlink_ifaces"
     for exit_ in exits:
         if not exit_.nat:
             continue
         mark = f"meta mark & {MARK_MASK} == {_hex(exit_.mark)}"
         if exit_.kind == "local":
-            lines.append(f'    {mark} oifname != "lo" masquerade')
+            lines.append(f'    {mark} oifname != "lo" {not_interlink} masquerade')
         elif exit_.interface:
             lines.append(f'    {mark} oifname "{_ifname(exit_.interface)}" masquerade')
     # Unmarked client/source traffic only gets here on its way to this
@@ -314,11 +345,14 @@ def render_script(
     unmarked = f"meta mark & {MARK_MASK} == 0x00000000"
     if facts.client_pool is not None:
         pool = facts.client_pool
-        lines.append(f"    ip saddr {pool} ip daddr != {pool} {unmarked} masquerade")
+        lines.append(
+            f"    ip saddr {pool} ip daddr != {pool} {unmarked} {not_interlink} masquerade"
+        )
     for source in policy.sources:
         if ":" not in source.cidr:
             lines.append(
-                f"    ip saddr {source.cidr} ip daddr != {source.cidr} {unmarked} masquerade"
+                f"    ip saddr {source.cidr} ip daddr != {source.cidr} {unmarked} "
+                f"{not_interlink} masquerade"
             )
     lines += ["  }", "}"]
     return "\n".join(lines) + "\n"

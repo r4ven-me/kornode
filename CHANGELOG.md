@@ -1,6 +1,80 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0] — 2026-10-25
+
+### Breaking — read before upgrading
+
+- **fabric → interlink (D-85).** The hub vhost for agents becomes `interlink.<domain>`; `korctl fabric` and `/api/fabric` are gone (use `korctl interlink`, `/api/interlink`). Old YAML/env spellings, policy aliases, `agent.yaml` and signed v1 bundle caches are read for one minor release. Upgrade agents first, then the hub, then run `kornode-agent set-hub-name interlink.<domain>` on each agent: [docs/runbooks/upgrade-2.0.md](docs/runbooks/upgrade-2.0.md).
+- Default DNS zone `kornode.lan` (an explicit `kornode.internal` stays). Panel: Agents and Interlink become **Nodes**; Network splits into hub policy & sources / kernel diagnostics.
+- `compose.web.yaml` / `compose.proxy.yaml` require `KORNODE_ADMIN_PASSWORD`; new admin passwords need ≥ 12 characters.
+- Agent image carries agent 2.2.0; bundles require at least agent 2.1.0.
+
+### Fixed (control plane review 2026-10-24)
+
+- **Re-push** (`korctl agent push`, `POST /api/agents/{name}/push`, Node → Activity & diagnostics): a bundle the agent marked failed was served forever while its content was unchanged (D-90).
+- Agents below the effective `min_agent_version` are flagged `upgrade_required` in the agent API, the panel and `korctl doctor` (D-91).
+- Upgrading an existing registry first writes a `VACUUM INTO` snapshot; a failed snapshot aborts the migration (D-92).
+- Agent boot no longer depends on control-plane files: the mTLS context is built lazily, a corrupt `state.json` is set aside and the agent falls back to bootstrap, an unreadable trust store skips the cache, and a renewed certificate is validated (key, CA, CN/OU, validity) before it replaces `cert.pem`.
+- Delivered commands whose result never arrives expire and no longer fill the 100-entry queue; one failing command no longer drops the rest of its batch.
+- The hub's renewal window follows the issued certificate's validity, like the agent's.
+- `kornode-agent set-hub-name` and an `agent.yaml` fallback dial: agents move to the renamed `interlink.<domain>` vhost without re-enrollment (D-93, `docs/runbooks/upgrade-2.0.md`). Agent version 2.2.0; minimum stays 2.1.0.
+
+### Security hardening (review 2026-10-24)
+
+- `compose.web.yaml` / `compose.proxy.yaml` no longer default the panel password to `change-me`: `KORNODE_ADMIN_PASSWORD` is required; `.env.example` ships it empty. New admin passwords (`POST /api/auth/password`, `korctl web hash-password`) must be 12+ characters and not a placeholder; existing configs still load, and `korctl doctor` (`admin-password` check) warns about a placeholder.
+- `POST /api/web-config/settings` requires reauthentication (current password, plus TOTP when enabled) to enable the terminal, change `admin_user` or `trusted_proxies`, or turn `session_cookie_secure` off. The panel asks for it only in those cases. The panel's Web / API section asks for the current password (and two-factor code) under "Confirm sensitive changes"; nothing typed there is stored.
+- The default ocserv host now refuses users named `agent-*` / `enroll-*` in the connect script: the per-user `agent-N` files (explicit-ipv4) are global to every vhost.
+- Name validation uses `fullmatch`: a trailing newline no longer slips past usernames, group names (`agents\n` vs reserved groups), domains and policy names.
+- The OTP email/Telegram delivery test refuses (400) to reuse the stored SMTP password / bot token when the request changes the SMTP host/port or the Telegram chat; the secret must be entered explicitly.
+- Admin TOTP sign-in codes are single-use (RFC 6238 §5.2): the hub remembers the last accepted time step per process and refuses it again; a second browser signs in with the next code. Reauthentication of an existing session (password, CSRF, live session) may reuse the code, and a credential change resets the record. A restart reopens the window for at most ~90 s.
+- The hub API no longer serves `/docs`, `/redoc` and `/openapi.json`.
+
+### Fixed (smaller data-plane gaps)
+
+- An IPv4 source (wg-easy, Amnezia) that also hands out IPv6 had its IPv6 forwarded unclassified; it is now rejected at the end of `egress_classify` (link-local and multicast untouched).
+- Agent-reported `gateway_sets` entries wider than /8 are refused, so a compromised agent cannot widen its set rule into `to: any` on the hub.
+
+### Fixed (boot window before the first reconciler pass)
+
+- After a host reboot ocserv could accept and forward clients before the reconciler installed the kill switch and classification. Supervisor now starts ocserv through `korctl net wait-ready -- ocserv …`, which waits for a converged pass without error and then `exec`s ocserv (no shell). A persistently failing reconciler keeps ocserv waiting and logs the reason every 30 s (fail closed).
+
+### Fixed (`kill_switch: false` falls through)
+
+- A rule with `kill_switch: false` whose upstream was down did not fall through to later rules as spec 02 promises: its flows kept the mark, hit the `throw` route and left through main without NAT, skipping later `drop`/`node:<n>` rules. The reconciler now compiles such rules out while the upstream is down; flows marked before the outage are rejected so they reconnect under the later rules. `explain` shows the skipped rule.
+
+### Fixed (inline domain destinations keyed by content)
+
+- Addresses resolved for an inline `to: {domains: [...]}` destination were stored under the rule's position (`rule<N>`). Resolution runs on its own clock (up to an hour), so inserting or reordering rules handed one rule's addresses to another: traffic meant for an upstream could be classified `via local` until the next resolve. The key is now derived from the domains (`inline.<hash>`) on the hub and the agent; the hub still reads `rule<N>` from agents before 2.2. The hub resolver also wakes within ~10 s when a new set or inline destination has never been resolved.
+
+### Fixed (no NAT inside the interlink for `via: local`)
+
+- `via: local` masqueraded everything not leaving through `lo`, and main also routes into interlink sessions and prefixes. A hub client reaching an agent prefix through the default `clients → any via local` rule (and the D-26 rule toward connected networks, including agents' /32 session routes) reached the agent as the hub's interlink address. Masquerade now never applies to interlink interfaces (`ip kornode_nat` has its own `interlink_ifaces` set). New netlab case in `test_p4_exit_set.py` fails before the fix (`10.99.0.1`) and passes after (real client address).
+
+### Fixed (fast failure of dead exits, D-89)
+
+- Clients of a dead kill-switched upstream waited for a timeout instead of getting ICMP unreachable: the error inherited the dead exit's mark from the flow and was dropped in postrouting. Locally generated ICMP errors that do not leave via the uplink now pass before the kill switch. Found by netlab `test_examples_forwarding` on the integrated code.
+
+### Fixed (certificate path activation, D-88)
+
+- Activating a certificate at a new path (self-signed → external or Let's Encrypt, or a certificate mode change) restarted nothing and sent ocserv a SIGHUP, which ocserv 1.5 cannot apply to a new path (`cannot find snapshot for file`). Certificate paths and `[vhost:...]` sections are now restart-only: activation restarts ocserv (active sessions reconnect), renewal at the same paths still reloads. The response names the action (`korctl server restart|reload`) and reports `restart_pending` when reload was unticked.
+
+### Changed (interlink naming and Nodes, D-85 / D-86)
+
+- Renamed the public fabric configuration, CLI/API, templates, bundles and panel to **interlink**; default DNS zone is **`kornode.lan`**. Agent version and v2 bundle minimum are 2.1.0. Explicit existing domains remain unchanged. Old YAML/env/.env names, policy aliases, agent config and signed v1 caches are readable for one minor release; conflicting aliases are rejected. Legacy signatures and sealed-secret AAD are verified before normalization. Certificate migration preserves the old files and SPKI pin. The SNI rename is a flag day, not a transparent image upgrade: agents switch with `kornode-agent set-hub-name` (D-93).
+- Combined Agents and Interlink into **Nodes → Overview / Settings / DNS**. Removed duplicate Config controls; retained all addressing controls and CLI/API/Web capabilities. Hub source editing links to the existing Network editor. Updated browser tests, including obsolete v1 panel expectations.
+- Config validation errors no longer echo malformed secret input (`hide_input_in_errors`). Added compatibility and schema-parity regression tests.
+
+### Fixed (stale upstream transport, D-87)
+
+- An agent's openconnect process could keep an UP tunnel while retrying a dead upstream, blackholing traffic instead of exposing its unreachable route. Existing configured `check_host` probes now reset that upstream after three consecutive failures, reconciling before redial. No new config fields; interlink and unmonitored upstreams are unchanged. Two real AmneziaWG abrupt-loss runs passed fast ICMP/no-leak/recovery checks.
+
+### Changed (panel)
+
+- Nodes: a node list and a per-node workspace with tabs (settings & enrollment, networks & sources, egress policy, upstreams, VPN access & users, activity & diagnostics); drafts survive tab switches; signing-key rotation moved under Control plane maintenance. Network: two tasks, hub policy & sources and kernel diagnostics (loaded on demand). Field help for interlink addressing and hub sources.
+
+### Integration with 1.2.0
+
+- Merges the 1.2.0 audit hardening (raw config transactions/ETags, MFA/session protection, stable routing marks and conntrack labels, fail-closed barriers, structured audit controls) with interlink and Nodes. The E2E access-client hook now restores routes on `reconnect`.
 
 ## [1.2.0] — 2026-10-23
 
@@ -10,6 +84,7 @@
 - Follow-up review closes CLI collection lost updates/secret-reference expansion, stale render/runtime writers, and password/TOTP updates through symlinked config paths.
 - Structured control settings, source/destination-set editors, nullable group inheritance, immutable release version tags and mandatory ocserv source checksum.
 - Existing VPN sessions may need reconnecting; conntrack-label support is required. MFA-enabled Basic clients must use the authenticated session flow. This release does **not** include the unaccepted interlink/Nodes redesign.
+
 
 
 ### Changed (role `gateway`, `via: node:<n>`, D-84, branch `redesign/rename-gateway-role`)

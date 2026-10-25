@@ -116,12 +116,12 @@ camouflage_realm = {{ config.server.camouflage.realm }}
 # port. Everything below belongs to it, so it stays the last section of the file.
 # Ports are global-only since ocserv 1.4.2 (a hard error inside a vhost, D-83);
 # the vhost inherits udp-port, and with it DTLS, from the default host.
-[vhost:{{ fabric_vhost.name }}]
-server-cert = {{ fabric_vhost.server_cert }}
-server-key = {{ fabric_vhost.server_key }}
-ca-cert = {{ fabric_vhost.ca_cert }}
+[vhost:{{ interlink_vhost.name }}]
+server-cert = {{ interlink_vhost.server_cert }}
+server-key = {{ interlink_vhost.server_key }}
+ca-cert = {{ interlink_vhost.ca_cert }}
 crl = {{ crl }}
-auth = "plain[passwd={{ fabric_vhost.passwd }}]"
+auth = "plain[passwd={{ interlink_vhost.passwd }}]"
 enable-auth = "certificate"
 cert-user-oid = 2.5.4.3
 cert-group-oid = 2.5.4.11

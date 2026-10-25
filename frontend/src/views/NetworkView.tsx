@@ -14,8 +14,13 @@ import { errorMessage } from "../lib/errors";
 import { netDriftCount, netPlanLines } from "../lib/net";
 import { ActionButton, EmptyState, Pill } from "../components/ui";
 import { HubEgress } from "./network/HubEgress";
+import "./network/network-hub.css";
 
-export function NetworkView({ token }: { token: string }) {
+export function NetworkView({ token, focus }: { token: string; focus?: "sources" }) {
+  const [task, setTask] = useState<"policy" | "diagnostics">("policy");
+  useEffect(() => {
+    if (focus === "sources") setTask("policy");
+  }, [focus]);
   const [plan, setPlan] = useState<NetPlan | null>(null);
   const [status, setStatus] = useState<NetStatus | null>(null);
   const [explain, setExplain] = useState<NetExplainResult | null>(null);
@@ -43,8 +48,8 @@ export function NetworkView({ token }: { token: string }) {
   };
 
   useEffect(() => {
-    void refresh();
-  }, [token]);
+    if (task === "diagnostics") void refresh();
+  }, [token, task]);
 
   const apply = async (dryRun: boolean) => {
     setBusy(dryRun ? "net-apply-dry-run" : "net-apply");
@@ -76,17 +81,35 @@ export function NetworkView({ token }: { token: string }) {
   };
 
   return (
-    <div className="view-stack">
-      {error && <section className="panel notice-error">{error}</section>}
-      <HubEgress token={token} />
+    <div className="view-stack network-hub">
+      <section className="panel" aria-label="Networks workspace">
+        <div className="panel-header"><div>
+          <h2>Networks on this hub</h2>
+          <p className="muted-line">Choose where traffic goes, attach a local VPN network, or troubleshoot the saved policy. Remote servers are managed in Nodes; Interlink connects servers to each other.</p>
+        </div></div>
+        <nav className="network-task-nav" aria-label="Network tasks">
+          <button type="button" className="action-button" aria-label="Hub policy & sources" aria-pressed={task === "policy"} aria-controls="network-policy" onClick={() => setTask("policy")}>
+            <strong>Hub policy &amp; sources</strong><span>Edit traffic rules, destination lists and local source networks.</span>
+          </button>
+          <button type="button" className="action-button" aria-label="Kernel diagnostics" aria-pressed={task === "diagnostics"} aria-controls="network-diagnostics" onClick={() => setTask("diagnostics")}>
+            <strong>Kernel diagnostics</strong><span>Inspect runtime status, preview or apply a plan, and explain a packet.</span>
+          </button>
+        </nav>
+      </section>
+      <div id="network-policy" className="view-stack network-task-content" role="region" aria-label="Hub policy & sources" hidden={task !== "policy"}>
+        <HubEgress token={token} focus={focus} active={task === "policy"} />
+      </div>
+      <div id="network-diagnostics" className="view-stack network-task-content" role="region" aria-label="Kernel diagnostics" hidden={task !== "diagnostics"}>
+      <p className="muted-line">Diagnostics use the saved policy, not unsaved editor changes. Dry run previews changes without applying them; Apply changes kernel routes and firewall rules.</p>
+      {error && <section className="panel notice-error" role="alert">{error}</section>}
       <section className="panel" data-capability="net.status">
         <div className="panel-header">
           <div>
-            <h2>Reconciler</h2>
+            <h2>Kernel sync status</h2>
             <p className="muted-line">Background process that keeps the kernel in line with the saved policy.</p>
           </div>
           <Pill kind={status?.running ? "ok" : "muted"}>
-            {status?.running ? "Running" : "Stopped"}
+            {status ? (status.running ? "Running" : "Stopped") : "Not loaded"}
           </Pill>
         </div>
         <p className="muted-line">
@@ -97,7 +120,7 @@ export function NetworkView({ token }: { token: string }) {
       <section className="panel" data-capability="net.plan">
         <div className="panel-header">
           <div>
-            <h2>Plan</h2>
+            <h2>Preview &amp; apply network plan</h2>
             <p className="muted-line">Compiled network policy compared with the kernel.</p>
           </div>
           <div className="toolbar">
@@ -171,18 +194,20 @@ export function NetworkView({ token }: { token: string }) {
       <section className="panel" data-capability="net.explain">
         <div className="panel-header">
           <div>
-            <h2>Explain</h2>
-            <p className="muted-line">Which rule, route and NAT a packet from source to destination gets.</p>
+            <h2>Explain a packet</h2>
+            <p className="muted-line">Read-only check of the saved policy: matching rule, routing table, route and NAT, with a kernel check where available.</p>
           </div>
         </div>
         <form className="inline-form" onSubmit={submitExplain}>
           <label>
             <span>Source</span>
-            <input value={src} onChange={(event) => setSrc(event.target.value)} required />
+            <input value={src} onChange={(event) => setSrc(event.target.value)} aria-describedby="network-explain-source-help" required />
+                        <span id="network-explain-source-help" className="field-help">Use host for this server, or a source IP address.</span>
           </label>
           <label>
             <span>Destination</span>
-            <input value={dst} onChange={(event) => setDst(event.target.value)} required />
+            <input value={dst} onChange={(event) => setDst(event.target.value)} aria-describedby="network-explain-destination-help" required />
+                        <span id="network-explain-destination-help" className="field-help">Destination IP address to look up.</span>
           </label>
           <button className="primary-button" disabled={busy === "net-explain"} type="submit">
             <Search size={18} aria-hidden="true" />
@@ -205,7 +230,7 @@ export function NetworkView({ token }: { token: string }) {
           <EmptyState text="No explanation yet" />
         )}
       </section>
-
+      </div>
     </div>
   );
 }

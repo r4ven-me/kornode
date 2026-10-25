@@ -87,12 +87,12 @@ def test_exit_target_must_be_active_exit_agent() -> None:
         assert err.value.code == code
 
 
-def test_exit_to_the_hub_or_to_fabric_is_rejected() -> None:
+def test_exit_to_the_hub_or_to_interlink_is_rejected() -> None:
     with pytest.raises(HubEgressError):
         check_hub_policy(cfg(egress=[{"from": ["clients"], "to": "any", "via": "node:1"}]), [])
-    fabric = {"egress": [{"from": ["clients"], "to": "fabric", "via": "node:2"}]}
+    interlink = {"egress": [{"from": ["clients"], "to": "interlink", "via": "node:2"}]}
     with pytest.raises(HubEgressError) as err:
-        check_hub_policy(cfg(**fabric), [node(2, ["gateway"])])
+        check_hub_policy(cfg(**interlink), [node(2, ["gateway"])])
     assert err.value.code == "runtime_unsupported"
 
 

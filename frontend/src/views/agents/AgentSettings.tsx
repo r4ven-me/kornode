@@ -19,7 +19,7 @@ export function AgentSettings({ agent, busy, mutate }: { agent: Agent; busy: boo
   return <section className="panel" data-capability="agent.show">
     <div className="panel-header"><h2>{agent.name} · node {agent.id}</h2><span className="pill muted">{agent.state} · {agent.online ? "online" : "offline"}</span></div>
     <p>Desired {agent.desired_version} / reported {agent.applied_version}. Last seen: {agent.last_seen ?? "never"}. Certificate: {agent.cert_not_after ?? "not enrolled"}.</p>
-    <p className="field-help">Access/exit roles prepare the registry; their complete runtime behavior is delivered in P4.</p>
+    <p className="field-help">Access agents serve VPN clients; gateway agents can provide an internet exit for other nodes.</p>
     <form onSubmit={event => {
       event.preventDefault();
       const tuning: Record<string, unknown> = { transport, dpd, keepalive };

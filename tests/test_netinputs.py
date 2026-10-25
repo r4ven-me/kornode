@@ -209,7 +209,7 @@ def _exit_inputs(tmp_path: Path, connected: bool, **extra: Any) -> HubNetInputs:
     return HubNetInputs(config, runner=Runner(), proc_sys=_proc(tmp_path, "1"))
 
 
-def test_hub_source_is_a_local_prefix_exported_to_the_fabric(tmp_path: Path) -> None:
+def test_hub_source_is_a_local_prefix_exported_to_the_interlink(tmp_path: Path) -> None:
     facts = _exit_inputs(tmp_path, connected=True).facts()
 
     assert ipaddress.ip_network("10.8.1.0/24") in facts.node_prefixes[1]

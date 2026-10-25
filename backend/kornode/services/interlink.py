@@ -1,8 +1,8 @@
-"""Fabric overview and settings (spec 07, 08 `fabric.show` / `fabric.settings`).
+"""Interlink overview and settings (spec 07, 08 `interlink.show` / `interlink.settings`).
 
-One read model for the whole fabric (addressing, nodes with prefixes, DNS zone, hub
-sources) so the CLI, the API and the panel's Fabric section show the same thing. Writes
-are limited to the `fabric:` section of the config file.
+One read model for the whole interlink (addressing, nodes with prefixes, DNS zone, hub
+sources) so the CLI, the API and the panel's Interlink section show the same thing. Writes
+are limited to the `interlink:` section of the config file.
 """
 
 from __future__ import annotations
@@ -19,28 +19,30 @@ from kornode.net.addressing import derive_addresses
 from kornode.services.agent_models import ManagementError
 from kornode.services.agents import AgentService
 from kornode.services.config_store import ConfigApplyError, ConfigPreflightError, mutate_config
-from kornode.services.fabric_dns import FabricDnsService
 from kornode.services.hub_egress import HubEgressService
+from kornode.services.interlink_dns import InterlinkDnsService
 from kornode.services.net import NetService
 from kornode.services.secrets import sanitized_validation_errors
 
 HUB_NODE_ID = 1
 SETTINGS_KEYS = ("cidr", "client_pool", "source_pool", "enroll_pool", "domain", "reserved")
-# `node_id` lives in the `node:` section (the hub's own id), not under `fabric:`.
+# `node_id` lives in the `node:` section (the hub's own id), not under `interlink:`.
 ACCEPTED_KEYS = (*SETTINGS_KEYS, "node_id")
 
 
-class FabricService:
+class InterlinkService:
     def __init__(
         self,
         config: AppConfig,
         path: Path,
         *,
+        env_file: Path | None = None,
         saved: Callable[[AppConfig], None] | None = None,
         sync: Callable[[AppConfig], None] | None = None,
     ) -> None:
         self.config = config
         self.path = path
+        self.env_file = env_file
         self.saved = saved
         self.sync = sync or self._sync
 
@@ -59,17 +61,17 @@ class FabricService:
                 "roles": item["roles"],
                 "state": item["state"],
                 "online": item["online"],
-                "fabric_address": str(self._service_address(item["id"])),
+                "interlink_address": str(self._service_address(item["id"])),
                 "prefixes": prefixes.get(item["id"], []),
             }
             for item in agents.list()["agents"]
         ]
-        zone = FabricDnsService(self.config).list()
+        zone = InterlinkDnsService(self.config).list()
         return {
-            "fabric": self.settings(),
+            "interlink": self.settings(),
             "hub": {
-                "fabric_address": str(self._service_address(HUB_NODE_ID)),
-                "server_name": self.config.fabric.server_name,
+                "interlink_address": str(self._service_address(HUB_NODE_ID)),
+                "server_name": self.config.interlink.server_name,
                 "prefixes": prefixes.get(HUB_NODE_ID, []),
             },
             "nodes": nodes,
@@ -78,17 +80,19 @@ class FabricService:
         }
 
     def settings(self) -> dict[str, Any]:
-        fabric = self.config.fabric.model_dump(mode="json")
-        return {"node_id": self.config.node.id, **{key: fabric[key] for key in SETTINGS_KEYS}}
+        interlink = self.config.interlink.model_dump(mode="json")
+        return {"node_id": self.config.node.id, **{key: interlink[key] for key in SETTINGS_KEYS}}
 
     def set(self, data: dict[str, Any]) -> dict[str, Any]:
         unknown = sorted(set(data) - set(ACCEPTED_KEYS))
         if unknown:
-            raise ManagementError(422, "invalid", f"unknown fabric settings: {', '.join(unknown)}")
+            raise ManagementError(
+                422, "invalid", f"unknown interlink settings: {', '.join(unknown)}"
+            )
         if not data:
-            raise ManagementError(422, "invalid", "no fabric settings given")
+            raise ManagementError(422, "invalid", "no interlink settings given")
         patch: dict[str, Any] = {
-            "fabric": {key: value for key, value in data.items() if key != "node_id"},
+            "interlink": {key: value for key, value in data.items() if key != "node_id"},
         }
         if "node_id" in data:
             patch["node"] = {"id": data["node_id"]}
@@ -99,9 +103,10 @@ class FabricService:
                 self.saved(config)
 
         try:
-            config, _ = mutate_config(
+            mutate_config(
                 self.path,
                 lambda raw: deep_merge(raw, patch),
+                env_file=self.env_file,
                 on_commit=installed,
                 after_apply=self.sync,
             )
@@ -109,11 +114,11 @@ class FabricService:
             raise ManagementError(
                 422,
                 "invalid",
-                "Invalid fabric configuration",
+                "Invalid interlink configuration",
                 sanitized_validation_errors(exc.errors()),
             ) from None
         except ValueError:
-            raise ManagementError(422, "invalid", "Invalid fabric configuration") from None
+            raise ManagementError(422, "invalid", "Invalid interlink configuration") from None
         except ConfigPreflightError:
             raise ManagementError(
                 500,
@@ -128,20 +133,17 @@ class FabricService:
                 "Configuration saved; runtime application failed. Retry rendering before reload.",
                 {"saved": True, "applied": False},
             ) from None
-        fabric = config.fabric.model_dump(mode="json")
-        return {
-            "fabric": {"node_id": config.node.id, **{key: fabric[key] for key in SETTINGS_KEYS}}
-        }
+        return {"interlink": self.settings()}
 
     def _service_address(self, node_id: int) -> object:
-        fabric = self.config.fabric
+        interlink = self.config.interlink
         return derive_addresses(
             node_id,
-            fabric_cidr=fabric.cidr,
-            client_pool=fabric.client_pool,
-            source_pool=fabric.source_pool,
-            domain=fabric.domain,
-        ).fabric_address
+            interlink_cidr=interlink.cidr,
+            client_pool=interlink.client_pool,
+            source_pool=interlink.source_pool,
+            domain=interlink.domain,
+        ).interlink_address
 
     @staticmethod
     def _sync(config: AppConfig) -> None:

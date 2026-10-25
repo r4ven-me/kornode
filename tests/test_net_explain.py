@@ -85,7 +85,7 @@ def test_named_source_is_classified_by_its_subnet() -> None:
 
 def test_unmatched_client_traffic_is_rejected() -> None:
     policy, facts = node3_case()
-    policy = policy.model_copy(update={"egress": policy.egress[:1]})  # to-fabric only
+    policy = policy.model_copy(update={"egress": policy.egress[:1]})  # to-interlink only
     compiled = compile_policy(policy, facts)
 
     decision = explain(compiled, policy, facts, "10.100.3.15", "1.1.1.1")
@@ -94,12 +94,12 @@ def test_unmatched_client_traffic_is_rejected() -> None:
     assert decision.route == "reject (admin-prohibited)"
 
 
-def test_fabric_destination_on_an_agent_uses_the_hub_tunnel() -> None:
+def test_interlink_destination_on_an_agent_uses_the_hub_tunnel() -> None:
     compiled, policy, facts = _node3()
 
     decision = explain(compiled, policy, facts, "10.100.3.15", "192.168.2.10")
 
-    assert decision.matched_rule is not None and decision.matched_rule["id"] == "to-fabric"
+    assert decision.matched_rule is not None and decision.matched_rule["id"] == "to-interlink"
     assert decision.route == "192.168.2.0/24 dev oc-hub0"
     assert decision.nat is None
 

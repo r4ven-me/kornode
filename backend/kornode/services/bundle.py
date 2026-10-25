@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 from kornode.bundle.canonical import body_sha256, canonical_json, content_hash
 from kornode.bundle.errors import BundleError
+from kornode.bundle.models import BUNDLE_FORMAT, MIN_AGENT_VERSION
 from kornode.bundle.sealing import SECRET_MARKER, digest_secrets, seal_secrets
 from kornode.bundle.signing import (
     key_id,
@@ -34,15 +35,35 @@ from kornode.bundle.signing import (
 from kornode.bundle.validator import validate
 from kornode.config.models import AppConfig
 from kornode.net.addressing import derive_addresses
-from kornode.net.model import Via
+from kornode.net.model import LEGACY_KEYWORDS, Via
 from kornode.registry.models import Node, StoredBundle
 from kornode.registry.repository import Registry, RegistryNotFound
 from kornode.tunnels.pin import certificate_file_pin
 
 HUB_NODE_ID = 1
-_FABRIC_RULE_ID = "to-fabric"
+_INTERLINK_RULE_ID = "to-interlink"
 _GATEWAY_RULE_ID = "gateway-local"
 _SECRET_UPSTREAM_FIELDS = ("password", "key", "camouflage")
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    """`2.1.0` → (2, 1, 0); anything unparsable sorts below every release."""
+    try:
+        return tuple(int(part) for part in value.split("."))
+    except (AttributeError, ValueError):
+        return (-1,)
+
+
+def effective_min_agent_version(config: AppConfig) -> str:
+    """The minimum every compiled bundle imposes: the configured value, but never
+    below what the bundle format itself needs (D-85: v2 bundles need 2.1.0)."""
+    return max(config.control.min_agent_version, MIN_AGENT_VERSION, key=version_tuple)
+
+
+def upgrade_required(agent_version: str | None, minimum: str) -> bool:
+    """Spec 12 "upgrade required": the last report names a version below `minimum`.
+    No report yet means unknown, not outdated."""
+    return agent_version is not None and version_tuple(agent_version) < version_tuple(minimum)
 
 
 class BundleService:
@@ -121,16 +142,16 @@ class BundleService:
             self.compile_node(registry, node_id, "signing key rotation")
 
     def control_url(self) -> str:
-        """The control API as an agent reaches it: the hub's fabric address."""
-        fabric = self.config.fabric
+        """The control API as an agent reaches it: the hub's interlink address."""
+        interlink = self.config.interlink
         hub = derive_addresses(
             HUB_NODE_ID,
-            fabric_cidr=fabric.cidr,
-            client_pool=fabric.client_pool,
-            source_pool=fabric.source_pool,
-            domain=fabric.domain,
+            interlink_cidr=interlink.cidr,
+            client_pool=interlink.client_pool,
+            source_pool=interlink.source_pool,
+            domain=interlink.domain,
         )
-        return f"https://{hub.fabric_address}:{self.config.control.port}"
+        return f"https://{hub.interlink_address}:{self.config.control.port}"
 
     def signing_keys(self) -> list[dict[str, str]]:
         public = self.signing_key().public_key()
@@ -226,7 +247,7 @@ class BundleService:
                 signature,
                 trusted=trusted,
                 high_water_version=version - 1,
-                agent_version=self.config.control.min_agent_version,
+                agent_version=plan["min_agent_version"],
                 expected_node_id=node_id,
             )
         except BundleError as exc:
@@ -248,32 +269,32 @@ class BundleService:
     # ------------------------------------------------------------------ plan
 
     def _plan(self, registry: Registry, node: Node, version: int) -> dict[str, Any]:
-        fabric = self.config.fabric
+        interlink = self.config.interlink
         addresses = derive_addresses(
             node.id,
-            fabric_cidr=fabric.cidr,
-            client_pool=fabric.client_pool,
-            source_pool=fabric.source_pool,
-            domain=fabric.domain,
+            interlink_cidr=interlink.cidr,
+            client_pool=interlink.client_pool,
+            source_pool=interlink.source_pool,
+            domain=interlink.domain,
         )
         hub = derive_addresses(
             HUB_NODE_ID,
-            fabric_cidr=fabric.cidr,
-            client_pool=fabric.client_pool,
-            source_pool=fabric.source_pool,
-            domain=fabric.domain,
+            interlink_cidr=interlink.cidr,
+            client_pool=interlink.client_pool,
+            source_pool=interlink.source_pool,
+            domain=interlink.domain,
         )
         node_info: dict[str, Any] = {
             "name": node.name,
             "roles": sorted(node.roles),
-            "fabric_address": str(addresses.fabric_address),
+            "interlink_address": str(addresses.interlink_address),
             "service_address": str(addresses.service_address),
             "client_pool": str(addresses.client_pool),
             "source_range": str(addresses.source_pool),
             "uplink_hint": "auto",
         }
         prefixes: list[dict[str, Any]] = [
-            {"prefix": fabric.cidr, "node_id": HUB_NODE_ID, "kind": "fabric"},
+            {"prefix": interlink.cidr, "node_id": HUB_NODE_ID, "kind": "interlink"},
             {"prefix": str(hub.client_pool), "node_id": HUB_NODE_ID, "kind": "pool"},
         ]
         prefixes.extend(
@@ -290,39 +311,39 @@ class BundleService:
             )
         prefixes.sort(key=lambda item: (item["node_id"], item["prefix"]))
         transport = node.transport
-        fabric_tunnel: dict[str, Any] = {
+        interlink_tunnel: dict[str, Any] = {
             "interface": "oc-hub0",
             "transport": transport.get("transport", "tcp"),
         }
         for field in ("dpd", "keepalive"):
             if field in transport:
-                fabric_tunnel[field] = int(transport[field])
+                interlink_tunnel[field] = int(transport[field])
         camouflage = transport.get("camouflage")
         if transport.get("camouflage_enc"):
             camouflage = self._decrypt_external_secrets(
                 node.id, "fabric-transport", base64.b64decode(transport["camouflage_enc"])
             )["camouflage"]
         if camouflage:
-            fabric_tunnel["camouflage"] = {SECRET_MARKER: str(camouflage)}
+            interlink_tunnel["camouflage"] = {SECRET_MARKER: str(camouflage)}
         plan = {
-            "format": "kornode.bundle/v1",
+            "format": BUNDLE_FORMAT,
             "node_id": node.id,
             "version": version,
             "generated_at": self._clock().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "min_agent_version": self.config.control.min_agent_version,
+            "min_agent_version": effective_min_agent_version(self.config),
             "hubs": [
                 {
                     "host": self.config.server.cn,
                     "port": self.config.server.port,
                     "pin": self._pin(),
                     "control_url": self.control_url(),
-                    "server_name": self.config.fabric.server_name,
+                    "server_name": self.config.interlink.server_name,
                 }
             ],
             "node": node_info,
-            "fabric": {"cidr": fabric.cidr, "domain": fabric.domain, "prefixes": prefixes},
+            "interlink": {"cidr": interlink.cidr, "domain": interlink.domain, "prefixes": prefixes},
             "tunnels": {
-                "fabric": fabric_tunnel,
+                "interlink": interlink_tunnel,
                 "upstreams": self._upstreams(registry, node.id),
             },
             "policy": self._policy(registry, node),
@@ -393,11 +414,11 @@ class BundleService:
     def _dns(
         self, registry: Registry, node_id: int, hub_pool: ipaddress.IPv4Network
     ) -> dict[str, Any]:
-        """The agent's own `node<id>` zone plus forwarding of the fabric zone
+        """The agent's own `node<id>` zone plus forwarding of the interlink zone
         to the hub resolver (D-66). The resolver must sit in the hub client
-        pool, which every bundle routes via the fabric; otherwise the zone is
+        pool, which every bundle routes via the interlink; otherwise the zone is
         not forwarded at all rather than toward an unreachable address."""
-        from kornode.services.fabric_dns import node_zone_records
+        from kornode.services.interlink_dns import node_zone_records
 
         dns: dict[str, Any] = {
             "enabled": True,
@@ -408,13 +429,15 @@ class BundleService:
         }
         listen = ipaddress.ip_address(self.config.internal_dns.listen)
         if listen in hub_pool:
-            dns["forward_zones"] = [{"zone": self.config.fabric.domain, "servers": [str(listen)]}]
+            dns["forward_zones"] = [
+                {"zone": self.config.interlink.domain, "servers": [str(listen)]}
+            ]
         return dns
 
     def _pin(self) -> str:
         if self._hub_pin is not None:
             return self._hub_pin
-        return certificate_file_pin(self.config.cert_path("fabric.crt")).pin
+        return certificate_file_pin(self.config.cert_path("interlink.crt")).pin
 
     def _upstreams(self, registry: Registry, node_id: int) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
@@ -430,43 +453,50 @@ class BundleService:
 
 
 def _external_aad(node_id: int, name: str) -> bytes:
+    # Storage protocol labels (including `fabric-transport`) are not UI names:
+    # changing them would invalidate existing registry ciphertext.
     return f"kornode-external-secrets-v1|{node_id}|{name}".encode()
 
 
 def policy_with_implicit_rules(policy: dict[str, Any], roles: list[str]) -> dict[str, Any]:
     """A bundle must keep the agent's path to the hub (spec 11): add the
-    fabric rule when no rule gives `host` that path.
+    interlink rule when no rule gives `host` that path.
 
     VPN clients of an `access` node are not in the implicit rule (D-67): a
-    branch user does not get the whole fabric, including the hub's services,
-    unless the operator writes `from: [clients] to: fabric via: fabric`."""
+    branch user does not get the whole interlink, including the hub's services,
+    unless the operator writes `from: [clients] to: interlink via: interlink`."""
     result: dict[str, Any] = json.loads(json.dumps(policy))
     result.setdefault("sources", [])
     result.setdefault("sets", {})
     rules = result.setdefault("egress", [])
     for rule in rules:
-        # Policies stored before D-84 say `exit:<n>`; the bundle carries `node:<n>`.
+        # Policies stored before D-84/D-85 say `exit:<n>` and `fabric`; the bundle carries
+        # `node:<n>` and `interlink`.
         with contextlib.suppress(ValueError):
             rule["via"] = Via.parse(str(rule.get("via", ""))).name
+        if isinstance(rule.get("from"), list):
+            rule["from"] = [LEGACY_KEYWORDS.get(item, item) for item in rule["from"]]
+        if isinstance(rule.get("to"), str):
+            rule["to"] = LEGACY_KEYWORDS.get(rule["to"], rule["to"])
     position = 0
     if not any(
-        rule.get("via") == "fabric" and "host" in (rule.get("from") or []) for rule in rules
+        rule.get("via") == "interlink" and "host" in (rule.get("from") or []) for rule in rules
     ):
         names = ["host", *(item["name"] for item in result["sources"])]
         if "access" not in roles:
             names.insert(0, "clients")
         taken = {rule.get("id") for rule in rules}
-        rule_id = _FABRIC_RULE_ID
+        rule_id = _INTERLINK_RULE_ID
         while rule_id in taken:
             rule_id += "-hub"
-        rules.insert(0, {"id": rule_id, "from": names, "to": "fabric", "via": "fabric"})
+        rules.insert(0, {"id": rule_id, "from": names, "to": "interlink", "via": "interlink"})
         position = 1
-    if "gateway" in roles and not any("fabric" in (rule.get("from") or []) for rule in rules):
-        # A gateway node (D-69) NATs what the hub sends it: anything from the fabric
-        # to a non-fabric destination leaves through this node's own uplink.
+    if "gateway" in roles and not any("interlink" in (rule.get("from") or []) for rule in rules):
+        # A gateway node (D-69) NATs what the hub sends it: anything from the interlink
+        # to a non-interlink destination leaves through this node's own uplink.
         taken = {rule.get("id") for rule in rules}
         rule_id = _GATEWAY_RULE_ID
         while rule_id in taken:
             rule_id += "-hub"
-        rules.insert(position, {"id": rule_id, "from": ["fabric"], "to": "any", "via": "local"})
+        rules.insert(position, {"id": rule_id, "from": ["interlink"], "to": "any", "via": "local"})
     return result

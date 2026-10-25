@@ -16,7 +16,7 @@ from kornode.net.addressing import (
 from kornode.net.errors import PolicyError
 
 DEFAULTS = {
-    "fabric_cidr": "10.99.0.0/24",
+    "interlink_cidr": "10.99.0.0/24",
     "client_pool": "10.100.{id}.0/24",
     "source_pool": "10.8.{id}.0/24",
 }
@@ -27,19 +27,19 @@ def net(text: str) -> ipaddress.IPv4Network:
 
 
 def test_node3_matches_the_spec_table() -> None:
-    derived = derive_addresses(3, domain="kornode.internal", **DEFAULTS)
+    derived = derive_addresses(3, domain="kornode.lan", **DEFAULTS)
 
-    assert str(derived.fabric_address) == "10.99.0.3"
+    assert str(derived.interlink_address) == "10.99.0.3"
     assert str(derived.client_pool) == "10.100.3.0/24"
     assert str(derived.service_address) == "10.100.3.1"
     assert str(derived.source_pool) == "10.8.3.0/24"
-    assert derived.dns_zone == "node3.kornode.internal"
+    assert derived.dns_zone == "node3.kornode.lan"
 
 
 def test_hub_is_node1() -> None:
-    derived = derive_addresses(1, domain="kornode.internal", **DEFAULTS)
+    derived = derive_addresses(1, domain="kornode.lan", **DEFAULTS)
 
-    assert str(derived.fabric_address) == "10.99.0.1"
+    assert str(derived.interlink_address) == "10.99.0.1"
     assert str(derived.service_address) == "10.100.1.1"
 
 
@@ -59,7 +59,7 @@ def test_default_templates_are_valid_and_fast() -> None:
         # /16 per id: every id's pool overlaps the next one's.
         ({"client_pool": "10.{id}.0.0/15"}, "not a valid network|overlaps"),
         ({"source_pool": "10.100.{id}.0/24"}, "overlaps"),
-        ({"fabric_cidr": "10.100.0.0/16"}, "overlaps"),
+        ({"interlink_cidr": "10.100.0.0/16"}, "overlaps"),
     ],
 )
 def test_bad_templates_are_rejected(overrides: dict[str, str], message: str) -> None:
@@ -75,10 +75,10 @@ def test_template_overlapping_reserved_is_rejected() -> None:
 @pytest.mark.parametrize(
     ("enroll_pool", "message"),
     [
-        ("10.99.0.240/28", "fabric\\.enroll_pool.*fabric\\.cidr"),
-        ("10.200.0.0/24", "fabric\\.enroll_pool.*reserved 10\\.200\\.0\\.0/16"),
-        ("10.100.7.128/25", "fabric\\.enroll_pool.*client_pool\\[7\\]"),
-        ("10.8.42.0/25", "fabric\\.enroll_pool.*source_pool\\[42\\]"),
+        ("10.99.0.240/28", "interlink\\.enroll_pool.*interlink\\.cidr"),
+        ("10.200.0.0/24", "interlink\\.enroll_pool.*reserved 10\\.200\\.0\\.0/16"),
+        ("10.100.7.128/25", "interlink\\.enroll_pool.*client_pool\\[7\\]"),
+        ("10.8.42.0/25", "interlink\\.enroll_pool.*source_pool\\[42\\]"),
     ],
 )
 def test_enroll_pool_rejects_overlaps(enroll_pool: str, message: str) -> None:
@@ -94,11 +94,11 @@ def test_render_template() -> None:
     assert render_template("10.100.{id}.0/24", 42) == net("10.100.42.0/24")
 
 
-def test_derive_rejects_ids_out_of_range_and_tiny_fabric() -> None:
+def test_derive_rejects_ids_out_of_range_and_tiny_interlink() -> None:
     with pytest.raises(PolicyError, match="outside"):
         derive_addresses(255, domain="d", **DEFAULTS)
     with pytest.raises(PolicyError, match="no host address"):
-        derive_addresses(9, domain="d", **{**DEFAULTS, "fabric_cidr": "10.99.0.0/29"})
+        derive_addresses(9, domain="d", **{**DEFAULTS, "interlink_cidr": "10.99.0.0/29"})
 
 
 def test_rule1_prefixes_of_different_nodes() -> None:
@@ -107,7 +107,7 @@ def test_rule1_prefixes_of_different_nodes() -> None:
             OwnedPrefix(net("10.100.3.0/24"), 3, "client_pool"),
             OwnedPrefix(net("10.100.0.0/16"), 2, "lan", adding=True),
         ],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
         local_networks=[LocalNetwork(net("10.100.0.0/16"), 2, "eth1")],
     )
 
@@ -127,31 +127,31 @@ def test_same_node_prefixes_may_nest() -> None:
             OwnedPrefix(net("192.168.3.0/24"), 3, "lan"),
             OwnedPrefix(net("192.168.3.128/25"), 3, "source"),
         ],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
         local_networks=[LocalNetwork(net("192.168.3.0/24"), 3, "eth1")],
     )
 
     assert result.ok and not result.warnings
 
 
-def test_rule2_fabric_cidr_and_reserved() -> None:
+def test_rule2_interlink_cidr_and_reserved() -> None:
     result = check_overlaps(
         [
             OwnedPrefix(net("10.99.0.0/25"), 2, "lan"),
             OwnedPrefix(net("172.16.5.0/24"), 2, "source"),
         ],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
         reserved=["172.16.0.0/12"],
     )
 
     owners = sorted(conflict.owner for conflict in result.errors)
-    assert owners == ["fabric.cidr", "fabric.reserved"]
+    assert owners == ["interlink.cidr", "interlink.reserved"]
 
 
 def test_rule2_enroll_pool_rejects_owned_prefix() -> None:
     result = check_overlaps(
         [OwnedPrefix(net("10.99.255.240/28"), 2, "client_pool")],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
         enroll_pool="10.99.255.240/28",
     )
 
@@ -160,7 +160,7 @@ def test_rule2_enroll_pool_rejects_owned_prefix() -> None:
             "prefix": "10.99.255.240/28",
             "node": 2,
             "with": "10.99.255.240/28",
-            "owner": "fabric.enroll_pool",
+            "owner": "interlink.enroll_pool",
         }
     ]
 
@@ -169,12 +169,12 @@ def test_rule3_error_when_adding_warning_when_existing() -> None:
     local = LocalNetwork(net("10.100.0.0/16"), 2, "eth1")
     adding = check_overlaps(
         [OwnedPrefix(net("10.100.3.0/24"), 3, "client_pool", adding=True)],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
         local_networks=[local],
     )
     existing = check_overlaps(
         [OwnedPrefix(net("10.100.3.0/24"), 3, "client_pool")],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
         local_networks=[local],
     )
 
@@ -193,7 +193,7 @@ def test_rule3_error_when_adding_warning_when_existing() -> None:
 def test_rule3_ignores_the_nodes_own_local_networks() -> None:
     result = check_overlaps(
         [OwnedPrefix(net("192.168.3.0/24"), 3, "lan", adding=True)],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
         local_networks=[LocalNetwork(net("192.168.3.0/24"), 3, "eth1")],
     )
 
@@ -203,7 +203,7 @@ def test_rule3_ignores_the_nodes_own_local_networks() -> None:
 def test_rule4_exported_lan_not_reported_is_a_warning() -> None:
     result = check_overlaps(
         [OwnedPrefix(net("192.168.3.0/24"), 3, "lan", adding=True)],
-        fabric_cidr="10.99.0.0/24",
+        interlink_cidr="10.99.0.0/24",
     )
 
     assert result.ok

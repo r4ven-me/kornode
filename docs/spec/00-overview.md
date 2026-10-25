@@ -13,18 +13,18 @@
 ## Glossary
 
 - **Node** — any machine in the network. The hub is node 1; agents are 2..254.
-- **Fabric** — the routed overlay formed by agents' ocserv sessions to the hub.
-- **Fabric prefix** — any prefix owned by a node and exported into the fabric:
+- **Interlink** — the routed overlay formed by agents' ocserv sessions to the hub.
+- **Interlink prefix** — any prefix owned by a node and exported into the interlink:
   its client pool, source subnets, exported LANs.
 - **Service address** — `10.100.<id>.1`, the node's own address for dnsmasq,
   panel (hub) and probes; bound to `lo`.
-- **Fabric address** — `10.99.0.<id>`, the node's address on its fabric
+- **Interlink address** — `10.99.0.<id>`, the node's address on its interlink
   interface (hub: on `lo` + ocserv side; agent: on its openconnect tun).
 - **Class** (hub) — `clients`, `agents`, `externals`: the three participant
   kinds with distinct auth, addressing and NAT policy.
 - **Source** — traffic origin class used in egress rules: `clients`, `host`,
-  `fabric`, or a named source (an attached access server like wg-easy).
-- **Exit** — where an egress rule sends traffic: `local`, `fabric`,
+  `interlink`, or a named source (an attached access server like wg-easy).
+- **Exit** — where an egress rule sends traffic: `local`, `interlink`,
   `node:<n>`, `upstream:<profile>`, `drop`.
 - **Bundle** — the signed desired-state document the hub compiles per agent.
 - **Reconciler** — loop that converges kernel state to desired state.
@@ -36,7 +36,7 @@
 - **Data plane**: kernel routing, nftables, tunnels. Must keep working without
   the control plane.
 - **Control plane**: registry, bundles, reports, commands. Pull-only from
-  agents, carried inside the fabric.
+  agents, carried inside the interlink.
 - **Management plane**: hub `korctl`, admin REST API, panel. All three equal
   (parity), all call the same services.
 

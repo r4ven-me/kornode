@@ -28,10 +28,20 @@ def snapshot(
 
 
 def _snapshot(conn: sqlite3.Connection, dest_dir: Path, *, now: datetime, keep: int) -> Path:
+    stamp = _as_utc(now).strftime("%Y%m%dT%H%M%SZ")
+    final_path = write_snapshot(conn, dest_dir, f"registry-{stamp}.db")
+    _prune(dest_dir, keep)
+    return final_path
+
+
+def write_snapshot(conn: sqlite3.Connection, dest_dir: Path, name: str) -> Path:
+    """`VACUUM INTO` a temp file, integrity-check it, rename it to `name` (0600).
+
+    Pre-migration snapshots (`pre-migration-v<N>-*.db`) use this too; their
+    prefix keeps them out of the daily rotation and its pruning."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(dest_dir, 0o700)
-    stamp = _as_utc(now).strftime("%Y%m%dT%H%M%SZ")
-    final_path = dest_dir / f"registry-{stamp}.db"
+    final_path = dest_dir / name
     fd, temp_name = tempfile.mkstemp(prefix=f".{final_path.name}.", suffix=".tmp", dir=dest_dir)
     os.close(fd)
     temp_path = Path(temp_name)
@@ -43,7 +53,6 @@ def _snapshot(conn: sqlite3.Connection, dest_dir: Path, *, now: datetime, keep: 
         if result != "ok":
             raise RegistryError(f"registry snapshot integrity check failed: {result}")
         os.replace(temp_path, final_path)
-        _prune(dest_dir, keep)
         return final_path
     finally:
         temp_path.unlink(missing_ok=True)

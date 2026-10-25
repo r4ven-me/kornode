@@ -20,6 +20,7 @@ from kornode.services.config import ConfigService
 from kornode.services.config_store import mutate_config
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificatePaths, ServerCertificateService
+from kornode.services.supervisor_rpc import SupervisorRpcClient
 
 AUTH = ("admin", "secret")
 
@@ -117,9 +118,11 @@ def test_certificate_save_serializes_with_other_writers_and_preserves_raw_refs(
 
 
 @pytest.mark.parametrize("fail_reload", [False, True])
-def test_activation_renders_once_then_reloads_authoritative_candidate_inside_lock(
+def test_activation_renders_once_then_restarts_authoritative_candidate_inside_lock(
     panel: tuple[TestClient, Path], monkeypatch: pytest.MonkeyPatch, fail_reload: bool
 ) -> None:
+    # The uploaded material lives at new paths: ocserv cannot SIGHUP onto a path
+    # it did not start with ("cannot find snapshot for file"), so activation restarts.
     client, path = panel
     material = ServerCertificatePaths(
         path.parent / "server.crt", path.parent / "server.key", path.parent / "ca.crt"
@@ -128,7 +131,7 @@ def test_activation_renders_once_then_reloads_authoritative_candidate_inside_loc
         ServerCertificateService, "save_external_material", lambda *_a, **_k: material
     )
     rendered: list[AppConfig] = []
-    reloaded: list[AppConfig] = []
+    restarted: list[AppConfig] = []
 
     def render(service: ConfigService, config: AppConfig) -> list[Path]:
         assert_locked(path)
@@ -137,17 +140,21 @@ def test_activation_renders_once_then_reloads_authoritative_candidate_inside_loc
         rendered.append(config)
         return []
 
-    def reload(service: ServerService, *, dry_run: bool = False) -> CommandResult:
+    def restart(service: ServerService, *, dry_run: bool = False) -> CommandResult:
         assert_locked(path)
         assert not dry_run
         assert service.config is rendered[-1]
-        reloaded.append(service.config)
+        restarted.append(service.config)
         if fail_reload:
             raise RuntimeError("private-key-material-must-not-escape")
-        return CommandResult(("supervisor-rpc", "signalProcess", "ocserv", "HUP"), 0, "", "")
+        return CommandResult(("supervisor-rpc", "restartProcess", "ocserv"), 0, "", "")
 
     monkeypatch.setattr(ConfigService, "write_rendered_files", render)
-    monkeypatch.setattr(ServerService, "reload", reload)
+    monkeypatch.setattr(
+        SupervisorRpcClient, "get_process_info", lambda *_a: {"statename": "RUNNING"}
+    )
+    monkeypatch.setattr(ServerService, "restart", restart)
+    monkeypatch.setattr(ServerService, "reload", lambda *_a, **_k: pytest.fail("SIGHUP"))
     # There must be no post-commit load/apply of an independently read snapshot.
     monkeypatch.setattr(routes_certificates, "load_config", lambda *_: pytest.fail("stale reload"))
     response = client.post(
@@ -161,12 +168,94 @@ def test_activation_renders_once_then_reloads_authoritative_candidate_inside_loc
         },
     )
     assert response.status_code == (500 if fail_reload else 200), response.text
-    assert len(rendered) == len(reloaded) == 1
+    assert len(rendered) == len(restarted) == 1
     assert load_config(path).certificates.server_cert == material.server_cert
     if fail_reload:
         assert response.json()["detail"]["status"] == "saved_but_not_applied"
         assert response.json()["detail"]["saved"] is True
         assert "private-key-material" not in response.text
+    else:
+        assert response.json()["reload"]["argv"] == ["korctl", "server", "restart"]
+        assert response.json()["restart_pending"] is False
+
+
+def test_activation_without_reload_reports_a_pending_restart(
+    panel: tuple[TestClient, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, path = panel
+    material = ServerCertificatePaths(
+        path.parent / "server.crt", path.parent / "server.key", path.parent / "ca.crt"
+    )
+    monkeypatch.setattr(
+        ServerCertificateService, "save_external_material", lambda *_a, **_k: material
+    )
+    monkeypatch.setattr(ServerService, "restart", lambda *_a, **_k: pytest.fail("restart"))
+    monkeypatch.setattr(ServerService, "reload", lambda *_a, **_k: pytest.fail("SIGHUP"))
+    response = client.post(
+        "/api/certificates/external",
+        auth=AUTH,
+        data={"reload": "false"},
+        files={
+            "server_cert": ("server.crt", b"certificate"),
+            "server_key": ("server.key", b"key"),
+            "ca_cert": ("ca.crt", b"ca"),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["reload"] is None
+    assert response.json()["restart_pending"] is True
+
+
+def test_mode_change_that_moves_certificate_paths_restarts_ocserv(
+    panel: tuple[TestClient, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, path = panel
+    mutate_config(
+        path,
+        lambda raw: deep_merge(
+            raw,
+            {
+                "certificates": {
+                    "server_cert": str(path.parent / "ext.crt"),
+                    "server_key": str(path.parent / "ext.key"),
+                    "ca_cert": str(path.parent / "ext-ca.crt"),
+                }
+            },
+        ),
+        write_rendered=False,
+    )
+    client.app.state.config = load_config(path)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        SupervisorRpcClient, "get_process_info", lambda *_a: {"statename": "RUNNING"}
+    )
+
+    def restart(_service: ServerService, *, dry_run: bool = False) -> CommandResult:
+        assert_locked(path)
+        calls.append("restart")
+        return CommandResult(("supervisor-rpc", "restartProcess", "ocserv"), 0, "", "")
+
+    monkeypatch.setattr(ServerService, "restart", restart)
+    monkeypatch.setattr(ServerService, "reload", lambda *_a, **_k: pytest.fail("SIGHUP"))
+    response = client.post(
+        "/api/certificates/settings", auth=AUTH, json={"mode": "external", "ca_name": "CA"}
+    )
+    assert response.status_code == 200, response.text
+    assert calls == ["restart"]
+    assert response.json()["reload"]["argv"] == ["korctl", "server", "restart"]
+
+
+def test_settings_save_without_ocserv_change_leaves_ocserv_alone(
+    panel: tuple[TestClient, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _path = panel
+    monkeypatch.setattr(ServerService, "restart", lambda *_a, **_k: pytest.fail("restart"))
+    monkeypatch.setattr(ServerService, "reload", lambda *_a, **_k: pytest.fail("SIGHUP"))
+    response = client.post(
+        "/api/certificates/settings", auth=AUTH, json={"mode": "auto", "ca_name": "Renamed CA"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["reload"] is None
 
 
 def test_certificate_preflight_failure_does_not_persist_or_reload(

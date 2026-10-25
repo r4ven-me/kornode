@@ -14,11 +14,12 @@ import tarfile
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.x509.oid import NameOID
 
@@ -110,7 +111,7 @@ class Agent:
         self._doctor_cache: tuple[float, int | None, list[dict[str, str]]] | None = None
         self._report_now = asyncio.Event()
         self._apply_lock = asyncio.Lock()
-        self._fabric_healthy_since: float | None = None
+        self._interlink_healthy_since: float | None = None
         self._thread_stop = threading.Event()
         self._versions: dict[str, str] = {}
 
@@ -140,9 +141,6 @@ class Agent:
     async def _run(self) -> int:
         self.loop = asyncio.get_running_loop()
         self.config: AgentConfig = load_config(self.root)
-        self.client = ControlClient.enrolled(
-            self.config.hub.control_url, self.root / "tls", self._fabric_address
-        )
         self.reconciler: Reconciler
         self.tunnels = TunnelManager(
             self.root,
@@ -153,7 +151,7 @@ class Agent:
             self.root,
             nameservers=self._hub_nameservers,
             policy=lambda: self.inputs.active.bundle.policy if self.inputs.active else None,
-            source=self._fabric_source,
+            source=self._interlink_source,
         )
         self.inputs = AgentNetInputs(
             self.config,
@@ -181,6 +179,12 @@ class Agent:
         # Boot first: a reconciler pass before the cached bundle is active would
         # drop the kill-switches the kernel still holds (fail closed).
         await _worker(self.applier.boot)
+        # Only now the control client: its mTLS context is built on the first
+        # request, so missing or corrupt ca/cert/key files cost the control loops
+        # (which retry with backoff), never the boot from cache.
+        self.client = ControlClient.enrolled(
+            self.config.hub.control_url, self.root / "tls", self._interlink_address
+        )
         for target in (
             self.reconciler.run_forever,
             lambda: watch_netlink(self.reconciler, self._thread_stop),
@@ -208,22 +212,24 @@ class Agent:
         self.reconciler.wake()
         self.set_resolver.changed.set()  # re-resolve the sets of the new policy now
 
-    def _fabric_source(self) -> str | None:
-        """The node's fabric address: queries to the hub resolver must come from it (D-66)."""
+    def _interlink_source(self) -> str | None:
+        """The node's interlink address: queries to the hub resolver must come from it (D-66)."""
         active = self.inputs.active
-        return str(active.bundle.node.fabric_address) if active else None
+        return str(active.bundle.node.interlink_address) if active else None
 
     def _hub_nameservers(self) -> list[str]:
-        """The hub resolver the node's dnsmasq forwards the fabric zone to (D-66, D-78)."""
+        """The hub resolver the node's dnsmasq forwards the interlink zone to (D-66, D-78)."""
         active = self.inputs.active
         dns = active.bundle.dns if active else None
         zones = dns.forward_zones if dns is not None and dns.forward_zones else ()
         return hub_nameservers([server for zone in zones for server in zone.servers])
 
-    def _fabric_address(self) -> str | None:
+    def _interlink_address(self) -> str | None:
         inputs = getattr(self, "inputs", None)
         active = inputs.active if inputs else None
-        iface = active.bundle.tunnels.fabric.interface if active else self.config.fabric.interface
+        iface = (
+            active.bundle.tunnels.interlink.interface if active else self.config.interlink.interface
+        )
         return self.probes.address(iface)
 
     def _converge_or_raise(self) -> None:
@@ -242,6 +248,8 @@ class Agent:
             self._thread_stop.wait(1.0)
 
     def _hub_ping(self) -> bool:
+        if not hasattr(self, "client"):
+            return False  # still booting from cache: the hub is not consulted yet
         future = asyncio.run_coroutine_threadsafe(self.client.ping(), self.loop)
         try:
             future.result(15)
@@ -258,7 +266,7 @@ class Agent:
         if not self.revoked:
             self.revoked = True
             log.error("the hub reports this node as revoked: tunnels are not redialled")
-            self.loop.run_in_executor(None, self.tunnels.suspend, "fabric")
+            self.loop.run_in_executor(None, self.tunnels.suspend, "interlink")
 
     def _on_event(self, event: dict[str, Any]) -> None:
         if event["type"] == "rolled_back":
@@ -339,22 +347,22 @@ class Agent:
 
     async def _deferred_loop(self) -> None:
         """A version rolled back while the hub path was down is retried once the
-        fabric has been healthy for 30 s (at most 3 attempts)."""
+        interlink has been healthy for 30 s (at most 3 attempts)."""
         while True:
             await asyncio.sleep(5)
             if self.applier.state.deferred is None or self.applier.state.pending is not None:
-                self._fabric_healthy_since = None
+                self._interlink_healthy_since = None
                 continue
             healthy = await asyncio.to_thread(
-                lambda: self.health.checks(self.applier.active).get("fabric", False)
+                lambda: self.health.checks(self.applier.active).get("interlink", False)
             )
             now = time.monotonic()
             if not healthy:
-                self._fabric_healthy_since = None
-            elif self._fabric_healthy_since is None:
-                self._fabric_healthy_since = now
-            elif now - self._fabric_healthy_since >= DEFERRED_STABLE_SECONDS:
-                self._fabric_healthy_since = None
+                self._interlink_healthy_since = None
+            elif self._interlink_healthy_since is None:
+                self._interlink_healthy_since = now
+            elif now - self._interlink_healthy_since >= DEFERRED_STABLE_SECONDS:
+                self._interlink_healthy_since = None
                 async with self._apply_lock:
                     outcome = await _worker(self.applier.retry_deferred)
                 if outcome is not None:
@@ -391,10 +399,19 @@ class Agent:
         # The key is kept: replacing only the certificate is one atomic rename,
         # whereas a new key would need two files to change together.
         cert_pem = await self.client.renew(csr.public_bytes(serialization.Encoding.PEM).decode())
+        # Whatever the hub returned must be a certificate this agent can use: a
+        # broken one written over cert.pem would lock the agent out of the hub.
+        validate_renewed_certificate(
+            cert_pem.encode(),
+            key,
+            (self.root / "tls" / "ca.pem").read_bytes(),
+            self.config.node_id,
+            now=now,
+        )
         atomic_write(self.root / "tls" / "cert.pem", cert_pem.encode(), 0o644)
         old = self.client
         self.client = ControlClient.enrolled(
-            self.config.hub.control_url, self.root / "tls", self._fabric_address
+            self.config.hub.control_url, self.root / "tls", self._interlink_address
         )
         await old.aclose()
         return True
@@ -421,6 +438,9 @@ class Agent:
             ok, output = False, str(exc)
         except (ValueError, KeyError, OSError):
             ok, output = False, "invalid command arguments or unavailable local data"
+        except Exception as exc:  # one broken command must not lose the rest of the batch
+            log.error("command %s (%s) failed: %s", command.id, command.type, type(exc).__name__)
+            ok, output, artefact = False, f"command failed: {type(exc).__name__}", None
         for attempt in range(3):
             try:
                 await self.client.command_result(
@@ -430,6 +450,9 @@ class Agent:
             except (ControlError, HubUnreachable) as exc:
                 log.warning("command result not delivered (%s)", exc)
                 await asyncio.sleep(2**attempt)
+            except Exception as exc:
+                log.warning("command result not delivered (%s)", type(exc).__name__)
+                break
         if command.type == "restart":
             self.exit_code = RESTART_EXIT_CODE
             self.stop.set()
@@ -606,13 +629,13 @@ class Agent:
             return {}
         resolved = self.set_resolver.read()
         found: dict[str, list[str]] = {}
-        for index, rule in enumerate(active.bundle.policy.egress):
+        for rule in active.bundle.policy.egress:
             if rule.parsed_via.kind != "node":
                 continue
             if isinstance(rule.to, SetRef):
                 key = rule.to.set
             elif isinstance(rule.to, InlineDest):
-                key = f"rule{index}"
+                key = rule.to.resolved_key()
             else:
                 continue
             found[key] = sorted(resolved.get(key, frozenset()))
@@ -708,6 +731,42 @@ def _add(archive: tarfile.TarFile, name: str, data: bytes) -> None:
     archive.addfile(info, io.BytesIO(data))
 
 
+class RenewalRejected(ValueError):
+    """The certificate returned by the hub is not usable; cert.pem is kept."""
+
+
+def validate_renewed_certificate(
+    cert_pem: bytes,
+    key: Any,
+    ca_pem: bytes,
+    node_id: int,
+    *,
+    now: datetime | None = None,
+) -> x509.Certificate:
+    """Parses; carries the public key of key.pem (same SPKI); is directly signed
+    by the enrolled CA; is CN=agent-<id>, OU=agents; and is valid now."""
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem)
+    except ValueError as exc:
+        raise RenewalRejected("renewed certificate does not parse") from exc
+    spki = serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    if cert.public_key().public_bytes(*spki) != key.public_key().public_bytes(*spki):
+        raise RenewalRejected("renewed certificate is not for this agent's key")
+    try:
+        cert.verify_directly_issued_by(x509.load_pem_x509_certificate(ca_pem))
+    except (InvalidSignature, ValueError, TypeError) as exc:
+        raise RenewalRejected("renewed certificate is not signed by the enrolled CA") from exc
+    names = [a.value for a in cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)]
+    units = [a.value for a in cert.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)]
+    if names != [f"agent-{node_id}"] or "agents" not in units:
+        raise RenewalRejected("renewed certificate names another identity")
+    moment = now or datetime.now(UTC)
+    skew = timedelta(minutes=5)  # the hub's clock may run slightly ahead
+    if cert.not_valid_before_utc > moment + skew or cert.not_valid_after_utc <= moment:
+        raise RenewalRejected("renewed certificate is not valid now")
+    return cert
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -722,4 +781,4 @@ def _log_outcome(outcome: Outcome) -> None:
     log.info("bundle %d: %s %s", outcome.version, outcome.result, outcome.error or "")
 
 
-__all__ = ["Agent", "AgentRuntime"]
+__all__ = ["Agent", "AgentRuntime", "RenewalRejected", "validate_renewed_certificate"]

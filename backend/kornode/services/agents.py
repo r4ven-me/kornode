@@ -39,7 +39,12 @@ from kornode.net.errors import NetError
 from kornode.net.model import NAME_PATTERN, EgressPolicy, InlineDest, SetRef, Source
 from kornode.registry.db import migrate, open_registry, transaction
 from kornode.registry.models import Node, iso_time
-from kornode.registry.repository import Registry, RegistryConflict, RegistryNotFound
+from kornode.registry.repository import (
+    DELIVERED_TTL_SECONDS,
+    Registry,
+    RegistryConflict,
+    RegistryNotFound,
+)
 from kornode.services.agent_models import (
     AccessInput,
     AccessUserInput,
@@ -51,10 +56,14 @@ from kornode.services.agent_models import (
     username,
 )
 from kornode.services.audit import AuditService
-from kornode.services.bundle import BundleService
+from kornode.services.bundle import (
+    BundleService,
+    effective_min_agent_version,
+    upgrade_required,
+)
 from kornode.services.command import CommandRunner
 from kornode.services.enrollment import EnrollmentError, EnrollmentService
-from kornode.services.fabric_groups import FabricGroupsService
+from kornode.services.interlink_groups import InterlinkGroupsService
 from kornode.services.sessions import SessionService
 from kornode.tunnels.pin import certificate_pin, pem_to_der
 
@@ -167,10 +176,10 @@ class AgentService:
 
     def _sync_hub(self) -> None:
         """ocserv group/user files, then the hub zone (`node<N>` names, D-66)."""
-        from kornode.services.fabric_dns import FabricDnsService
+        from kornode.services.interlink_dns import InterlinkDnsService
 
-        FabricGroupsService(self.config, reload_ocserv=self._reload_ocserv).sync()
-        FabricDnsService(self.config, agents=self).sync()
+        InterlinkGroupsService(self.config, reload_ocserv=self._reload_ocserv).sync()
+        InterlinkDnsService(self.config, agents=self).sync()
 
     def _synced(self) -> None:
         try:
@@ -183,7 +192,7 @@ class AgentService:
                 {"committed": True, "recovery": "korctl registry maintain"},
             ) from None
 
-    def _view(self, node: Node) -> dict[str, Any]:
+    def _view(self, node: Node, agent_version: str | None = None) -> dict[str, Any]:
         data = asdict(node)
         data.pop("seal_pubkey")
         data.pop("policy")
@@ -209,16 +218,65 @@ class AgentService:
             online = False
         data["online"] = online and node.state == "active"
         data["runtime_support"] = RUNTIME_GAPS
+        # Spec 12 "upgrade required": the newest report names an agent version
+        # below the minimum every compiled bundle imposes, so the agent refuses
+        # (or will refuse) the bundles the hub serves (D-91).
+        minimum = effective_min_agent_version(self.config)
+        data["agent_version"] = agent_version
+        data["min_agent_version"] = minimum
+        data["upgrade_required"] = node.state != "revoked" and upgrade_required(
+            agent_version, minimum
+        )
         return data
 
     def list(self) -> dict[str, Any]:
         with self.registry() as r:
-            return {"agents": [self._view(n) for n in r.list_nodes() if n.id != 1]}
+            versions = r.last_agent_versions()
+            return {
+                "agents": [self._view(n, versions.get(n.id)) for n in r.list_nodes() if n.id != 1]
+            }
 
     def show(self, name: str) -> dict[str, Any]:
         with self.registry() as r:
             node = self.node(r, name)
-            return {**self._view(node), "prefixes": [asdict(p) for p in r.list_prefixes(node.id)]}
+            return {
+                **self._view(node, r.last_agent_versions().get(node.id)),
+                "prefixes": [asdict(p) for p in r.list_prefixes(node.id)],
+            }
+
+    def push(self, name: str, *, dry_run: bool = False) -> dict[str, Any]:
+        """Operator re-push (spec 06): compile a new, higher version even when the
+        content did not change. Content dedup would otherwise keep serving a version
+        the agent already marked failed (e.g. restart inside the confirm window), and
+        the agent never re-applies a version at or below its high-water mark (D-90).
+        Only on request: the hub never forces a recompile on its own."""
+        with self.exclusive():
+            with self.registry() as r, transaction(r.conn):
+                node = self.node(r, name)
+                if node.state != "active" or node.seal_pubkey is None:
+                    raise ManagementError(
+                        409, "not_active", "push requires an active enrolled agent"
+                    )
+                latest = r.latest_bundle(node.id)
+                current = {
+                    "agent": name,
+                    "desired_version": node.desired_version,
+                    "applied_version": node.applied_version,
+                    "high_water_version": node.high_water_version,
+                }
+                if dry_run:
+                    next_version = (
+                        max(
+                            latest.version if latest else 0,
+                            node.desired_version,
+                            node.high_water_version,
+                        )
+                        + 1
+                    )
+                    return {"dry_run": True, **current, "version": next_version}
+                stored = self.bundles.compile_node(r, node.id, "operator push", force=True)
+            self._audit("agent.push", name)
+            return {**current, "version": stored.version, "pushed": True}
 
     def create(self, payload: AgentCreate) -> dict[str, Any]:
         with self.exclusive():
@@ -272,10 +330,10 @@ class AgentService:
             return {"agent": self.show(node.name), "token": token}
 
     def addresses(self, node_id: int) -> Any:
-        f = self.config.fabric
+        f = self.config.interlink
         return derive_addresses(
             node_id,
-            fabric_cidr=f.cidr,
+            interlink_cidr=f.cidr,
             client_pool=f.client_pool,
             source_pool=f.source_pool,
             domain=f.domain,
@@ -724,7 +782,7 @@ class AgentService:
                 raise ManagementError(409, "not_active", "commands require an active agent")
             if data.get("dry_run", False):
                 return {"dry_run": True, "agent": name, "type": kind, "args": args}
-            r.expire_commands(node.id, iso_time(self.clock()))
+            r.expire_commands(node.id, self.clock())
             pending = sum(1 for c in r.list_commands(node.id) if c.state in ("queued", "delivered"))
             if pending >= 100:
                 raise ManagementError(409, "queue_full", "agent command queue is full")
@@ -750,7 +808,14 @@ class AgentService:
         if command.node_id != node.id:
             raise ManagementError(404, "not_found", "command not found for agent")
         data = asdict(command)
-        if command.state == "queued" and command.expires_at <= iso_time(self.clock()):
+        now = self.clock()
+        if command.state == "queued" and command.expires_at <= iso_time(now):
+            data["state"] = "expired"
+        if (
+            command.state == "delivered"
+            and command.delivered_at is not None
+            and command.delivered_at <= iso_time(now - timedelta(seconds=DELIVERED_TTL_SECONDS))
+        ):
             data["state"] = "expired"
         if data["result"]:
             artifact = data["result"].pop("artefact_b64", None)
@@ -801,7 +866,7 @@ class AgentService:
 
     def _validate(self, r: Registry, *, changed: int) -> None:
         # Only the prefixes of the node being mutated are "adding": a conflict
-        # elsewhere in the fabric must not block unrelated mutations.
+        # elsewhere in the interlink must not block unrelated mutations.
         owned: list[OwnedPrefix] = []
         local: list[LocalNetwork] = []
         for node in r.list_nodes():
@@ -858,7 +923,7 @@ class AgentService:
                 raise ManagementError(
                     409, "interface_conflict", "sources and tunnels must have distinct interfaces"
                 )
-            tunnels = {"fabric": TunnelFact("oc-hub0", False)}
+            tunnels = {"interlink": TunnelFact("oc-hub0", False)}
             tunnels.update(gateway_tunnels(policy, "oc-hub0", False))
             tunnels.update(
                 {
@@ -883,10 +948,10 @@ class AgentService:
                 ),
             )
         self._check_gateway_role_kept(r, changed)
-        f = self.config.fabric
+        f = self.config.interlink
         conflicts = check_overlaps(
             owned,
-            fabric_cidr=f.cidr,
+            interlink_cidr=f.cidr,
             reserved=f.reserved,
             enroll_pool=f.enroll_pool,
             local_networks=local,
@@ -926,7 +991,7 @@ class AgentService:
                     409,
                     "runtime_unsupported",
                     "leaving through another node supports `to: any`, a set or an inline "
-                    "destination, not `fabric` or a node",
+                    "destination, not `interlink` or a node",
                 )
             if "host" in rule.from_:
                 raise ManagementError(
@@ -1026,7 +1091,7 @@ def validate_command(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
             ):
                 raise ValueError()
         elif kind == "reconnect" and args.get("tunnel") is not None:
-            if not re.fullmatch(r"fabric|upstream:[a-z][a-z0-9_-]{0,30}", args["tunnel"]):
+            if not re.fullmatch(r"interlink|upstream:[a-z][a-z0-9_-]{0,30}", args["tunnel"]):
                 raise ValueError()
         elif kind == "rollback":
             if type(args.get("to_version")) is not int or not 1 <= args["to_version"] <= 2**31 - 1:

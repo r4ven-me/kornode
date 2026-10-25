@@ -39,23 +39,23 @@ Scenario list (must all exist by the end of P4; each maps to a task "Done when")
 | ID | Scenario | Expectation |
 | --- | --- | --- |
 | NL-01 | hub Prometheus stub → node3 agent `:9100` | real source address seen, no NAT |
-| NL-02 | node3 agent → `monitoring.kornode.internal` on hub | resolves, TCP ok |
+| NL-02 | node3 agent → `monitoring.kornode.lan` on hub | resolves, TCP ok |
 | NL-03 | cli3 → internet | exit per rules, MSS ≤ path MTU |
 | NL-04 | cli3 → service in node2 LAN | via hub, no NAT |
-| NL-05 (`test_routed_fabric.py`, done) | awg3 client → internet via `upstream:office` | via ext; ext down → ICMP unreachable, nothing on uplink |
-| NL-06 | awg3 client → hub monitoring | via fabric, hub sees `10.8.3.2` |
+| NL-05 (`test_routed_interlink.py`, done) | awg3 client → internet via `upstream:office` | via ext; ext down → ICMP unreachable, nothing on uplink |
+| NL-06 | awg3 client → hub monitoring | via interlink, hub sees `10.8.3.2` |
 | NL-07 | hub client → hub docker bridge with `via: upstream` rule | local delivery |
 | NL-08 | openconnect bounce under traffic | zero marked packets on uplink |
 | NL-09 (`test_p0_upstream.py`, done) | 5 % loss + 50 ms on carrier | 50 MB transfer completes |
 | NL-10 | delete policy route manually | restored ≤ 2 s |
-| NL-11 | bundle cutting the fabric | rollback ≤ 70 s, reported |
+| NL-11 | bundle cutting the interlink | rollback ≤ 70 s, reported |
 | NL-12 | tampered bundle | rejected, version unchanged |
 | NL-13 | hub down 10 min | agent clients keep internet; agent restart boots from cache |
 | NL-14 | overlapping prefix in registry | rejected with conflict details |
-| NL-15 | carrier exclusion with `host → any via fabric` | no loop, tunnel stays up |
+| NL-15 | carrier exclusion with `host → any via interlink` | no loop, tunnel stays up |
 | NL-16 | regression set from v1.1.5 incidents (P1-06) | green |
 | NL-17 (`tests/netlab/test_p4_exit_set.py`, done) | two-host topology: source `wgusers` on hub, `via: node:2` by set, rest `local` | listed destinations leave via node2's uplink with node2's address, others via hub; node2 offline → listed destinations get ICMP unreachable, never hub uplink |
-| NL-18 (same file, done) | same topology, full tunnel (`to: any via node:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real fabric address |
+| NL-18 (same file, done) | same topology, full tunnel (`to: any via node:2`) + hub Prometheus scrapes node2 agent | all source traffic exits node2; scrape works by node2's real interlink address |
 
 NL-08 is `test_tunnel_drop_and_reconnect_through_a_running_reconciler_leaks_nothing`:
 openconnect is killed and redialled under traffic while `korctl net run` is
@@ -166,7 +166,7 @@ E2E scenarios must ultimately mirror NL-01..NL-13 on real hosts plus:
 | E2E-01 | fresh enroll of agent-a and agent-b ≤ 30 s each |
 | E2E-02 | registry change → agent applied ≤ 10 s |
 | E2E-03 | 60 s blackhole of agent-b's uplink → auto recovery (P3 implementation: namespaced nft fault, never host iptables) |
-| E2E-04 | revoke agent-b → fabric down, control API 403 |
+| E2E-04 | revoke agent-b → interlink down, control API 403 |
 | E2E-05 | hub backup → wipe → restore → agents reconnect without re-enroll |
 | E2E-06 | upgrade hub and agents from previous pre-release with live traffic, ≤ 30 s interruption |
 | E2E-07 | two-host run with only `hub` (wg-easy attached as a source) and `agent-a` (role `gateway`): a wg-easy client exits via agent-a by domain/subnet list, then in full mode; hub Prometheus scrapes agent-a |
@@ -179,12 +179,12 @@ and **partial** NL-13 (≥600 s hub outage, cache boot, external tunnel/ICMP tra
 E2E-04 checks actual mTLS HTTP 403 through a test-only TCP relay; CA/client cert
 verification stays on, hostname checking is disabled only for that relay probe.
 E2E-05 includes announced rotation keys, owned wipe/staged restore activation,
-original certs and restored high-water recovery. E2E-06 observes continuous fabric
+original certs and restored high-water recovery. E2E-06 observes continuous interlink
 mTLS probes (not access-client forwarding); it requires paired **different immutable**
 `E2E_PREVIOUS_HUB_IMAGE` / `E2E_PREVIOUS_AGENT_IMAGE` digest refs with compatible
 CLI/schema. Missing baselines skip; identical images fail rather than pass as an upgrade.
 
-`test_routed_fabric.py` runs NL-01…NL-04 and NL-06 on real VMs (case `routed`; all passed on 2026-10-20: D-65, D-66, D-67, D-68) and keeps explicit P4 skips: NL-07…09, full NL-13
+`test_routed_interlink.py` runs NL-01…NL-04 and NL-06 on real VMs (case `routed`; all passed on 2026-10-20: D-65, D-66, D-67, D-68) and keeps explicit P4 skips: NL-07…09, full NL-13
 client forwarding and E2E-06 client continuity. They are listed in offline plan
 and run summary. There is no claimed wg-easy/domain/leak/throughput/host-network
 coverage. None of the real VM cases has been run; local faked SSH/Docker safety
@@ -196,5 +196,5 @@ image identities/sizes, sanitized diagnostics, cleanup evidence and remaining sk
 - Compiler golden files: `tests/golden/<example>.nft`, `.rules`, `.routes`;
   regenerate with `pytest --update-golden`, reviewed in PR diffs.
 - Contract tests validate every API response model against the OpenAPI
-  schema and bundle bodies against `schemas/bundle.v1.schema.json`.
+  schema and bundle bodies against `schemas/bundle.v2.schema.json`.
 - No test sleeps longer than needed: poll with timeouts.

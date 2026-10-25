@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from kornode.bundle.canonical import MAX_BODY_BYTES
 from kornode.bundle.errors import BundleError
-from kornode.bundle.models import Bundle
+from kornode.bundle.models import BUNDLE_FORMAT, LEGACY_BUNDLE_FORMAT, MIN_AGENT_VERSION, Bundle
 from kornode.bundle.sealing import unseal, walk_sealed
 from kornode.bundle.signing import verify
 from kornode.net.compile import NodeFacts, TunnelFact, compile_policy, gateway_tunnels
@@ -37,21 +37,21 @@ def _version_tuple(value: str) -> tuple[int, ...]:
 def facts_for(bundle: Bundle) -> NodeFacts:
     """NodeFacts that make the policy compile as if every tunnel were up."""
     prefixes: dict[int, list[ipaddress.IPv4Network | ipaddress.IPv6Network]] = {}
-    for item in bundle.fabric.prefixes:
+    for item in bundle.interlink.prefixes:
         prefixes.setdefault(item.node_id, []).append(
             ipaddress.ip_network(item.prefix, strict=False)
         )
-    tunnels = {"fabric": TunnelFact(interface=bundle.tunnels.fabric.interface, up=True)}
+    tunnels = {"interlink": TunnelFact(interface=bundle.tunnels.interlink.interface, up=True)}
     for upstream in bundle.tunnels.upstreams:
         tunnels[f"upstream:{upstream.name}"] = TunnelFact(interface=upstream.interface, up=True)
-    tunnels.update(gateway_tunnels(bundle.policy, bundle.tunnels.fabric.interface, True))
+    tunnels.update(gateway_tunnels(bundle.policy, bundle.tunnels.interlink.interface, True))
     return NodeFacts(
         node_id=bundle.node_id,
         client_pool=ipaddress.IPv4Network(bundle.node.client_pool, strict=False),
         tunnels=tunnels,
         upstreams=tuple(upstream.name for upstream in bundle.tunnels.upstreams),
         node_prefixes={key: tuple(value) for key, value in prefixes.items()},
-        fabric_ifaces=(bundle.tunnels.fabric.interface,),
+        interlink_ifaces=(bundle.tunnels.interlink.interface,),
         uplink="auto",
     )
 
@@ -87,20 +87,26 @@ def validate(
         raise BundleError(
             "replay", f"version {bundle.version} is not above high-water {high_water_version}"
         )
-    if bundle.min_agent_version and _version_tuple(bundle.min_agent_version) > _version_tuple(
-        agent_version
-    ):
-        raise BundleError("too_old", f"bundle needs agent >= {bundle.min_agent_version}")
+    minimum = bundle.min_agent_version or "0.0.0"
+    if raw["format"] == BUNDLE_FORMAT:
+        minimum = max(minimum, MIN_AGENT_VERSION, key=_version_tuple)
+    if _version_tuple(minimum) > _version_tuple(agent_version):
+        raise BundleError("too_old", f"bundle needs agent >= {minimum}")
     secrets: dict[str, str] = {}
     for pointer, sealed in walk_sealed(raw):
         if seal_private_key is not None:
-            secrets[pointer] = unseal(sealed, seal_private_key, bundle.node_id, pointer)
+            plaintext = unseal(sealed, seal_private_key, bundle.node_id, pointer)
+            # v1 ciphertext is bound to its original path. Only translate the
+            # lookup key after authentication, never the AAD or signed body.
+            if raw["format"] == LEGACY_BUNDLE_FORMAT and pointer == "/tunnels/fabric/camouflage":
+                pointer = "/tunnels/interlink/camouflage"
+            secrets[pointer] = plaintext
     try:
         compile_policy(bundle.policy, facts_for(bundle))
     except (PolicyError, ValueError) as exc:
         raise BundleError("policy", f"policy does not compile: {exc}") from exc
-    if not bundle.tunnels.fabric.interface:
-        raise BundleError("no_fabric", "bundle has no fabric tunnel")
-    if not any(rule.parsed_via.kind == "fabric" for rule in bundle.policy.egress):
-        raise BundleError("no_fabric", "bundle has no rule using the fabric exit")
+    if not bundle.tunnels.interlink.interface:
+        raise BundleError("no_interlink", "bundle has no interlink tunnel")
+    if not any(rule.parsed_via.kind == "interlink" for rule in bundle.policy.egress):
+        raise BundleError("no_interlink", "bundle has no rule using the interlink exit")
     return Validated(bundle=bundle, key_id=signer, secrets=secrets)

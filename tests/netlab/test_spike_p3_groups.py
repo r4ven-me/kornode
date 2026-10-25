@@ -30,12 +30,12 @@ from tests.netlab.ocserv_peers import LISTENER, Peer, issue_client_cert
 
 pytestmark = pytest.mark.netlab
 
-HUB_FABRIC_ADDR = "10.99.0.1"
+HUB_INTERLINK_ADDR = "10.99.0.1"
 HUB_LAN_ADDR = "172.30.1.1"
 INET_ADDR = "198.51.100.2"
 CONTROL_PORT = 8444
 CLIENT_POOL = "10.100.1.0/24"
-FABRIC_CIDR = "10.99.0.0/24"
+INTERLINK_CIDR = "10.99.0.0/24"
 ENROLL_POOL = "10.99.255.240/28"
 AGENT_ID = 3
 CLIENT_USER = "alice"
@@ -64,7 +64,7 @@ ENROLL_NFT = textwrap.dedent(
     table inet spike_enroll {{
         chain input {{
             type filter hook input priority filter; policy accept;
-            ip saddr {ENROLL_POOL} ip daddr {HUB_FABRIC_ADDR} tcp dport {CONTROL_PORT} accept
+            ip saddr {ENROLL_POOL} ip daddr {HUB_INTERLINK_ADDR} tcp dport {CONTROL_PORT} accept
             ip saddr {ENROLL_POOL} drop
         }}
         chain forward {{
@@ -129,7 +129,7 @@ def _start(
     hub.run(["sysctl", "-qw", "net.ipv4.ip_forward=1"])
     lab.add_veth(hub, inet, addr_a="198.51.100.1/24", addr_b=f"{INET_ADDR}/24")
     inet.run(["ip", "route", "add", "10.0.0.0/8", "via", "198.51.100.1"])
-    for name, cidr in (("fab0", f"{HUB_FABRIC_ADDR}/32"), ("lan0", f"{HUB_LAN_ADDR}/24")):
+    for name, cidr in (("fab0", f"{HUB_INTERLINK_ADDR}/32"), ("lan0", f"{HUB_LAN_ADDR}/24")):
         hub.run(["ip", "link", "add", name, "type", "dummy"])
         hub.run(["ip", "addr", "add", cidr, "dev", name])
         hub.run(["ip", "link", "set", name, "up"])
@@ -183,8 +183,8 @@ def _start(
                 [
                     "python3",
                     str(tmp / "listener.py"),
-                    f"{HUB_FABRIC_ADDR}:{CONTROL_PORT}",
-                    f"{HUB_FABRIC_ADDR}:22",
+                    f"{HUB_INTERLINK_ADDR}:{CONTROL_PORT}",
+                    f"{HUB_INTERLINK_ADDR}:22",
                     f"{HUB_LAN_ADDR}:{CONTROL_PORT}",
                 ],
                 tmp / "hub-listener.log",
@@ -277,14 +277,15 @@ def _write_ocserv_files(hub: Namespace, tmp: Path, *, guard: bool) -> None:
     users.mkdir()
     (groups / "clients").write_text(f"ipv4-network = {CLIENT_POOL}\n", encoding="utf-8")
     (groups / "agents").write_text(
-        f"ipv4-network = {FABRIC_CIDR}\nroute = {FABRIC_CIDR}\nrestrict-user-to-routes = false\n",
+        f"ipv4-network = {INTERLINK_CIDR}\nroute = {INTERLINK_CIDR}\n"
+        "restrict-user-to-routes = false\n",
         encoding="utf-8",
     )
     # No restrict-user-to-*: ocserv enforces them through /usr/libexec/ocserv-fw
     # (iptables), a second kernel writer that silently does nothing without
     # iptables. The enroll restriction is ENROLL_NFT, compiled by kornode.net.
     (groups / "enroll").write_text(
-        f"ipv4-network = {ENROLL_POOL}\nroute = {HUB_FABRIC_ADDR}/32\nmax-same-clients = 1\n",
+        f"ipv4-network = {ENROLL_POOL}\nroute = {HUB_INTERLINK_ADDR}/32\nmax-same-clients = 1\n",
         encoding="utf-8",
     )
     (users / f"agent-{AGENT_ID}").write_text(
@@ -360,21 +361,21 @@ def test_s01_s02_password_client_and_certificate_agent_share_one_listener(
     client_addr = groups_lab.client.address()
     assert client_addr is not None and ip_address(client_addr) in ip_network(CLIENT_POOL)
     assert groups_lab.agent.address() == f"10.99.0.{AGENT_ID}"
-    assert groups_lab.agent.pushed_routes() == [FABRIC_CIDR]
+    assert groups_lab.agent.pushed_routes() == [INTERLINK_CIDR]
 
     log = groups_lab.connect_log.read_text(encoding="utf-8")
     assert f"user={CLIENT_USER} group=clients" in log
     assert f"user=agent-{AGENT_ID} group=agents" in log
     print(groups_lab.show_users())  # noqa: T201 - spike evidence
     print(log)  # noqa: T201
-    # The hub side of every agent session is the hub fabric address.
+    # The hub side of every agent session is the hub interlink address.
     agent_line = f"user=agent-{AGENT_ID} group=agents ip=10.99.0.{AGENT_ID}"
-    assert f"{agent_line} local={HUB_FABRIC_ADDR}" in log
+    assert f"{agent_line} local={HUB_INTERLINK_ADDR}" in log
 
     assert tcp_check(groups_lab.client.ns, INET_ADDR, 80)
     assert tcp_check(groups_lab.client.ns, HUB_LAN_ADDR, CONTROL_PORT)
-    assert tcp_check(groups_lab.agent.ns, HUB_FABRIC_ADDR, CONTROL_PORT)
-    assert tcp_check(groups_lab.agent.ns, HUB_FABRIC_ADDR, 22)
+    assert tcp_check(groups_lab.agent.ns, HUB_INTERLINK_ADDR, CONTROL_PORT)
+    assert tcp_check(groups_lab.agent.ns, HUB_INTERLINK_ADDR, 22)
 
 
 def test_s01_client_certificate_without_password_is_refused(groups_lab: GroupsLab) -> None:
@@ -428,16 +429,16 @@ def test_s04_enroll_session_reaches_only_the_control_api(groups_lab: GroupsLab) 
     )
     addr = groups_lab.enroll.address()
     assert addr is not None and ip_address(addr) in ip_network(ENROLL_POOL), addr
-    assert groups_lab.enroll.pushed_routes() == [f"{HUB_FABRIC_ADDR}/32"]
+    assert groups_lab.enroll.pushed_routes() == [f"{HUB_INTERLINK_ADDR}/32"]
     reach = {
-        "control api": tcp_check(groups_lab.enroll.ns, HUB_FABRIC_ADDR, CONTROL_PORT),
-        "hub fabric :22": tcp_check(groups_lab.enroll.ns, HUB_FABRIC_ADDR, 22),
+        "control api": tcp_check(groups_lab.enroll.ns, HUB_INTERLINK_ADDR, CONTROL_PORT),
+        "hub interlink :22": tcp_check(groups_lab.enroll.ns, HUB_INTERLINK_ADDR, 22),
         "hub lan": tcp_check(groups_lab.enroll.ns, HUB_LAN_ADDR, CONTROL_PORT),
         "internet": tcp_check(groups_lab.enroll.ns, INET_ADDR, 80),
     }
     assert reach == {
         "control api": True,
-        "hub fabric :22": False,
+        "hub interlink :22": False,
         "hub lan": False,
         "internet": False,
     }

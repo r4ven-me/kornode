@@ -518,7 +518,7 @@ def test_init_ca_is_idempotent_and_validates_existing_pair(tmp_path: Path) -> No
         ("server", "server"),
         ("user", "users/alice"),
         ("control", "control"),
-        ("fabric", "fabric"),
+        ("interlink", "interlink"),
     ],
 )
 @pytest.mark.parametrize("failure", ["key", "certificate", "invalid", "publish"])
@@ -547,13 +547,13 @@ def test_generation_failures_preserve_original_pairs(
             return service.create_user_certificate("alice")
         if operation == "control":
             return service.ensure_control_certificate("10.100.1.1")
-        return service.ensure_fabric_certificate()
+        return service.ensure_interlink_certificate()
 
     issue()
     key, crt = config.cert_path(stem + ".key"), config.cert_path(stem + ".crt")
     # Key generation is skipped for pinned listener keys; exercise a partial
     # original state there too, without deleting the surviving certificate.
-    if failure == "key" and operation in {"server", "control", "fabric"}:
+    if failure == "key" and operation in {"server", "control", "interlink"}:
         key.unlink()
     original = {path: path.read_bytes() if path.exists() else None for path in (key, crt)}
     run = runner.run

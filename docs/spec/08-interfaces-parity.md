@@ -51,42 +51,43 @@ capabilities:
 
 | ID | korctl | API | Panel |
 | --- | --- | --- | --- |
-| agent.list | `agent list [--json]` | `GET /api/agents` | Agents → table |
-| agent.show | `agent show <name>` | `GET /api/agents/{name}` | Agents → detail |
-| agent.create | `agent create <name> [--id N] [--role access] [--description]` | `POST /api/agents` | Add agent dialog |
-| agent.token | `agent token <name>` (re-issue) | `POST /api/agents/{name}/token` | Detail → Enrollment |
-| agent.update | `agent set <name> --role/--description/--transport ...` | `PATCH /api/agents/{name}` | Detail → Settings |
-| agent.revoke | `agent revoke <name>` | `POST /api/agents/{name}/revoke` | Detail → Revoke |
-| agent.delete | `agent delete <name>` | `DELETE /api/agents/{name}` | Detail → Delete |
-| agent.prefixes | `agent prefix add/del/list <name> <cidr> [--kind lan] [--no-export]` | `GET/POST/DELETE /api/agents/{name}/prefixes` | Detail → Networks |
-| agent.policy | `agent egress show/edit/set <name> [--file]` | `GET/PUT /api/agents/{name}/policy` | Detail → Egress editor |
-| agent.sources | `agent source add/set <name> <source> --file <json>`; `del/list` | `GET /api/agents/{name}/sources`, `PUT/DELETE .../sources/{source}` | Detail → Networks and sources |
-| agent.externals | `agent upstream add/set <name> <upstream> --file <json>`; `del/list` | `GET /api/agents/{name}/upstreams`, `PUT/DELETE .../upstreams/{upstream}` | Detail → Upstreams |
-| agent.access | `agent access show/set/del <name> [--hostname H --port P --udp --reissue]` | `GET/PUT/DELETE /api/agents/{name}/access` | Detail → Access listener and users (role access) |
-| agent.users | `agent user add/del/list/passwd/enable/disable <name> ...`; `set --file <json>` | `GET /api/agents/{name}/users`, `PUT/DELETE .../users/{username}` | Detail → Access listener and users (role access; delivered in the bundle) |
-| agent.bundle | `agent bundle list/show/diff <name> [v1] [v2]` | `GET /api/agents/{name}/bundles[/{v}]`, `GET .../diff?a=&b=` | Detail → Bundles |
-| agent.reports | `agent status <name> [--watch]` | `GET /api/agents/{name}/reports?limit=` | Detail → Status |
-| agent.command | `agent exec <name> reconnect/explain/collect-diag/restart/rollback ...` | `POST /api/agents/{name}/commands`, `GET .../commands/{id}` | Detail → Actions |
-| fabric.show | `fabric show` | `GET /api/fabric` | Fabric → Topology |
-| fabric.settings | `fabric set --node-id/--cidr/--domain/...` | `PATCH /api/fabric` | Fabric → Settings |
-| dns.records | `dns record add/del <name> <type> <value> [--node <agent>]`, `dns record list` | `GET/POST/DELETE /api/dns/records` | Fabric → DNS |
-| egress.hub | `egress show/edit/set/check` | `GET/PUT /api/egress`, `POST /api/egress/check` | Network → Egress |
-| sources.hub | `source add/del/list` | `/api/sources` | Network → Sources |
-| sets | `set add/del/list/refresh` | `/api/sets` | Network → Sets |
-| net.plan | `net plan` | `GET /api/net/plan` | Network → Plan |
-| net.apply | `net apply [--dry-run]` | `POST /api/net/apply` | Network → Apply |
-| net.explain | `net explain <src> <dst> [...]` | `POST /api/net/explain` | Network → Explain |
+| agent.list | `agent list [--json]` | `GET /api/agents` | Nodes → Node list (topology cards) |
+| agent.show | `agent show <name>` | `GET /api/agents/{name}` | Nodes → node workspace |
+| agent.create | `agent create <name> [--id N] [--role access] [--description]` | `POST /api/agents` | Nodes → Node list → Add agent |
+| agent.token | `agent token <name>` (re-issue) | `POST /api/agents/{name}/token` | Node → Settings & enrollment |
+| agent.update | `agent set <name> --role/--description/--transport ...` | `PATCH /api/agents/{name}` | Node → Settings & enrollment |
+| agent.push | `agent push <name> [--dry-run]` | `POST /api/agents/{name}/push` | Node → Activity & diagnostics → Re-push bundle |
+| agent.revoke | `agent revoke <name>` | `POST /api/agents/{name}/revoke` | Node → Settings & enrollment → Revoke |
+| agent.delete | `agent delete <name>` | `DELETE /api/agents/{name}` | Node → Settings & enrollment → Delete |
+| agent.prefixes | `agent prefix add/del/list <name> <cidr> [--kind lan] [--no-export]` | `GET/POST/DELETE /api/agents/{name}/prefixes` | Node → Networks & sources |
+| agent.policy | `agent egress show/edit/set <name> [--file]` | `GET/PUT /api/agents/{name}/policy` | Node → Egress policy |
+| agent.sources | `agent source add/set <name> <source> --file <json>`; `del/list` | `GET /api/agents/{name}/sources`, `PUT/DELETE .../sources/{source}` | Node → Networks & sources |
+| agent.externals | `agent upstream add/set <name> <upstream> --file <json>`; `del/list` | `GET /api/agents/{name}/upstreams`, `PUT/DELETE .../upstreams/{upstream}` | Node → Upstreams |
+| agent.access | `agent access show/set/del <name> [--hostname H --port P --udp --reissue]` | `GET/PUT/DELETE /api/agents/{name}/access` | Node → VPN access & users (role access) |
+| agent.users | `agent user add/del/list/passwd/enable/disable <name> ...`; `set --file <json>` | `GET /api/agents/{name}/users`, `PUT/DELETE .../users/{username}` | Node → VPN access & users (role access; delivered in the bundle) |
+| agent.bundle | `agent bundle list/show/diff <name> [v1] [v2]` | `GET /api/agents/{name}/bundles[/{v}]`, `GET .../diff?a=&b=` | Node → Activity & diagnostics (bundles) |
+| agent.reports | `agent status <name> [--watch]` | `GET /api/agents/{name}/reports?limit=` | Node → Activity & diagnostics (reports); header status line |
+| agent.command | `agent exec <name> reconnect/explain/collect-diag/restart/rollback ...` | `POST /api/agents/{name}/commands`, `GET .../commands/{id}` | Node → Activity & diagnostics (commands) |
+| interlink.show | `interlink show` | `GET /api/interlink` | Nodes → Node list (interlink topology) |
+| interlink.settings | `interlink set --node-id/--cidr/--domain/...` | `PATCH /api/interlink` | Nodes → Interlink addressing |
+| dns.records | `dns record add/del <name> <type> <value> [--node <agent>]`, `dns record list` | `GET/POST/DELETE /api/dns/records` | Nodes → Interlink DNS |
+| egress.hub | `egress show/edit/set/check` | `GET/PUT /api/egress`, `POST /api/egress/check` | Network → Hub policy & sources → Egress rules |
+| sources.hub | `source add/del/list` | `/api/sources` | Network → Hub policy & sources → Sources |
+| sets | inside `egress show/edit/set` (no separate commands) | inside `GET/PUT /api/egress` | Network → Hub policy & sources → Destination sets |
+| net.plan | `net plan` | `GET /api/net/plan` | Network → Kernel diagnostics → Preview & apply |
+| net.apply | `net apply [--dry-run]` | `POST /api/net/apply` | Network → Kernel diagnostics → Apply |
+| net.explain | `net explain <src> <dst> [...]` | `POST /api/net/explain` | Network → Kernel diagnostics → Explain a packet |
 | net.doctor | `doctor [--json]` | `GET /api/diagnostics/doctor` | Diagnostics → Doctor |
-| control.status | `control status` | `GET /api/control` | Agents → header |
-| control.rotate_key | `control rotate-signing-key [--yes] [--dry-run]` | `POST /api/control/rotate-signing-key` | Agents → header |
+| control.status | `control status` | `GET /api/control` | Nodes → Node list (counters) |
+| control.rotate_key | `control rotate-signing-key [--yes] [--dry-run]` | `POST /api/control/rotate-signing-key` | Nodes → Node list → Control plane maintenance |
 | hub.backup | `hub backup [--out] [--passphrase-file] [--json]` | `POST /api/hub/backup` (streams encrypted file) | Config → Backup / Restore |
 | hub.restore | `hub restore <file> [--target] [--passphrase-file] [--dry-run] [--yes] [--json]` | `POST /api/hub/restore` (encrypted binary upload; default validate-only) | Config → Backup / Restore |
-| clients.* | existing `user ...` (+ alias `client ...`) | existing `/api/users` | Clients (renamed from Users) |
-| externals.hub | existing `upstream ...` (+ alias `external ...`) | existing `/api/upstream` | External servers (renamed) |
+| clients.* | existing `user ...` | existing `/api/users` | Users |
+| externals.hub | existing `upstream ...` | existing `/api/upstream` | Config → Upstream |
 
 Output conventions: every `korctl` command supports `--json`; human output is
 a table. Exit codes as in 06. API errors use the `{error, message, details}`
-shape. The Agents panel shows sanitized validation field paths and conflict details
+shape. The Nodes section shows sanitized validation field paths and conflict details
 in its error area, without echoing credential input values.
 
 ## P3-09 implementation and usage
@@ -131,8 +132,8 @@ korctl agent user add branch alice --password-stdin --group staff
 korctl agent status branch --watch --json
 korctl agent bundle list branch --json
 korctl agent bundle diff branch 1 2 --json
-korctl agent exec branch reconnect --tunnel fabric --dry-run --json
-korctl agent exec branch reconnect --tunnel fabric --yes --json
+korctl agent exec branch reconnect --tunnel interlink --dry-run --json
+korctl agent exec branch reconnect --tunnel interlink --yes --json
 korctl agent delete branch --dry-run --json
 korctl control status --json
 korctl control rotate-signing-key --dry-run --json
@@ -160,6 +161,7 @@ the bundle since P4-04 (password authentication only); unsupported runtime polic
 
 ## Panel structure (hub)
 
-Top-level sections: Dashboard · Clients · Agents · External servers ·
-Network (egress, sources, sets, plan, explain) · Fabric (topology, DNS) ·
-Certificates · Logs · Diagnostics · Settings.
+Sidebar groups (see `docs/panel.md`): Dashboard · Access (Users, Groups, Sessions) ·
+Routing (Network: hub policy & sources / kernel diagnostics; Nodes: node list,
+interlink addressing, interlink DNS, per-node workspace) · System (Config with
+certificates, upstreams and backup; Diagnostics; Logs; Terminal).

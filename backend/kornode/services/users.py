@@ -66,7 +66,7 @@ def _validate_route(value: str) -> str:
 
 def _validate_domain(value: str) -> str:
     candidate = value.strip().rstrip(".")
-    if not candidate or not DOMAIN_RE.match(candidate):
+    if not candidate or not DOMAIN_RE.fullmatch(candidate):
         raise ValueError(f"invalid domain name: {value}")
     return candidate
 
@@ -202,7 +202,7 @@ class UserConfig(BaseModel):
     @classmethod
     def validate_port_rules(cls, value: str | None) -> str | None:
         stripped = _strip_optional(value)
-        if stripped and not PORT_RULE_RE.match(stripped):
+        if stripped and not PORT_RULE_RE.fullmatch(stripped):
             raise ValueError("restrict-user-to-ports contains unsupported characters")
         return stripped
 
@@ -210,7 +210,7 @@ class UserConfig(BaseModel):
     @classmethod
     def validate_hostname(cls, value: str | None) -> str | None:
         stripped = _strip_optional(value)
-        if stripped and not HOSTNAME_RE.match(stripped):
+        if stripped and not HOSTNAME_RE.fullmatch(stripped):
             raise ValueError("hostname must be a valid DNS hostname")
         return stripped
 
@@ -237,21 +237,21 @@ class UserService:
         self.runner = runner or CommandRunner()
         self.files = files or FileManager()
         self.passwd_file = config.secret_path("ocpasswd")
-        # Enroll accounts live in their own file: the fabric vhost reads it, the
+        # Enroll accounts live in their own file: the interlink vhost reads it, the
         # client host never does (S-07, D-71).
         self.enroll_passwd_file = config.secret_path("ocpasswd-enroll")
 
     def validate_username(self, username: str) -> str:
-        if not USERNAME_RE.match(username):
+        if not USERNAME_RE.fullmatch(username):
             raise ValueError(
                 f"username '{username}' may contain letters, numbers, _, ., @ and - only"
             )
         if is_reserved_username(username):
-            raise ValueError(f"username '{username}' is reserved for fabric agents/enrollment")
+            raise ValueError(f"username '{username}' is reserved for interlink agents/enrollment")
         return username
 
     def validate_group_name(self, group: str) -> str:
-        if not USERNAME_RE.match(group):
+        if not USERNAME_RE.fullmatch(group):
             raise ValueError(f"group '{group}' may contain letters, numbers, _, ., @ and - only")
         if group.lower() in RESERVED_GROUPS:
             raise ValueError(f"group '{group}' is reserved")
@@ -592,7 +592,7 @@ class UserService:
     ) -> CommandResult:
         """One-shot enrollment account, created directly in the `enroll` group.
 
-        validate_username() rejects `enroll-*` for operators, so the fabric
+        validate_username() rejects `enroll-*` for operators, so the interlink
         enrollment service goes through this narrow entry point instead.
         """
         if not ENROLL_USER_RE.fullmatch(username):

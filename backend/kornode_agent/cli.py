@@ -9,6 +9,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -20,7 +21,7 @@ from urllib.parse import urlsplit
 
 from kornode.tunnels.argv import DialSpec, openconnect_argv
 from kornode_agent.agent import Agent, _component_versions
-from kornode_agent.config import load_config
+from kornode_agent.config import load_config, save_config
 from kornode_agent.control import ControlClient, ControlError, HubUnreachable
 from kornode_agent.enroll import EnrollToken, TokenError, enroll, is_enrolled, parse_token
 from kornode_agent.inspection import (
@@ -53,6 +54,11 @@ def _positive(value: str) -> int:
     return number
 
 
+HOST_NAME = re.compile(
+    r"(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="kornode-agent")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
@@ -62,6 +68,10 @@ def _parser() -> argparse.ArgumentParser:
     one.add_argument("token")
     one.add_argument("--force", action="store_true", help="enroll again over an existing identity")
     sub.add_parser("run", help="main process (used by the supervisor)")
+    one = sub.add_parser(
+        "set-hub-name", help="set the hub vhost name (SNI) in agent.yaml; agent must be stopped"
+    )
+    one.add_argument("server_name", help="e.g. interlink.<interlink domain>")
     sub.add_parser("version", help="versions of the agent and its components")
     sub.add_parser("status", help="live status, or offline local state")
     one = sub.add_parser("explain", help="explain a routing decision")
@@ -131,6 +141,8 @@ def _command(root: Path, args: argparse.Namespace) -> tuple[dict[str, object], i
         return dict(_component_versions()), EXIT_OK
     if args.command == "enroll":
         return _enroll(root, args.token, force=args.force), EXIT_OK
+    if args.command == "set-hub-name":
+        return _set_hub_name(root, args.server_name), EXIT_OK
     if args.command == "run":
         code = _run(root)
         return {"stopped": True, "exit_code": code}, code
@@ -191,6 +203,21 @@ def _run(root: Path) -> int:
         return await agent.run()
 
     return asyncio.run(runner())
+
+
+def _set_hub_name(root: Path, server_name: str) -> dict[str, object]:
+    """Point an enrolled agent at a renamed hub vhost (D-85): identity, key and pin stay."""
+    name = server_name.strip().rstrip(".").lower()
+    if not HOST_NAME.fullmatch(name):
+        raise LocalError("invalid", "server name must be a DNS name", 2)
+    with ProcessLock(root):
+        config = load_config(root)
+        previous = config.hub.server_name
+        save_config(
+            root,
+            config.model_copy(update={"hub": config.hub.model_copy(update={"server_name": name})}),
+        )
+    return {"server_name": name, "previous": previous}
 
 
 def _enroll(root: Path, text: str, *, force: bool) -> dict[str, object]:

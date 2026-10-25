@@ -10,6 +10,7 @@ import pytest
 
 from kornode.config.loader import load_config
 from kornode.config.models import AppConfig
+from kornode.net.model import InlineDest
 from kornode.services.domain_resolver import (
     MAX_INTERVAL_SECONDS,
     MIN_INTERVAL_SECONDS,
@@ -131,7 +132,25 @@ def test_domain_groups_cover_named_sets_and_inline_destinations(tmp_path: Path) 
         },
     )
     groups = {group.name: group.domains for group in domain_groups(config)}
-    assert groups == {"corp": ("corp.example",), "rule2": ("inline.example",)}
+    inline = InlineDest(domains=("inline.example",)).resolved_key()
+    assert groups == {"corp": ("corp.example",), inline: ("inline.example",)}
+
+
+def test_inline_resolution_follows_the_domains_not_the_rule_position(tmp_path: Path) -> None:
+    # Resolution runs on its own clock: inserting a rule in front must not hand the
+    # addresses resolved for one rule's domains to another rule (a `via local` leak).
+    def keys(egress: list[dict[str, object]]) -> dict[str, tuple[str, ...]]:
+        config = _config(tmp_path, {**_upstream_enabled(), "egress": egress})
+        return {group.name: group.domains for group in domain_groups(config)}
+
+    tunnel = {"from": ["clients"], "to": {"domains": ["vpn.example"]}, "via": "upstream:primary"}
+    plain = {"from": ["clients"], "to": {"domains": ["plain.example"]}, "via": "local"}
+    before = keys([tunnel, plain])
+    after = keys([plain, tunnel])
+    assert before == after
+    assert len(before) == 2 and all(key.startswith("inline.") for key in before)
+    config = _config(tmp_path, {**_upstream_enabled(), "egress": [plain, tunnel]})
+    assert DomainResolverService(config).pending()  # never resolved: wake the resolver loop
 
 
 def test_domain_groups_resolve_through_internal_dns_upstreams(tmp_path: Path) -> None:

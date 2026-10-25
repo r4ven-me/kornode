@@ -1,4 +1,4 @@
-"""Default netlab topology for P1 fabric scenarios.
+"""Default netlab topology for P1 interlink scenarios.
 
 Address plan:
 
@@ -46,7 +46,7 @@ HTTP_PORT = 80
 HUB_STUB_PORT = 9090
 NODE_STUB_PORT = 9100
 DNS_NAME_ECHO = "echo.test"
-DNS_NAME_MONITORING = "monitoring.kornode.internal"
+DNS_NAME_MONITORING = "monitoring.kornode.lan"
 
 
 @dataclass
@@ -200,7 +200,7 @@ def _start_dns_stub(ns: Namespace) -> subprocess.Popen[bytes]:
 
         ANSWERS = {
             "echo.test": "203.0.113.1",
-            "monitoring.kornode.internal": "172.30.1.1",
+            "monitoring.kornode.lan": "172.30.1.1",
         }
 
         def parse_name(data, offset):

@@ -87,7 +87,7 @@ def test_auth_change_during_password_verification_cannot_create_new_session(
         original(request, username, password)
         previous = request.app.state.config
         updated = previous.model_copy(deep=True)
-        updated.web.admin_password = "replacement"
+        updated.web.admin_password = "replacement-password"
         request.app.state.config = updated
         invalidate_auth_sessions(request, previous, updated)
 
@@ -140,7 +140,7 @@ def test_password_change_hashes_and_revokes_all_sessions(tmp_path: Path) -> None
 def test_password_change_reauthenticates_and_requires_csrf(tmp_path: Path, totp: bool) -> None:
     client = _client(tmp_path, totp=totp)
     csrf = _login(client, totp=totp)
-    payload = {"current_password": "wrong", "new_password": "replacement"}
+    payload = {"current_password": "wrong", "new_password": "replacement-password"}
     if totp:
         payload["totp_code"] = _code(client)
     response = client.post("/api/auth/password", headers={"X-Kornode-CSRF": csrf}, json=payload)
@@ -155,7 +155,7 @@ def test_password_change_reauthenticates_and_requires_csrf(tmp_path: Path, totp:
         payload["totp_code"] = _code(client)
     changed = client.post("/api/auth/password", headers={"X-Kornode-CSRF": csrf}, json=payload)
     assert changed.status_code == 200
-    _login(client, password="replacement", totp=totp)
+    _login(client, password="replacement-password", totp=totp)
 
 
 def test_password_change_preserves_scripted_basic_without_totp(tmp_path: Path) -> None:
@@ -163,17 +163,17 @@ def test_password_change_preserves_scripted_basic_without_totp(tmp_path: Path) -
     response = client.post(
         "/api/auth/password",
         auth=("admin", "secret"),
-        json={"current_password": "secret", "new_password": "replacement"},
+        json={"current_password": "secret", "new_password": "replacement-password"},
     )
     assert response.status_code == 200
-    assert client.get("/api/auth/me", auth=("admin", "replacement")).status_code == 200
+    assert client.get("/api/auth/me", auth=("admin", "replacement-password")).status_code == 200
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("admin_user", "replacement-admin"),
-        ("admin_password", "replacement"),
+        ("admin_password", "replacement-password"),
         ("admin_password_hash", "changed-hash"),
         ("admin_totp_enabled", True),
         ("admin_totp_secret", "KRSXG5DSNFXGOIDB"),
@@ -209,7 +209,7 @@ def test_invalidation_helper_preserves_sessions_for_unrelated_settings(tmp_path:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("admin_password", "replacement"),
+        ("admin_password", "replacement-password"),
         ("admin_password", None),
         ("admin_password_hash", "replacement-hash"),
         ("admin_totp_enabled", False),
@@ -277,7 +277,7 @@ def test_web_settings_cannot_smuggle_password_or_mfa_fields(tmp_path: Path) -> N
         "/api/web-config/settings",
         headers={"X-Kornode-CSRF": csrf},
         json={
-            "admin_password": "replacement",
+            "admin_password": "replacement-password",
             "admin_password_hash": "replacement-hash",
             "admin_totp_enabled": False,
             "admin_totp_secret": "KRSXG5DSNFXGOIDB",
@@ -296,7 +296,7 @@ def test_in_memory_config_replacement_invalidates_without_helper(tmp_path: Path)
     client = _client(tmp_path)
     _login(client)
     new = client.app.state.config.model_copy(deep=True)
-    new.web.admin_password = "replacement"
+    new.web.admin_password = "replacement-password"
     client.app.state.config = new
     assert client.get("/api/auth/me").status_code == 401
 

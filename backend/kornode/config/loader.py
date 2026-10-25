@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -13,6 +14,10 @@ from kornode.config.env import combined_environment, env_overrides_from_mapping
 from kornode.config.models import AppConfig
 
 DEFAULT_CONFIG_PATH = Path("/etc/kornode/config.yaml")
+# Top-level sections renamed by D-85, read under their old name until the next minor release.
+LEGACY_SECTIONS = {"fabric": "interlink"}
+
+_LOGGER = logging.getLogger(__name__)
 SECRET_REF_RE = re.compile(r"^\$\{SECRET:([A-Za-z_][A-Za-z0-9_]*)}$")
 
 
@@ -34,7 +39,20 @@ def load_yaml_file(path: Path | None) -> dict[str, Any]:
         return {}
     if not isinstance(loaded, dict):
         raise ValueError(f"configuration root must be a mapping: {path}")
-    return loaded
+    return rename_legacy_sections(loaded, str(path))
+
+
+def rename_legacy_sections(data: dict[str, Any], origin: str) -> dict[str, Any]:
+    """Move a section stored under its pre-D-85 name to the new one. Writers that load
+    the file through here save it back under the new name."""
+    for old, new in LEGACY_SECTIONS.items():
+        if old not in data:
+            continue
+        if new in data:
+            raise ValueError(f"{origin}: both `{old}` and `{new}` are set; keep only `{new}`")
+        _LOGGER.warning("%s: section `%s` is now called `%s`", origin, old, new)
+        data = {(new if key == old else key): value for key, value in data.items()}
+    return data
 
 
 def resolve_secret_refs(value: Any, secrets: Mapping[str, str]) -> Any:
@@ -86,7 +104,10 @@ def validate_config_data(
     """
     resolved_env_file = Path(env_file) if env_file is not None else None
     environment = combined_environment(config_path, resolved_env_file, environ)
-    env_overrides = env_overrides_from_mapping(environment)
+    env_overrides = rename_legacy_sections(env_overrides_from_mapping(environment), "environment")
+    yaml_config = rename_legacy_sections(dict(yaml_config), str(config_path))
+    if cli_overrides is not None:
+        cli_overrides = rename_legacy_sections(dict(cli_overrides), "CLI overrides")
     explicit_paths = _leaf_paths(env_overrides) | _leaf_paths(yaml_config)
     if cli_overrides:
         explicit_paths |= _leaf_paths(cli_overrides)

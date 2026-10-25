@@ -50,6 +50,17 @@ class AuthSessionRegistry:
         self._lock = threading.Lock()
         self._auth_fingerprint: bytes | None = None
         self._generation = 0
+        # Replay protection for sign-in TOTP: the last accepted time step. Per process;
+        # a restart forgets it (the window reopens for at most ~90 s).
+        self._totp_step = -1
+
+    def accept_totp_step(self, step: int) -> bool:
+        """Accept a sign-in TOTP step once: not newer than the last accepted one is a replay."""
+        with self._lock:
+            if step <= self._totp_step:
+                return False
+            self._totp_step = step
+            return True
 
     def synchronize(self, config: AppConfig) -> None:
         """Invalidate cookies when the running application's auth config changes."""
@@ -59,11 +70,14 @@ class AuthSessionRegistry:
                 self._sessions.clear()
                 self._generation += 1
                 self._auth_fingerprint = fingerprint
+                # A replay now also needs the new credentials.
+                self._totp_step = -1
 
     def revoke_all(self) -> None:
         with self._lock:
             self._sessions.clear()
             self._generation += 1
+            self._totp_step = -1
 
     @property
     def generation(self) -> int:
@@ -180,7 +194,10 @@ def invalidate_auth_sessions(
             registry.synchronize(new_config)
 
 
-def authenticate_totp(request: Request, code: str | None) -> None:
+def authenticate_totp(request: Request, code: str | None, *, consume: bool = False) -> None:
+    """consume=True (sign-in) accepts a code once; reauthentication of an existing
+    session also needs the password, the session and CSRF, so it may reuse the code
+    that just signed in."""
     config = request.app.state.config
     if not config.web.admin_totp_enabled:
         return
@@ -193,7 +210,8 @@ def authenticate_totp(request: Request, code: str | None) -> None:
         raise HTTPException(status_code=429, detail="too many failed login attempts")
     secret = config.web.admin_totp_secret
     try:
-        valid = secret is not None and AdminTotpService(config).verify_code(secret, code)
+        step = AdminTotpService(config).matching_step(secret, code) if secret else None
+        valid = step is not None and (not consume or registry.accept_totp_step(step))
     except (ValueError, TypeError):
         valid = False
     if not valid:

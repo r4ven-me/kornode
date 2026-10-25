@@ -1,9 +1,9 @@
-"""Fabric DNS zone (spec 07 "DNS", D-66) shared by CLI/API/panel.
+"""Interlink DNS zone (spec 07 "DNS", D-66) shared by CLI/API/panel.
 
-The hub's dnsmasq answers the whole `<fabric.domain>` zone from local data
+The hub's dnsmasq answers the whole `<interlink.domain>` zone from local data
 (`local=/<domain>/`); each agent's dnsmasq answers its own
 `node<id>.<domain>` from the bundle and forwards the rest of the zone to the
-hub. Stored names (and CNAME targets) are relative to `fabric.domain`, so a
+hub. Stored names (and CNAME targets) are relative to `interlink.domain`, so a
 domain change never leaves stale absolute names in the registry.
 """
 
@@ -66,14 +66,14 @@ def _zone(node_id: int, domain: str) -> str:
 
 
 def _service_address(config: AppConfig, node_id: int) -> str:
-    fabric = config.fabric
+    interlink = config.interlink
     return str(
         derive_addresses(
             node_id,
-            fabric_cidr=fabric.cidr,
-            client_pool=fabric.client_pool,
-            source_pool=fabric.source_pool,
-            domain=fabric.domain,
+            interlink_cidr=interlink.cidr,
+            client_pool=interlink.client_pool,
+            source_pool=interlink.source_pool,
+            domain=interlink.domain,
         ).service_address
     )
 
@@ -89,7 +89,7 @@ def zone_records(config: AppConfig, registry: Registry) -> list[ZoneRecord]:
     `node<N>` exists for every registered node, whatever its state: the name
     goes away with the registry row, so revocation needs no DNS step.
     """
-    domain = config.fabric.domain
+    domain = config.interlink.domain
     hub = _service_address(config, HUB_NODE_ID)
     records = [
         ZoneRecord(_fqdn("hub", domain), "A", hub, HUB_NODE_ID, True),
@@ -106,7 +106,7 @@ def zone_records(config: AppConfig, registry: Registry) -> list[ZoneRecord]:
 
 def node_zone_records(config: AppConfig, registry: Registry, node_id: int) -> list[ZoneRecord]:
     """The answers an agent serves locally: its own `node<id>` zone."""
-    zone = _zone(node_id, config.fabric.domain)
+    zone = _zone(node_id, config.interlink.domain)
     return [
         record
         for record in zone_records(config, registry)
@@ -134,7 +134,7 @@ def dnsmasq_lines(records: Iterable[ZoneRecord]) -> list[str]:
     return sorted(hosts) + sorted(lines)
 
 
-class FabricDnsService:
+class InterlinkDnsService:
     def __init__(
         self,
         config: AppConfig,
@@ -162,7 +162,7 @@ class FabricDnsService:
         if not path.exists():
             return [
                 ZoneRecord(
-                    _fqdn(name, self.config.fabric.domain),
+                    _fqdn(name, self.config.interlink.domain),
                     "A",
                     _service_address(self.config, HUB_NODE_ID),
                     HUB_NODE_ID,
@@ -181,7 +181,7 @@ class FabricDnsService:
         with self.agents.registry() as r:
             names = {node.id: node.name for node in r.list_nodes()}
             return {
-                "domain": self.config.fabric.domain,
+                "domain": self.config.interlink.domain,
                 "records": [self._view(item, names) for item in zone_records(self.config, r)],
             }
 
@@ -211,7 +211,7 @@ class FabricDnsService:
         def change(r: Registry) -> None:
             record = self._record(r, payload, deleting=True)
             r.delete_dns_record(record.name, record.type, record.value)
-            fqdn = _fqdn(record.name, self.config.fabric.domain)
+            fqdn = _fqdn(record.name, self.config.interlink.domain)
             records = zone_records(self.config, r)
             if not any(item.fqdn == fqdn for item in records) and any(
                 item.type == "CNAME" and item.value == fqdn for item in records
@@ -232,7 +232,7 @@ class FabricDnsService:
         return self.list()
 
     def _record(self, r: Registry, payload: DnsRecordInput, *, deleting: bool = False) -> DnsRecord:
-        domain = self.config.fabric.domain
+        domain = self.config.interlink.domain
         name = payload.name
         node_id: int | None = None
         if payload.node is not None:
@@ -263,7 +263,7 @@ class FabricDnsService:
         return record
 
     def _value(self, payload: DnsRecordInput, node_id: int | None) -> str:
-        domain = self.config.fabric.domain
+        domain = self.config.interlink.domain
         if payload.type != "CNAME":
             try:
                 address = ipaddress.ip_address(payload.value)

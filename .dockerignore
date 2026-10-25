@@ -7,6 +7,7 @@
 **/.env
 **/.env.*
 !.env.example
+!examples/.env.example
 /secrets
 /certificates
 /lists

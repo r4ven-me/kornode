@@ -20,10 +20,10 @@ export function AgentPolicy({ policy, busy, mutate }: { policy: Policy; busy: bo
     const value: unknown = JSON.parse(sets);
     if (value && typeof value === "object" && !Array.isArray(value)) parsedSets = value as JsonObject;
   } catch { /* The advanced editor retains invalid JSON for correction. */ }
-  const classes = ["clients", "host", "fabric", ...(policy.sources ?? []).map(source => source.name)];
+  const classes = ["clients", "host", "interlink", ...(policy.sources ?? []).map(source => source.name)];
   return <section className="panel" data-capability="agent.policy.show">
     <h2>Egress policy</h2>
-    <p className="field-help">First match wins; drag a rule or use the arrows to reorder. The compiler preserves the fabric recovery path. A saved policy is not proof of connectivity: the backend validates semantics and refuses what the node cannot run.</p>
+    <p className="field-help">First match wins; drag a rule or use the arrows to reorder. The compiler preserves the interlink recovery path. A saved policy is not proof of connectivity: the backend validates semantics and refuses what the node cannot run.</p>
     <form data-capability="agent.policy.set" onSubmit={e => {
       e.preventDefault(); setError("");
       let parsed: Policy["sets"];

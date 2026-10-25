@@ -1976,6 +1976,28 @@ code {
   padding-left: 18px;
 }
 
+.detail-grid {
+  display: grid;
+  gap: 10px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin: 12px 0;
+}
+
+.detail-grid > div {
+  min-width: 0;
+}
+
+.detail-grid dt {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detail-grid dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .p12-base64-dialog {
   display: flex;
   flex-direction: column;
@@ -2600,7 +2622,7 @@ label .icon-button span {
   padding: 2px 0;
 }
 
-/* Form building blocks of the v2 views (Agents, Fabric, Network → Egress).
+/* Form building blocks of the v2 views (Agents, Interlink, Network → Egress).
    Their labels wrap the control directly, without a <span>, so the label text
    is styled on the label and the control resets back to the input look. */
 .agent-fields {

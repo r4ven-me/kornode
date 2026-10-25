@@ -1,7 +1,7 @@
 # Networking, routing and DNS
 
 Contracts live in `docs/spec/` (`01-addressing`, `02-egress-and-sources`, `03-kernel-dataplane`,
-`04-netcore-reconciler`, `07-fabric`). This page is the operator's overview.
+`04-netcore-reconciler`, `07-interlink`). This page is the operator's overview.
 
 ## Principles
 
@@ -12,7 +12,7 @@ Contracts live in `docs/spec/` (`01-addressing`, `02-egress-and-sources`, `03-ke
   route tables 12000–12999, main-table routes with `proto 77`. It never flushes global state or host firewall rules.
 - Fail closed: traffic assigned to a tunnel never leaks through the uplink, including while a tunnel
   reconnects or the reconciler restarts (`unreachable default` in every exit table, stale-mark rejects).
-- No NAT inside the fabric. Masquerade happens only toward the internet (`via: local`) and toward
+- No NAT inside the interlink. Masquerade happens only toward the internet (`via: local`) and toward
   external upstreams (`via: upstream:<profile>`).
 - Applying is idempotent, supports dry-run, and is one `nft -f` transaction.
 
@@ -31,17 +31,17 @@ Rootless mode cannot control the network and is not supported.
 
 ## Addressing
 
-The hub is node 1, agents are 2..254. With the default `fabric` settings:
+The hub is node 1, agents are 2..254. With the default `interlink` settings:
 
 | Item | Formula | Hub | Node 3 |
 | --- | --- | --- | --- |
-| Fabric address | `10.99.0.<id>` | `10.99.0.1` | `10.99.0.3` |
+| Interlink address | `10.99.0.<id>` | `10.99.0.1` | `10.99.0.3` |
 | Client pool | `10.100.<id>.0/24` | `10.100.1.0/24` | `10.100.3.0/24` |
 | Service address (dnsmasq, panel, probes) | first host of the pool | `10.100.1.1` | `10.100.3.1` |
 | Source default range | `10.8.<id>.0/24` | `10.8.1.0/24` | `10.8.3.0/24` |
-| DNS zone | `node<id>.<fabric.domain>` | `node1.kornode.internal` | `node3.kornode.internal` |
+| DNS zone | `node<id>.<interlink.domain>` | `node1.kornode.lan` | `node3.kornode.lan` |
 
-A fabric prefix is any prefix a node owns and exports: its client pool, source subnets, exported LANs.
+An interlink prefix is any prefix a node owns and exports: its client pool, source subnets, exported LANs.
 The overlap validator runs on every registry or config change and on bundle apply, and rejects overlapping
 prefixes with `409 address_overlap` (CLI exit code 3). Ids of deleted agents are quarantined for 30 days.
 
@@ -56,15 +56,15 @@ sources:
 sets:
   corp: {routes: [10.60.0.0/16], domains: [corp.example.com]}
 egress:
-  - {from: [clients, host, amnezia], to: fabric, via: fabric}
+  - {from: [clients, host, amnezia], to: interlink, via: interlink}
   - {from: [clients, amnezia], to: {set: corp}, via: "upstream:office"}
   - {from: [clients, amnezia], to: any, via: local}
 ```
 
-- `from`: `clients` (this node's ocserv pool), `host` (locally originated traffic), `fabric` (transit from the
-  fabric), or a named source.
-- `to`: `any`, `fabric`, `{set: <name>}`, inline `{routes, domains}`, or `{node: <id>}`.
-- `via`: `local` (main table, masquerade to the uplink), `fabric`, `node:<n>`, `upstream:<profile>`, `drop`.
+- `from`: `clients` (this node's ocserv pool), `host` (locally originated traffic), `interlink` (transit from the
+  interlink), or a named source.
+- `to`: `any`, `interlink`, `{set: <name>}`, inline `{routes, domains}`, or `{node: <id>}`.
+- `via`: `local` (main table, masquerade to the uplink), `interlink`, `node:<n>`, `upstream:<profile>`, `drop`.
 - `kill_switch` defaults to `true` for every `via` except `local`: when the exit is down, traffic is rejected
   instead of falling through to the next rule.
 
@@ -85,7 +85,7 @@ Each distinct exit gets a fwmark (`0x0c000000 | index << 8`, mask `0xffffff00`) 
 
 | Priority | Rule |
 | --- | --- |
-| 90 | `lookup main suppress_prefixlength 0` — connected routes and fabric sessions beat policies |
+| 90 | `lookup main suppress_prefixlength 0` — connected routes and interlink sessions beat policies |
 | 95 | `to <carrier>/32 lookup main` — a tunnel carrier never enters its own tunnel |
 | 100+i | `fwmark <mark_i>/0xffffff00 lookup <12000+i>` |
 
@@ -100,11 +100,11 @@ runs one reconciler pass.
 ## Hub, agents and sources
 
 - **Hub**: ocserv serves clients, agents and one-time enroll sessions on one 443/tcp, selected by SNI (clients
-  host and `fabric.<fabric.domain>` vhost). Routes to agent prefixes come from ocserv `iroute` sessions, installed
+  host and `interlink.<interlink.domain>` vhost). Routes to agent prefixes come from ocserv `iroute` sessions, installed
   into `main` with `proto 77` by the hub reconciler. Agent ↔ agent traffic is forwarded by the hub.
-- **Agent**: openconnect to the hub (the fabric exit) and to external upstreams; the reconciler converges the
+- **Agent**: openconnect to the hub (the interlink exit) and to external upstreams; the reconciler converges the
   signed bundle. With a cached bundle it keeps forwarding when the hub is down and boots from cache.
-- **Gateway nodes**: an agent with role `gateway` accepts `from: fabric` traffic and masquerades it; another node
+- **Gateway nodes**: an agent with role `gateway` accepts `from: interlink` traffic and masquerades it; another node
   sends traffic there with `via: node:<n>`.
 - **Sources** (wg-easy, Amnezia, any access server): run it in `network_mode: host`, disable its own NAT hooks;
   kornode owns routing and NAT for the source subnet. `korctl doctor` reports foreign NAT rules on a source
@@ -112,9 +112,9 @@ runs one reconciler pass.
 
 ## DNS
 
-The hub owns the fabric zone (`node<id>.<fabric.domain>` and registry records: `korctl dns record add|del|list`).
-Each node runs dnsmasq on its service address, bound to `lo`; agents forward fabric names to the hub through
-their fabric address. Clients of a node use that node's dnsmasq (blocklists, domain-set resolution).
+The hub owns the interlink zone (`node<id>.<interlink.domain>` and registry records: `korctl dns record add|del|list`).
+Each node runs dnsmasq on its service address, bound to `lo`; agents forward interlink names to the hub through
+their interlink address. Clients of a node use that node's dnsmasq (blocklists, domain-set resolution).
 
 ## Diagnostics
 

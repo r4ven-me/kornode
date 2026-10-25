@@ -57,6 +57,8 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
   let authenticated = false;
   let serverState = options.initialServerState ?? "running";
   let userFetchCount = 0;
+  let sourceVersion = 1;
+  let sourceContent = "web:\n  enabled: true\n";
   const users = options.users ?? [];
   const groups = options.groups ?? [];
   const otpRecords = options.otpRecords ?? [];
@@ -95,6 +97,23 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         csrf: route.request().headers()["x-kornode-csrf"] ?? null,
         body: route.request().postData()
       });
+    }
+    if (path === "/api/config/source") {
+      const etag = `"source-${sourceVersion}"`;
+      if (method === "POST") {
+        if (route.request().headers()["if-match"] !== etag) {
+          await route.fulfill({ status: 412, json: { detail: "Source changed" } });
+          return;
+        }
+        sourceContent = route.request().postDataJSON().content;
+        sourceVersion += 1;
+      }
+      const nextEtag = `"source-${sourceVersion}"`;
+      await route.fulfill({
+        headers: { ETag: nextEtag },
+        json: { path: "/etc/kornode/config.yaml", exists: true, content: sourceContent, etag: nextEtag, config: options.config ?? {}, written: [], valid: true }
+      });
+      return;
     }
     if (path === "/api/server/start") {
       serverState = "running";
@@ -180,6 +199,16 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         written: []
       },
       "/api/routing/reload": [commandResult],
+      "/api/agents": { agents: [] },
+      "/api/control": { enabled: false, agents: 0, active: 0, signing_key_id: null, rotation: null },
+      "/api/interlink": {
+        interlink: { node_id: 1, cidr: "10.99.0.0/24", client_pool: "10.100.{id}.0/24", source_pool: "10.8.{id}.0/24", enroll_pool: "10.99.255.240/28", domain: "kornode.lan", reserved: [] },
+        hub: { interlink_address: "10.99.0.1", server_name: "interlink.kornode.lan", prefixes: [] },
+        nodes: [], sources: []
+      },
+      "/api/dns/records": { domain: "kornode.lan", records: [] },
+      "/api/egress": { policy: { sources: [], sets: {}, egress: [] }, warnings: [], dead_rules: [] },
+      "/api/egress/check": { warnings: [], dead_rules: [] },
       "/api/net/plan": {
         exits: [],
         warnings: [],
@@ -200,7 +229,7 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         dry_run: false
       },
       "/api/internal-dns/status": {
-        enabled: false,
+        resolver_active: true,
         blocklist_enabled: false,
         local_records_enabled: false,
         listen: "10.10.10.1",
@@ -233,7 +262,7 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         connections: [],
         ...options.upstreamStatus
       },
-      "/api/upstream": options.upstreamProfiles ?? [],
+      "/api/upstream": (options.upstreamProfiles ?? []).map(profile => ({ kind: "openconnect", ...profile })),
       "/api/upstream/settings": { status: "ok" },
       "/api/upstream/profiles": { status: "ok" },
       "/api/upstream/profiles/office/sync": {
@@ -298,11 +327,6 @@ export async function mockApi(page: Page, options: MockOptions = {}) {
         routing: { mode: options.routingMode ?? "full", split: {} },
         web: { terminal_enabled: options.terminalEnabled ?? false },
         ...options.config
-      },
-      "/api/config/source": {
-        path: "/etc/kornode/config.yaml",
-        exists: true,
-        content: "web:\n  enabled: true\n"
       },
       "/api/config/render": {},
       "/api/config/source/validate": {},

@@ -3,16 +3,16 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from tests.test_fabric_groups import _config, _registry
+from tests.test_interlink_groups import _config, _registry
 
-from kornode.services.fabric_groups import FabricGroupsService
+from kornode.services.interlink_groups import InterlinkGroupsService
 
 
 def test_concurrent_sync_cannot_resurrect_a_revoked_agent_guard(tmp_path: Path) -> None:
     config = _config(tmp_path)
     registry = _registry(config)
     registry.create_node(id=3, name="branch", state="active")
-    first, second = FabricGroupsService(config), FabricGroupsService(config)
+    first, second = InterlinkGroupsService(config), InterlinkGroupsService(config)
     captured, release, second_started, second_read = (threading.Event() for _ in range(4))
     original_first, original_second = first.nodes, second.nodes
     errors: list[BaseException] = []
@@ -30,7 +30,7 @@ def test_concurrent_sync_cannot_resurrect_a_revoked_agent_guard(tmp_path: Path) 
     first.nodes = old_snapshot  # type: ignore[method-assign]
     second.nodes = new_snapshot  # type: ignore[method-assign]
 
-    def run(service: FabricGroupsService, start: threading.Event | None = None) -> None:
+    def run(service: InterlinkGroupsService, start: threading.Event | None = None) -> None:
         if start:
             start.set()
         try:

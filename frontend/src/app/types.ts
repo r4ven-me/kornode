@@ -3,8 +3,7 @@ import type { CertificateInfo, CertificateStatus, CommandResult, ConfigSource, D
 export type Tab =
   | "dashboard"
   | "users"
-  | "agents"
-  | "fabric"
+  | "nodes"
   | "groups"
   | "sessions"
   | "network"
@@ -16,7 +15,6 @@ export type Tab =
 export type ConfigSection =
   | "system"
   | "backup"
-  | "fabric"
   | "server"
   | "auth"
   | "certificates"
@@ -33,7 +31,7 @@ export type CommandOutputKey = Tab | ConfigSection | "routing";
 export const configSections: Array<{ id: ConfigSection; label: string }> = [
   { id: "system", label: "System" },
   { id: "backup", label: "Backup / Restore" },
-  { id: "fabric", label: "Fabric" },
+
   { id: "server", label: "Server" },
   { id: "certificates", label: "Certificates" },
   { id: "auth", label: "Authentication" },

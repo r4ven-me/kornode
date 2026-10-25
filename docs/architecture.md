@@ -1,7 +1,7 @@
 # Architecture
 
 Kornode v2 is a hub plus agents: one hub (node 1) and any number of agents (nodes 2..254) joined into a routed
-overlay (the fabric) by ocserv/openconnect sessions on 443/tcp. Every node runs the same networking core and one
+overlay (the interlink) by ocserv/openconnect sessions on 443/tcp. Every node runs the same networking core and one
 reconciler. Contracts: `docs/spec/` (start with `00-overview.md`); decisions: `docs/redesign/DECISIONS.md`.
 
 ## Components
@@ -11,7 +11,7 @@ reconciler. Contracts: `docs/spec/` (start with `00-overview.md`); decisions: `d
 | `kornode` (hub image) | hub | ocserv for clients, agents and enroll, registry, bundle compiler, control API, admin API, panel, `korctl`, reconciler. |
 | `kornode-agent` (agent image) | every other node | openconnect to the hub and to external upstreams, reconciler, control-plane client, optional local ocserv (`access` role), optional dnsmasq. |
 | `kornode.net` | both images | Desired-state model, egress compiler, kernel adapter, reconciler, explain. The only code that changes kernel networking state. |
-| `kornode.control` | hub | Agent-facing control API, a separate process from the admin API, bound to the hub fabric address. |
+| `kornode.control` | hub | Agent-facing control API, a separate process from the admin API, bound to the hub interlink address. |
 | `kornode_agent` | agent | Agent runtime and the `kornode-agent` CLI. |
 
 ## Planes
@@ -19,7 +19,7 @@ reconciler. Contracts: `docs/spec/` (start with `00-overview.md`); decisions: `d
 - **Data plane**: kernel routing, nftables, tunnels. Keeps working without the control plane: an agent with a
   cached bundle keeps forwarding when the hub is down and boots from cache.
 - **Control plane**: registry, signed bundles, agent reports, commands. Agents pull; everything is carried inside
-  the fabric.
+  the interlink.
 - **Management plane**: `korctl`, the admin REST API and the panel. They are equal (parity) and call the same
   services; `parity.yaml` plus `tests/test_parity.py` enforce it. The control plane runs even with
   `web.enabled: false`.
@@ -31,11 +31,11 @@ reconciler. Contracts: `docs/spec/` (start with `00-overview.md`); decisions: `d
 2. **Registry** (`registry/`): SQLite (`data_dir/registry.db`) with nodes, prefixes, per-node egress policy,
    externals, bundle history.
 3. **Services** (`services/`): all business logic, shared by CLI, API and panel — `AgentService`,
-   `HubEgressService`, `FabricService`, `FabricGroupsService`, `FabricDnsService`, `UserService`,
+   `HubEgressService`, `InterlinkService`, `InterlinkGroupsService`, `InterlinkDnsService`, `UserService`,
    `CertificateService`, `SessionService`, `UpstreamService`, `DomainResolverService`, `BackupService`, `NetService`,
    `DiagnosticsService`, `DoctorService`, and others.
 4. **Bundle** (`bundle/`): compiles, signs (ed25519) and seals per-agent bundles; schema
-   `docs/spec/schemas/bundle.v1.schema.json`.
+   `docs/spec/schemas/bundle.v2.schema.json`.
 5. **Net core** (`net/`): pure `compile()` from inputs to `DesiredState`, `diff`, `kernel`, `reconciler`, `explain`.
 6. **Infrastructure**: safe command runner (explicit argv, no shell), atomic file manager, secret masker,
    supervisor adapter, `tunnels/` (openconnect argv, carrier and pin handling).
@@ -49,9 +49,9 @@ services").
 
 ```text
 kornode/
-├── cli.py, cli_agents.py, cli_egress.py, cli_fabric.py, cli_hub.py   # korctl
+├── cli.py, cli_agents.py, cli_egress.py, cli_interlink.py, cli_hub.py   # korctl
 ├── main.py, healthcheck.py
-├── api/            # routes_agents, routes_egress, routes_fabric, routes_dns, routes_net, routes_hub,
+├── api/            # routes_agents, routes_egress, routes_interlink, routes_dns, routes_net, routes_hub,
 │                   # routes_users, routes_sessions, routes_certificates, routes_config, ...
 ├── bundle/         # canonical JSON, models, signing, sealing, validator, redaction
 ├── config/         # defaults, env, loader, models, reserved
@@ -59,7 +59,7 @@ kornode/
 ├── net/            # model, addressing, compile, nftgen, state, diff, kernel, reconciler, explain
 ├── registry/       # db, models, repository, snapshot, SQL migrations
 ├── renderers/      # ocserv, dnsmasq, supervisor
-├── services/       # agents, hub_egress, fabric, fabric_groups, fabric_dns, netinputs, net, bundle, apply,
+├── services/       # agents, hub_egress, interlink, interlink_groups, interlink_dns, netinputs, net, bundle, apply,
 │                   # enrollment, backup, doctor, upstream, domain_resolver, users, certificates, ...
 ├── tunnels/        # openconnect argv, carrier addresses, pin
 └── schemas/
@@ -72,7 +72,7 @@ kornode_agent/      # agent runtime: agent, control, apply, inputs, tunnels, acc
 
 `frontend/src/` is split by role; `main.tsx` only mounts `<App />`.
 
-- `App.tsx` — the root component: tab navigation (Dashboard, Config, Users, Agents, Fabric, Groups, Sessions,
+- `App.tsx` — the root component: tab navigation (Dashboard, Config, Users, Agents, Interlink, Groups, Sessions,
   Network, Diagnostics, Logs, Terminal) and the wiring of feature-hook state into the views.
 - `app/core.ts` — `usePanelCore()`: auth, the loaded `AppState`, busy/notice handling, `loadAll()` and
   `runAction()` (the wrapper every mutation goes through for consistent busy state, notices, dry-run labelling
@@ -83,19 +83,19 @@ kornode_agent/      # agent runtime: agent, control, apply, inputs, tunnels, acc
   `core.registerHydrator()`.
 - `api.ts` — typed API client; `app/types.ts`, `app/state.ts` — shared types and initial state.
 - `views/` — one component per tab or section; larger areas have a folder: `views/agents/` (agent policy,
-  settings, resources, activity), `views/fabric/` (topology, fabric settings, fabric DNS), `views/network/`
+  settings, resources, activity), `views/interlink/` (topology, interlink settings, interlink DNS), `views/network/`
   (hub egress and sources), `views/upstream/`, `views/users/`, `views/groups/`, `views/certificates/`,
   `views/config/`.
 - `components/` — reusable UI blocks; `lib/` — pure helpers without React state.
 
 Views receive state and callbacks as props and leave API calls to the hooks; the exceptions are views that own
-their data flow (`views/network/HubEgress.tsx`, `views/fabric/FabricView.tsx`, `views/agents/AgentsView.tsx`,
+their data flow (`views/network/HubEgress.tsx`, `views/interlink/InterlinkView.tsx`, `views/agents/AgentsView.tsx`,
 `views/config/AdminTotpPanel.tsx`).
 
 ## Egress and the reconciler
 
 What leaves where is declarative: one ordered `egress` list per node (first match wins) over `clients`, `host`,
-`fabric` and named `sources`, with `via` one of `local`, `fabric`, `node:<n>`, `upstream:<profile>`, `drop`
+`interlink` and named `sources`, with `via` one of `local`, `interlink`, `node:<n>`, `upstream:<profile>`, `drop`
 (`docs/spec/02-egress-and-sources.md`). On the hub it comes from `config.yaml` (`egress`, `sources`, `sets`;
 `HubEgressService`); for agents it is stored per node in the registry and delivered in the bundle.
 
@@ -111,9 +111,9 @@ fail-closed rules still land (`docs/spec/04-netcore-reconciler.md`). Only `korno
 ### Hub
 
 - ocserv serves three classes: `clients` (users, all `auth.*` methods), `agents` and one-time `enroll` sessions.
-  Agents and enroll use the `fabric.<fabric.domain>` virtual host on the same 443/tcp, selected by TLS SNI, with
+  Agents and enroll use the `interlink.<interlink.domain>` virtual host on the same 443/tcp, selected by TLS SNI, with
   their own certificate and a connect-script guard that admits only registry agents there.
-- Per-user ocserv files (`FabricGroupsService`) carry `explicit-ipv4`, `iroute` for each agent's exported prefixes
+- Per-user ocserv files (`InterlinkGroupsService`) carry `explicit-ipv4`, `iroute` for each agent's exported prefixes
   and `route` for other agents'. ocserv does not install `iroute` routes itself, so the hub reconciler installs
   `<prefix> dev vpnsN` into `main` with `proto 77`; a session counts as connected while that route exists.
 - The hub egress model is the same as an agent's; without an explicit `egress` list, hub clients leave through
@@ -123,11 +123,11 @@ fail-closed rules still land (`docs/spec/04-netcore-reconciler.md`). Only `korno
 ### Agent
 
 - `kornode-agent enroll` redeems a one-time token and stores the identity; `kornode-agent run` is the supervisor
-  main process. It holds the fabric tunnel and external upstream tunnels, applies bundles with
+  main process. It holds the interlink tunnel and external upstream tunnels, applies bundles with
   apply-with-confirm (verify health within a window, else roll back) and reports status.
 - A cached bundle is enough to boot and forward without the hub.
 - Roles: `access` runs a local ocserv listener for users of that node (password and certificate, hashes delivered
-  in the bundle); `gateway` accepts `from: fabric` traffic and masquerades it for other nodes' `via: node:<n>`.
+  in the bundle); `gateway` accepts `from: interlink` traffic and masquerades it for other nodes' `via: node:<n>`.
 - Sources (wg-easy, Amnezia) attach to a node as named sources; kornode owns their routing and NAT.
 
 ### External upstreams
@@ -162,8 +162,8 @@ dnsmasq (`services/host_dns.py`). It needs `network_mode: host` and a mount of t
      "Download & apply" button), validated (scheme, size cap, per-line domain parsing)
      and cached individually under `data_dir/internal-dns/urls/` before use.
 
-The same dnsmasq instance answers the fabric zone (`node<id>.<fabric.domain>` and registry records, owned by the
-hub; agents forward fabric names to it) and, through `DomainResolverService`, backs the domain sets of the egress
+The same dnsmasq instance answers the interlink zone (`node<id>.<interlink.domain>` and registry records, owned by the
+hub; agents forward interlink names to it) and, through `DomainResolverService`, backs the domain sets of the egress
 policy. It runs whenever `server.enabled` or any of blocklist, local records or forward domains is on
 (`AppConfig.dnsmasq_active_reasons()`), and the client DNS is the VPN server's own resolver unconditionally while
 `server.enabled` (`client_dns_servers()`). Clients routed by domain sets must use it, so the addresses they
@@ -214,7 +214,7 @@ panel (a labeled input, checkbox or select bound to that specific field), groupe
 the "Server (VPN)" / "Authentication methods" panels (Config tab), the admin web panel's own
 settings live under "Web / API panel", `system`/`cli` under "General", `identity`/`certificates`
 live in their own dedicated tabs, `egress`/`sources`/`sets` live in Network → Egress rules and Network → Sources,
-and `fabric` settings live in the Fabric tab.
+and `interlink` settings live in the Interlink tab.
 
 When a new field is added to `AppConfig`, add its GUI control in the same change:
 

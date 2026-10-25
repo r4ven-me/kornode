@@ -1,7 +1,6 @@
-"""P4 expectations that are not VM scenarios are explicit skips, never fabricated success.
+"""Opt-in VM interlink, access-client and external-source acceptance scenarios.
 
-The P3 cache/upgrade probes exercise fabric/upstream connectivity, not client
-throughput, no-NAT routed prefixes or wg-easy access/exit runtime.
+Netlab-only contracts are reported as coverage references, not blocked VM skips.
 """
 
 import secrets
@@ -13,30 +12,31 @@ from tests.e2e.inventory import E2EError
 
 pytestmark = pytest.mark.e2e
 
-BLOCKED = {
-    "NL-07": "covered by the netlab suppress-rule test (D-80)",
-    "NL-08": "covered by netlab tunnel-bounce leak tests and the E2E-07 fail-closed checks (D-80)",
+BLOCKED: dict[str, str] = {}
+NETLAB_COVERAGE = {
+    "NL-07": "tests/netlab/test_p0_upstream.py::"
+    "test_suppress_rule_keeps_connected_routes_ahead_of_policy_table",
+    "NL-08": "tests/netlab/test_p0_upstream.py::"
+    "test_tunnel_drop_and_reconnect_through_a_running_reconciler_leaks_nothing; "
+    "test_reconciler_restart_with_the_tunnel_dying_meanwhile_leaks_nothing",
+    "NL-09": "tests/netlab/test_p0_upstream.py::"
+    "test_nl09_50_mb_transfer_completes_through_the_tunnel_with_loss_and_latency",
 }
 
 
-@pytest.mark.parametrize("scenario,reason", BLOCKED.items(), ids=BLOCKED)
-def test_pending_runtime_contract(scenario: str, reason: str) -> None:
-    pytest.skip(f"{scenario} is not a VM scenario: {reason}")
-
-
-HUB_FABRIC_ADDRESS = "10.99.0.1"
+HUB_INTERLINK_ADDRESS = "10.99.0.1"
 HUB_RESOLVER = "10.100.1.1"
 AGENT_B_LAN = "192.168.30.0/24"
 AGENT_B_LAN_HOST = "192.168.30.1"
 
 
 @pytest.mark.e2e_case("routed")
-def test_nl_01_hub_reaches_an_agent_over_the_fabric_without_nat(cluster: Cluster) -> None:
-    address = cluster.call("agent-a", "fabric_address")["address"]
+def test_nl_01_hub_reaches_an_agent_over_the_interlink_without_nat(cluster: Cluster) -> None:
+    address = cluster.call("agent-a", "interlink_address")["address"]
 
     peer = cluster.tcp_peer("agent-a", "hub", address)
 
-    assert peer == HUB_FABRIC_ADDRESS
+    assert peer == HUB_INTERLINK_ADDRESS
 
 
 @pytest.mark.e2e_case("routed")
@@ -52,28 +52,28 @@ def test_nl_04_agent_reaches_a_service_in_another_agents_lan_via_the_hub_without
         60,
         "agent-a did not apply the bundle with the exported prefix",
     )
-    source = cluster.call("agent-a", "fabric_address")["address"]
+    source = cluster.call("agent-a", "interlink_address")["address"]
 
-    # Host traffic of an agent uses its fabric address as the source (strict RPF on the hub).
+    # Host traffic of an agent uses its interlink address as the source (strict RPF on the hub).
     peer = cluster.tcp_peer("agent-b", "agent-a", AGENT_B_LAN_HOST, source=source)
 
     assert peer == source
 
 
-def _service_address(fabric_address: str) -> str:
-    # 10.99.0.<id> -> 10.100.<id>.1 (default fabric templates, spec 01).
-    return f"10.100.{fabric_address.rsplit('.', 1)[1]}.1"
+def _service_address(interlink_address: str) -> str:
+    # 10.99.0.<id> -> 10.100.<id>.1 (default interlink templates, spec 01).
+    return f"10.100.{interlink_address.rsplit('.', 1)[1]}.1"
 
 
 @pytest.mark.e2e_case("routed")
-def test_nl_02_agent_reaches_hub_monitoring_by_fabric_name(cluster: Cluster) -> None:
-    """The agent resolves its own zone locally and the rest of the fabric zone
-    through the hub resolver over the fabric; TCP to the resolved address works
-    and keeps the agent's fabric address (no NAT)."""
-    source = cluster.call("agent-a", "fabric_address")["address"]
+def test_nl_02_agent_reaches_hub_monitoring_by_interlink_name(cluster: Cluster) -> None:
+    """The agent resolves its own zone locally and the rest of the interlink zone
+    through the hub resolver over the interlink; TCP to the resolved address works
+    and keeps the agent's interlink address (no NAT)."""
+    source = cluster.call("agent-a", "interlink_address")["address"]
     resolver = _service_address(source)
-    node = f"node{source.rsplit('.', 1)[1]}.kornode.internal"
-    cluster.call("hub", "dns_record", name="monitoring", type="A", value=HUB_FABRIC_ADDRESS)
+    node = f"node{source.rsplit('.', 1)[1]}.kornode.lan"
+    cluster.call("hub", "dns_record", name="monitoring", type="A", value=HUB_INTERLINK_ADDRESS)
 
     def resolves(name: str, expected: str) -> bool:
         answer = cluster.call("agent-a", "dns_resolve", name=name, server=resolver)
@@ -82,12 +82,12 @@ def test_nl_02_agent_reaches_hub_monitoring_by_fabric_name(cluster: Cluster) -> 
     wait_for(lambda: resolves(node, resolver), 60, f"agent-a resolver does not answer {node}")
     try:
         wait_for(
-            lambda: resolves("monitoring.kornode.internal", HUB_FABRIC_ADDRESS),
+            lambda: resolves("monitoring.kornode.lan", HUB_INTERLINK_ADDRESS),
             60,
-            "monitoring.kornode.internal is not resolved through the hub",
+            "monitoring.kornode.lan is not resolved through the hub",
         )
     except E2EError as exc:
-        name = "monitoring.kornode.internal"
+        name = "monitoring.kornode.lan"
         probes = {
             "agent->agent": cluster.call("agent-a", "dns_resolve", name=name, server=resolver),
             "agent->hub": cluster.call("agent-a", "dns_resolve", name=name, server=HUB_RESOLVER),
@@ -96,7 +96,7 @@ def test_nl_02_agent_reaches_hub_monitoring_by_fabric_name(cluster: Cluster) -> 
         }
         raise E2EError(f"{exc}: {probes}; agent-a {cluster.call('agent-a', 'net_dump')}") from None
 
-    peer = cluster.tcp_peer("hub", "agent-a", HUB_FABRIC_ADDRESS, source=source)
+    peer = cluster.tcp_peer("hub", "agent-a", HUB_INTERLINK_ADDRESS, source=source)
 
     assert peer == source
 
@@ -105,10 +105,10 @@ ACCESS_PORT = 8443  # published by the harness on agent-a (worker.ACCESS_PORT)
 
 
 @pytest.mark.e2e_case("routed")
-def test_nl_03_access_client_of_an_agent_reaches_the_fabric_and_leaves_through_the_node(
+def test_nl_03_access_client_of_an_agent_reaches_the_interlink_and_leaves_through_the_node(
     cluster: Cluster,
 ) -> None:
-    """A VPN client of agent-a (role access): reaches the hub across the fabric
+    """A VPN client of agent-a (role access): reaches the hub across the interlink
     without NAT, leaves through the node with NAT, and a *new* login works while
     the hub is down (users travel in the bundle as hashes). A throwaway openconnect
     client runs in its own container on the agent-b VM (outside the node's policy)
@@ -116,7 +116,7 @@ def test_nl_03_access_client_of_an_agent_reaches_the_fabric_and_leaves_through_t
     golden/netlab suites, not here."""
     inventory = cluster.fleet.inventory
     agent_a, hub_lan = inventory.host("agent-a").address, inventory.host("hub").address
-    node_id = cluster.call("agent-a", "fabric_address")["address"].rsplit(".", 1)[1]
+    node_id = cluster.call("agent-a", "interlink_address")["address"].rsplit(".", 1)[1]
     password = secrets.token_hex(12)
     before = cluster.status("agent-a")["applied_version"]
     access = cluster.call(
@@ -132,7 +132,7 @@ def test_nl_03_access_client_of_an_agent_reaches_the_fabric_and_leaves_through_t
     )
 
     # Only these destinations go through the tunnel of the throwaway client.
-    routes = [f"{HUB_FABRIC_ADDRESS}/32", f"{hub_lan}/32"]
+    routes = [f"{HUB_INTERLINK_ADDRESS}/32", f"{hub_lan}/32"]
 
     def connect() -> dict[str, str] | None:
         try:
@@ -164,9 +164,9 @@ def test_nl_03_access_client_of_an_agent_reaches_the_fabric_and_leaves_through_t
     try:
         client = login()
         assert client.startswith(f"10.100.{node_id}."), client
-        # Across the fabric: the hub sees the client's own address (no NAT).
-        assert cluster.tcp_peer("hub", "agent-b", HUB_FABRIC_ADDRESS, client=True) == client
-        # Outside the fabric: leaves through agent-a with its address (masquerade).
+        # Across the interlink: the hub sees the client's own address (no NAT).
+        assert cluster.tcp_peer("hub", "agent-b", HUB_INTERLINK_ADDRESS, client=True) == client
+        # Outside the interlink: leaves through agent-a with its address (masquerade).
         assert cluster.tcp_peer("hub", "agent-b", hub_lan, client=True) == agent_a
         cluster.call("agent-b", "access_client_stop")
 
@@ -192,10 +192,10 @@ def test_nl_06_source_prefix_is_exported_and_reachable_in_both_directions_withou
     cluster: Cluster,
 ) -> None:
     """A client behind a source of agent-b (a docker network standing in for the wg-easy
-    interface): its subnet is exported into the fabric, it reaches the hub, and the hub
-    and agent-a reach it, all with real addresses (no NAT inside the fabric)."""
+    interface): its subnet is exported into the interlink, it reaches the hub, and the hub
+    and agent-a reach it, all with real addresses (no NAT inside the interlink)."""
     # The source network of agent-b is 10.8.<node id>.0/24 with node id 3 (second enrolled agent).
-    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), (
+    assert cluster.call("agent-b", "interlink_address")["address"].endswith(".3"), (
         "agent-b is not node 3"
     )
     interface = cluster.call("agent-b", "source_iface")["interface"]
@@ -208,16 +208,16 @@ def test_nl_06_source_prefix_is_exported_and_reachable_in_both_directions_withou
 
         wait_for(applied, 60, f"{role} did not apply the bundle with the source")
     cluster.call("agent-b", "client_route", routes=["10.99.0.0/24"])
-    agent_a = cluster.call("agent-a", "fabric_address")["address"]
+    agent_a = cluster.call("agent-a", "interlink_address")["address"]
 
     # Source client -> hub: forwarded by agent-b as class `source`, no NAT.
-    assert cluster.tcp_peer("hub", "agent-b", HUB_FABRIC_ADDRESS, client=True) == SOURCE_CLIENT
+    assert cluster.tcp_peer("hub", "agent-b", HUB_INTERLINK_ADDRESS, client=True) == SOURCE_CLIENT
     # Hub -> source client: the exported prefix is routed through agent-b's session.
     assert (
         cluster.tcp_peer("agent-b", "hub", SOURCE_CLIENT, listener_client=True)
-        == HUB_FABRIC_ADDRESS
+        == HUB_INTERLINK_ADDRESS
     )
-    # agent-a -> source client: the prefix reached its bundle (host traffic, fabric address).
+    # agent-a -> source client: the prefix reached its bundle (host traffic, interlink address).
     assert (
         cluster.tcp_peer("agent-b", "agent-a", SOURCE_CLIENT, source=agent_a, listener_client=True)
         == agent_a
@@ -229,13 +229,15 @@ def test_e2e_07_client_of_agent_a_leaves_through_agent_b_and_fails_closed_when_i
     cluster: Cluster,
 ) -> None:
     """Exit via another node (D-69). A VPN client of agent-a (role access) has the policy
-    `clients -> any via node:3`: its internet traffic crosses the fabric, the hub steers it
+    `clients -> any via node:3`: its internet traffic crosses the interlink, the hub steers it
     into agent-b's session and agent-b (role gateway) masquerades it. With agent-b gone the
     traffic is never sent out of agent-a or the hub: it gets nowhere."""
     inventory = cluster.fleet.inventory
     agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
     ext = inventory.host("ext").address
-    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
+    assert cluster.call("agent-b", "interlink_address")["address"].endswith(".3"), (
+        "agent-b is not 3"
+    )
     password = secrets.token_hex(12)
     before = {role: cluster.status(role)["applied_version"] for role in ("agent-a", "agent-b")}
     cluster.call("hub", "gateway_role")
@@ -278,8 +280,8 @@ def test_e2e_07_client_of_agent_a_leaves_through_agent_b_and_fails_closed_when_i
         # the client reaches around the tunnel, can be the target. The client container shares
         # agent-b's VM, so the proof that this goes through the tunnel is the next check.)
         assert cluster.tcp_peer("ext", "agent-b", ext, client=True) == agent_b
-        # Inside the fabric nothing changed: no NAT, the client keeps its own address.
-        peer = cluster.tcp_peer("hub", "agent-b", HUB_FABRIC_ADDRESS, client=True)
+        # Inside the interlink nothing changed: no NAT, the client keeps its own address.
+        peer = cluster.tcp_peer("hub", "agent-b", HUB_INTERLINK_ADDRESS, client=True)
         assert peer.startswith("10.100.2.")
 
         cluster.call("agent-b", "stop")
@@ -304,11 +306,13 @@ def test_e2e_07_hub_source_leaves_through_agent_b_and_fails_closed_when_it_is_go
 ) -> None:
     """Spec E2E-07, full-tunnel half: a source attached to the hub (a docker network standing
     in for wg-easy) has the hub rule `source -> any via node:3`. Its internet traffic crosses
-    the fabric and agent-b (role gateway) masquerades it; the hub's own uplink never carries it,
+    the interlink and agent-b (role gateway) masquerades it; the hub's own uplink never carries it,
     and with agent-b gone it gets nowhere."""
     inventory = cluster.fleet.inventory
     agent_b, ext = inventory.host("agent-b").address, inventory.host("ext").address
-    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
+    assert cluster.call("agent-b", "interlink_address")["address"].endswith(".3"), (
+        "agent-b is not 3"
+    )
     before = {role: cluster.status(role)["applied_version"] for role in ("agent-b",)}
     cluster.call("hub", "gateway_role")
     interface = cluster.call("hub", "source_iface")["interface"]
@@ -356,13 +360,15 @@ def test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed(
     cluster: Cluster,
 ) -> None:
     """Spec E2E-07, domain half (D-79). The client of agent-a has `clients -> {domains: [x]}
-    via node:3`, x being a name in the fabric zone that points at ext, the "internet". Agent-a
+    via node:3`, x being a name in the interlink zone that points at ext, the "internet". Agent-a
     resolves x itself and reports the address; the hub marks the transit traffic by source
     and destination, agent-b masquerades it. With agent-b gone nothing leaves."""
     inventory = cluster.fleet.inventory
     agent_a, agent_b = inventory.host("agent-a").address, inventory.host("agent-b").address
     ext = inventory.host("ext").address
-    assert cluster.call("agent-b", "fabric_address")["address"].endswith(".3"), "agent-b is not 3"
+    assert cluster.call("agent-b", "interlink_address")["address"].endswith(".3"), (
+        "agent-b is not 3"
+    )
     password = secrets.token_hex(12)
     cluster.call("hub", "dns_record", name="webdest", type="A", value=ext)
     before = {role: cluster.status(role)["applied_version"] for role in ("agent-a", "agent-b")}
@@ -372,7 +378,7 @@ def test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed(
         user="alice", password=password,
     )  # fmt: skip
     pin = access["certificate"]["pin"]
-    cluster.call("hub", "access_policy", via="node:3", domain="webdest.kornode.internal")
+    cluster.call("hub", "access_policy", via="node:3", domain="webdest.kornode.lan")
     for role in ("agent-a", "agent-b"):
 
         def applied(role: str = role) -> bool:
@@ -410,7 +416,7 @@ def test_e2e_07_domain_exit_of_a_client_leaves_through_agent_b_and_fails_closed(
             dumps = {role: cluster.call(role, "net_dump") for role in ("hub", "agent-a")}
             dumps["resolved"] = cluster.call("agent-a", "resolved_sets")
             dumps["dns"] = cluster.call(
-                "agent-a", "dns_resolve", name="webdest.kornode.internal", server=HUB_RESOLVER
+                "agent-a", "dns_resolve", name="webdest.kornode.lan", server=HUB_RESOLVER
             )
             raise E2EError(f"{exc}: {dumps}") from None
         cluster.call("agent-b", "stop")
@@ -492,11 +498,11 @@ def test_nl_13_forwarding_access_client_keeps_the_internet_while_the_hub_is_down
 
 
 @pytest.mark.e2e_case("routed")
-def test_fabric_recovers_after_a_60_second_hub_outage_without_operator_action(
+def test_interlink_recovers_after_a_60_second_hub_outage_without_operator_action(
     cluster: Cluster,
 ) -> None:
-    """Phase 4 "done when": after the fabric channel is cut for 60 s, the hub reaches the
-    agents again by their real fabric addresses, with nobody touching anything."""
+    """Phase 4 "done when": after the interlink channel is cut for 60 s, the hub reaches the
+    agents again by their real interlink addresses, with nobody touching anything."""
     cluster.call("hub", "stop")
     try:
         wait_for(lambda: cluster.ping("agent-a") == 0, 20, "hub stop did not interrupt control")
@@ -510,8 +516,8 @@ def test_fabric_recovers_after_a_60_second_hub_outage_without_operator_action(
             f"{role} did not reconnect after the 60 s outage",
         )
     for role in ("agent-a", "agent-b"):
-        address = cluster.call(role, "fabric_address")["address"]
-        assert cluster.tcp_peer(role, "hub", address) == HUB_FABRIC_ADDRESS
+        address = cluster.call(role, "interlink_address")["address"]
+        assert cluster.tcp_peer(role, "hub", address) == HUB_INTERLINK_ADDRESS
 
 
 @pytest.mark.e2e_case("routed")
@@ -560,13 +566,90 @@ def test_nl_05_awg_client_leaves_through_upstream_office_and_fails_closed_when_i
             dumps["status"] = cluster.status("agent-a")
             raise E2EError(f"{exc}: {dumps}") from None
 
-        cluster.call("ext", "stop")
-        time.sleep(15)  # the upstream tunnel notices the server going away
+        cluster.call("agent-a", "uplink_capture", phase="start", host=agent_b)
         try:
-            assert cluster.tcp_unreachable("agent-b", "agent-b", agent_b, awg=True), (
-                "AmneziaWG client traffic arrived while the upstream was down"
+            wait_for(
+                lambda: bool(cluster.call("agent-a", "uplink_capture", phase="status")["ready"]),
+                10,
+                "NL-05 uplink capture did not become ready",
             )
+            observations: list[dict[str, object]] = []
+            cluster.fleet.results["routed.nl05_observations"] = observations
+            started = time.monotonic()
+            next_snapshot = started
+            stage = "natural"
+
+            def observe() -> None:
+                snapshot = cluster.call("agent-a", "nl05_snapshot")
+                snapshot["stage"] = stage
+                snapshot["seconds"] = round(time.monotonic() - started, 3)
+                snapshot["capture"] = cluster.call("agent-a", "uplink_capture", phase="status")
+                observations.append(snapshot)
+
+            observe()
+            cluster.call("ext", "nl05_ext_kill")
+            rejection: dict[str, object] = {}
+            try:
+                def rejected() -> bool:
+                    nonlocal next_snapshot
+                    probe = cluster.call("agent-b", "interlink_connect", host=agent_b, awg=True)
+                    rejection.update(error=probe["error"], seconds=probe["seconds"])
+                    cluster.fleet.results["routed.nl05_rejection"] = dict(rejection)
+                    if time.monotonic() >= next_snapshot:
+                        observe()
+                        next_snapshot = time.monotonic() + 20
+                    return (
+                        not probe["ok"]
+                        and probe["error"] in {"EHOSTUNREACH", "ENETUNREACH"}
+                        and probe["seconds"] < 2
+                    )
+
+                try:
+                    wait_for(rejected, 90, "AWG client did not receive a fast ICMP unreachable")
+                except E2EError:
+                    # Preserve the failure. Forcing only the owned upstream link
+                    # down distinguishes a live-but-retrying transport from a
+                    # broken kernel guard or a lost ICMP reply on the AWG path.
+                    natural = dict(rejection)
+                    stage = "forced_link_down"
+                    next_snapshot = 0
+                    try:
+                        cluster.call("agent-a", "nl05_tunnel_down")
+                        wait_for(
+                            rejected, 20, "diagnostic link-down did not produce fast rejection",
+                        )
+                    except E2EError:
+                        cluster.fleet.results["routed.nl05_counterfactual_failed"] = True
+                    finally:
+                        cluster.fleet.results["routed.nl05_counterfactual"] = dict(rejection)
+                        cluster.fleet.results["routed.nl05_rejection"] = natural
+                    raise
+                assert cluster.tcp_unreachable("agent-b", "agent-b", agent_b, awg=True), (
+                    "AmneziaWG client traffic arrived while the upstream was down"
+                )
+                assert rejected(), "fail-closed regressed during the outage"
+                cluster.fleet.results["routed.nl05_rejection"] = dict(rejection)
+                capture = cluster.call("agent-a", "uplink_capture", phase="status")
+                assert not capture["done"], "capture expired before the outage check completed"
+                assert any(
+                    key.startswith("wg0:out:icmp_3_") and count > 0
+                    for key, count in capture["trace"].items()
+                ), "fast errno must be backed by a captured ICMP unreachable on the AWG source"
+            finally:
+                try:
+                    observe()
+                finally:
+                    cluster.call("ext", "restart")
         finally:
-            cluster.call("ext", "restart")
+            capture = cluster.call("agent-a", "uplink_capture", phase="stop")
+            cluster.fleet.results["routed.nl05_trace"] = capture.get("trace", {})
+            assert capture["done"], "uplink capture did not stop cleanly"
+            assert capture["packets"] == 0, "AWG client packets leaked onto agent-a's uplink"
+            cluster.fleet.results["routed.nl05_uplink_packets"] = capture["packets"]
+        wait_for(
+            lambda: through_office() == ext,
+            150,
+            "AWG forwarding did not recover through upstream:office after ext restarted",
+        )
     finally:
         cluster.call("agent-b", "awg_client_stop")

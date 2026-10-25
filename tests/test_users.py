@@ -68,7 +68,7 @@ def test_user_service_uses_ocpasswd_c_for_password_file(tmp_path: Path) -> None:
     ]
 
 
-def test_create_user_with_fabric_puts_user_in_clients(tmp_path: Path) -> None:
+def test_create_user_with_interlink_puts_user_in_clients(tmp_path: Path) -> None:
     class WritingRunner(CommandRunner):
         def run(
             self,
@@ -109,7 +109,7 @@ def test_reserved_usernames_are_rejected_on_create(tmp_path: Path, username: str
     runner = RecordingRunner()
     service = UserService(_config(tmp_path), runner=runner)
 
-    with pytest.raises(ValueError, match="reserved for fabric agents/enrollment"):
+    with pytest.raises(ValueError, match="reserved for interlink agents/enrollment"):
         service.create_user(username, "password")
 
     assert runner.calls == []

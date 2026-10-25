@@ -26,7 +26,7 @@ def build(corp: list[str], session: tuple[str, str] | None = None):  # type: ign
         {
             "sets": {"corp": {"routes": corp}},
             "egress": [
-                {"from": ["clients", "host"], "to": "fabric", "via": "fabric"},
+                {"from": ["clients", "host"], "to": "interlink", "via": "interlink"},
                 {"from": ["clients", "host"], "to": {"set": "corp"}, "via": "upstream:office"},
                 {"from": ["clients"], "to": "any", "via": "local"},
             ],
@@ -37,13 +37,13 @@ def build(corp: list[str], session: tuple[str, str] | None = None):  # type: ign
         node_id=3,
         client_pool=ipaddress.IPv4Network("10.100.3.0/24"),
         tunnels={
-            "fabric": TunnelFact("ktun0", True, ("203.0.113.2",)),
+            "interlink": TunnelFact("ktun0", True, ("203.0.113.2",)),
             "upstream:office": TunnelFact("ktun1", True, ("198.51.100.9",)),
         },
         sources={},
         upstreams=("office",),
         node_prefixes={1: (net("10.100.1.0/24"),), 2: (net("10.100.2.0/24"),)},
-        fabric_ifaces=("ktun0",),
+        interlink_ifaces=("ktun0",),
         local_networks=(net("192.168.3.0/24"),),
         session_routes=((net(session[0]), session[1]),) if session else (),
         uplink="kup0",

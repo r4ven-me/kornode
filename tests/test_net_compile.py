@@ -51,7 +51,7 @@ def hub_case() -> tuple[EgressPolicy, NodeFacts]:
             1: (n("10.99.0.0/24"), n("10.100.1.0/24")),
             2: (n("10.100.2.0/24"), n("192.168.2.0/24")),
         },
-        fabric_ifaces=("vpns0",),
+        interlink_ifaces=("vpns0",),
         local_networks=(n("172.17.0.0/16"),),
         resolved={"corp": frozenset({"10.60.5.5/32"})},
         uplink="eth0",
@@ -69,22 +69,22 @@ def node3_case() -> tuple[EgressPolicy, NodeFacts]:
     bundle = json.loads((EXAMPLES / "bundle.node3.example.json").read_text(encoding="utf-8"))
     policy = EgressPolicy.model_validate(bundle["policy"])
     prefixes: dict[int, list[Any]] = {}
-    for item in bundle["fabric"]["prefixes"]:
+    for item in bundle["interlink"]["prefixes"]:
         prefixes.setdefault(item["node_id"], []).append(n(item["prefix"]))
     prefixes.setdefault(3, []).append(n(bundle["node"]["client_pool"]))
-    fabric = bundle["tunnels"]["fabric"]
+    interlink = bundle["tunnels"]["interlink"]
     office = bundle["tunnels"]["upstreams"][0]
     facts = NodeFacts(
         node_id=3,
         client_pool=n(bundle["node"]["client_pool"]),
         tunnels={
-            "fabric": TunnelFact(fabric["interface"], True, ("203.0.113.2",)),
+            "interlink": TunnelFact(interlink["interface"], True, ("203.0.113.2",)),
             "upstream:office": TunnelFact(office["interface"], True, ("198.51.100.9",)),
         },
         sources={"amnezia": SourceFact(present=True)},
         upstreams=("office",),
         node_prefixes={node: tuple(items) for node, items in prefixes.items()},
-        fabric_ifaces=(fabric["interface"],),
+        interlink_ifaces=(interlink["interface"],),
         local_networks=(n("192.168.3.0/24"),),
         uplink="ens3",
         all_rp_filter="0",
@@ -143,7 +143,7 @@ def test_marks_are_identity_based_and_tables_are_bounded_slots() -> None:
     compiled = compile_policy(*hub_case())
     exits = {exit_.name: (exit_.mark, exit_.table) for exit_ in compiled.exits}
     assert exits["upstream:office"] == (0x0CC63D00, 12002)
-    assert exits["fabric"] == (0x0C800100, 12001)
+    assert exits["interlink"] == (0x0C800100, 12001)
     assert exits["local"][0] == 0x0C800000
     assert all(mark & 0xFF == 0 and mark >> 24 == 0x0C for mark, _ in exits.values())
 
@@ -152,7 +152,28 @@ def test_local_exit_has_no_rule_or_table_but_is_masqueraded() -> None:
     compiled = compile_policy(*hub_case())
 
     assert not [rule for rule in compiled.desired.rules if rule.table == 12003]
-    assert '== 0x0c800000 oifname != "lo" masquerade' in compiled.script
+    assert (
+        '== 0x0c800000 oifname != "lo" oifname != @interlink_ifaces masquerade' in compiled.script
+    )
+
+
+def test_nothing_leaving_into_the_interlink_is_masqueraded() -> None:
+    # `local` is main + NAT to the uplink, but main also routes into interlink
+    # sessions: a hub client reaching an agent prefix through `to: any via local`
+    # must keep its source address (no NAT inside the interlink).
+    compiled = compile_policy(*hub_case())
+    nat = compiled.script.split("table ip kornode_nat {", 1)[1]
+    assert "set interlink_ifaces {" in nat
+    masquerades = [line.strip() for line in nat.splitlines() if line.strip().endswith("masquerade")]
+    unguarded = [
+        line
+        for line in masquerades
+        if "oifname != @interlink_ifaces" not in line and 'oifname "' not in line
+    ]
+    assert masquerades and not unguarded, masquerades
+    sets = {(e.family, e.table, e.set_name): e.elements for e in compiled.desired.elements}
+    assert sets[("ip", "kornode_nat", "interlink_ifaces")] == frozenset({"vpns0"})
+    assert sets[("inet", "kornode", "interlink_ifaces")] == frozenset({"vpns0"})
 
 
 def test_implicit_returns_come_before_every_rule() -> None:
@@ -170,12 +191,15 @@ def test_implicit_returns_come_before_every_rule() -> None:
 
 def test_unrouted_clients_and_sources_are_rejected_last() -> None:
     script = compile_policy(*node3_case()).script
-    chain = script.split("chain egress_classify {", 1)[1].split("}", 1)[0].strip().splitlines()
+    chain = script.split("chain egress_classify {", 1)[1].split("\n  }", 1)[0].splitlines()
 
-    assert chain[-2:] == [
+    assert chain[-3:] == [
         '    ip saddr 10.100.3.0/24 reject with icmpx admin-prohibited comment "egress rule 3"',
         '    iifname "awg0" ip saddr 10.8.3.0/24 reject with icmpx admin-prohibited '
         'comment "egress rule 3"',
+        # An IPv4 source's IPv6 (wg-easy hands out both) is not forwarded unclassified.
+        '    iifname "awg0" ip6 saddr != fe80::/10 ip6 daddr != { fe80::/10, ff00::/8 } '
+        'reject with icmpx admin-prohibited comment "source amnezia: no IPv6 policy"',
     ]
 
 
@@ -227,10 +251,29 @@ def test_stale_own_marks_never_leave_via_the_uplink() -> None:
     script = compile_policy(policy, facts).script
     strict = compile_policy(policy, dataclasses.replace(facts, uplink=None)).script
 
-    assert f'{stale} reject with icmpx admin-prohibited' in script
-    assert f'{stale} drop' in script
+    assert f"{stale} reject with icmpx admin-prohibited" in script
+    assert f"{stale} drop" in script
     assert f"{stale} reject with icmpx admin-prohibited" in strict
     assert f"{stale} drop" in strict
+
+
+def test_local_icmp_errors_toward_clients_pass_before_the_kill_switch() -> None:
+    # D-28: a client of a dead kill-switched upstream gets ICMP unreachable.
+    # icmp_send attaches the flow's conntrack, so output restores the dead mark
+    # onto the error; it must still pass postrouting unless it heads to the uplink.
+    policy, facts = hub_case()
+    down = dataclasses.replace(
+        facts, tunnels={"upstream:office": TunnelFact("oc-office0", False, ("198.51.100.9",))}
+    )
+    postrouting = compile_policy(policy, down).script.split("chain postrouting {")[1]
+    lines = [line.strip() for line in postrouting.split("}\n", 1)[0].splitlines()]
+    icmp = [i for i, line in enumerate(lines) if "fib saddr type local" in line]
+    kill = [i for i, line in enumerate(lines) if line.endswith(" drop")]
+    assert len(icmp) == 2 and kill and max(icmp) < min(kill), lines
+    assert all('oifname != "eth0" accept' in lines[i] for i in icmp)
+    # Unknown uplink: no exemption, the strict kill switch keeps everything (fail closed).
+    strict = compile_policy(policy, dataclasses.replace(down, uplink=None)).script
+    assert "fib saddr type local" not in strict
 
 
 def test_uplink_that_is_not_an_ifname_is_rejected_not_rendered() -> None:
@@ -264,18 +307,18 @@ def test_down_tunnel_keeps_only_the_kill_switch_route() -> None:
     }
 
 
-def test_agent_fabric_exit_routes_only_other_nodes_prefixes() -> None:
+def test_agent_interlink_exit_routes_only_other_nodes_prefixes() -> None:
     routes = compile_policy(*node3_case()).desired.routes
 
-    fabric = {r.dst for r in routes if r.table == 12001 and r.type == "unicast"}
-    assert fabric == {"10.99.0.0/24", "10.100.1.0/24", "10.100.2.0/24", "192.168.2.0/24"}
+    interlink = {r.dst for r in routes if r.table == 12001 and r.type == "unicast"}
+    assert interlink == {"10.99.0.0/24", "10.100.1.0/24", "10.100.2.0/24", "192.168.2.0/24"}
 
 
-def test_no_masquerade_toward_the_fabric() -> None:
+def test_no_masquerade_toward_the_interlink() -> None:
     for case in (hub_case, node3_case):
         compiled = compile_policy(*case())
-        fabric = next(exit_ for exit_ in compiled.exits if exit_.name == "fabric")
-        assert fabric.nat is False
+        interlink = next(exit_ for exit_ in compiled.exits if exit_.name == "interlink")
+        assert interlink.nat is False
         assert 'oifname "oc-hub0" masquerade' not in compiled.script
         assert 'oifname "vpns0" masquerade' not in compiled.script
 
@@ -411,3 +454,54 @@ def test_session_routes_become_kornode_owned_main_routes() -> None:
         Route(table=MAIN_TABLE, dst="192.168.3.0/24", dev="vpns0", proto=KORNODE_RTPROTO) in routes
     )
     assert not any(r.table == MAIN_TABLE for r in compile_policy(*hub_case()).desired.routes)
+
+
+def _fallthrough_case(up: bool) -> tuple[EgressPolicy, NodeFacts]:
+    policy = EgressPolicy.model_validate(
+        {
+            "egress": [
+                {
+                    "from": ["clients"],
+                    "to": {"routes": ["198.51.100.0/24"]},
+                    "via": "upstream:office",
+                    "kill_switch": False,
+                },
+                {"from": ["clients"], "to": "any", "via": "drop"},
+            ]
+        }
+    )
+    facts = NodeFacts(
+        node_id=1,
+        client_pool=n("10.100.1.0/24"),
+        tunnels={"upstream:office": TunnelFact("oc-office0", up, ())},
+        upstreams=("office",),
+        uplink="eth0",
+        all_rp_filter="1",
+    )
+    return policy, facts
+
+
+def test_kill_switch_false_falls_through_to_later_rules_while_the_upstream_is_down() -> None:
+    # Spec 02: `false` means fall through to later rules, not "main table un-NATed".
+    up = compile_policy(*_fallthrough_case(True))
+    down = compile_policy(*_fallthrough_case(False))
+    office = next(e for e in down.exits if e.name == "upstream:office")
+
+    assert [rule.index for rule in up.classify if rule.exit is not None] == [0]
+    assert [rule.index for rule in down.classify] == [1, 2]  # rule 0 skipped, drop and tail
+    assert f"meta mark set 0x{office.mark:08x}" not in down.script
+    # Flows the upstream marked before it went down reconnect instead of leaking.
+    forward = down.script.split("chain forward {")[1].split("\n  }")[0]
+    assert f"meta mark & 0xffffff00 == 0x{office.mark:08x} reject" in forward
+    postrouting = down.script.split("chain postrouting {")[1].split("\n  }")[0]
+    assert f"meta mark & 0xffffff00 == 0x{office.mark:08x} drop" in postrouting
+
+
+def test_explain_reports_a_skipped_kill_switch_false_rule_and_moves_on() -> None:
+    from kornode.net.explain import explain
+
+    policy, facts = _fallthrough_case(False)
+    decision = explain(compile_policy(policy, facts), policy, facts, "10.100.1.5", "198.51.100.7")
+
+    assert decision.matched_rule is not None and decision.matched_rule["via"] == "drop"
+    assert any("rule 0 skipped" in warning for warning in decision.warnings)

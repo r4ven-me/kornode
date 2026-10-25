@@ -44,6 +44,8 @@ def test_web_settings_saves_panel_fields_without_touching_admin_password(
             "terminal_enabled": True,
             "terminal_idle_timeout": 600,
             "session_lifetime": 1800,
+            # Enabling the terminal and changing trusted proxies need reauthentication.
+            "current_password": "secret",
         },
     )
 
@@ -55,3 +57,4 @@ def test_web_settings_saves_panel_fields_without_touching_admin_password(
     assert saved["web"]["terminal_idle_timeout"] == 600
     assert saved["web"]["session_lifetime"] == 1800
     assert saved["web"]["admin_password"] == "secret"
+    assert "current_password" not in saved["web"]

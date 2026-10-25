@@ -3,7 +3,7 @@
 The bundle carries only the policy; the node pre-resolves its domain sets itself and
 records the addresses per set in `<root>/resolved/<set>.txt` -- the same layout the hub
 uses (D-25), read back into NodeFacts.resolved by AgentNetInputs. Lookups go to the hub
-resolver over the fabric (the one the node's own dnsmasq forwards to), so the answers
+resolver over the interlink (the one the node's own dnsmasq forwards to), so the answers
 match what the node's clients get; without it the node falls back to /etc/resolv.conf.
 Stdlib only: the agent image carries no DNS library. Until a set is resolved it is empty,
 so traffic assigned to it matches nothing (fail closed).
@@ -94,7 +94,7 @@ def udp_lookup(
     source: str | None = None,
 ) -> tuple[list[str], int | None]:
     """One A/AAAA query, tried against each nameserver in turn. `source` pins the local
-    address: the hub's strict reverse path drops fabric traffic from any other one (D-47)."""
+    address: the hub's strict reverse path drops interlink traffic from any other one (D-47)."""
     query_id = random.SystemRandom().randrange(1 << 16)
     try:
         question = _encode_name(domain) + struct.pack("!HH", rdtype, 1)

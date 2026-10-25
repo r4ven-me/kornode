@@ -2,6 +2,11 @@
 
 ## Image and process model
 
+D-85 agents report version **2.1.0** and consume new `kornode.bundle/v2` bundles.
+Legacy `agent.yaml` and signed v1 caches remain readable for one minor release;
+this is an in-memory compatibility path, not transparent SNI migration. See
+[rename compatibility and flag-day limits](10-migration.md#v2-rename-compatibility-d-84d-85).
+
 - Image `kornode-agent` (same repo, `Dockerfile.agent` or a target in the
   main Dockerfile), Debian slim base matching the hub, packages:
   `openconnect`, `nftables`, `iproute2`, `dnsmasq`, `ocserv` (used only with
@@ -19,7 +24,7 @@
 
 ```
 /var/lib/kornode-agent/
-  agent.yaml                 # bootstrap (enroll): hub host/port/pin, fabric tunnel params, control_url; operator edits log level only
+  agent.yaml                 # bootstrap (enroll): hub host/port/pin, interlink tunnel params, control_url; operator edits log level only
   tls/key.pem tls/cert.pem tls/ca.pem
   seal/x25519.key
   bundles/<version>.json + <version>.sig   # exact received bytes + signature envelope
@@ -40,7 +45,7 @@ is the only pointer, so one rename switches it.
 {"current": 42, "confirmed": [42, 41, 40], "high_water": 43,
  "pending": {"version": 43, "started_at": "...", "previous": 42},
  "deferred": {"version": 43, "attempts": 1},
- "failed": {"39": "health: fabric (control ping) failed"},
+ "failed": {"39": "health: interlink (control ping) failed"},
  "last_apply": {"version": 43, "result": "rolled_back", "at": "...", "error": "..."}}
 ```
 
@@ -66,7 +71,7 @@ bundle signed by a new key is confirmed, the other active keys move to
 
 ### Bootstrap state
 
-`current = 0`: a desired state built from `agent.yaml` alone — the fabric
+`current = 0`: a desired state built from `agent.yaml` alone — the interlink
 tunnel to the hub and an empty egress policy (only the implicit rules of 02;
 nothing is marked to a tunnel, so nothing can leak). Used after enrollment
 until the first bundle is confirmed, and when no cached bundle verifies.
@@ -79,12 +84,12 @@ start
  ├─ pending present → the agent died inside a confirm window:
  │     current := pending.previous, record failed[v] = "restart during confirm"
  ├─ verify current (signature with active or retired keys, validator steps
- │     2 and 4–6 of 05); on failure try the next confirmed version, then the
+ │     2–6 of 05, skipping only the high-water replay comparison); on failure try the next confirmed version, then the
  │     bootstrap state; report what was skipped
  ├─ start reconciler with current; start tunnels from current
  └─ main loop:
       poll(since=high_water, wait=60) ─► new bundle → stage → apply-with-confirm
-      deferred version and fabric healthy for 30 s → retry it (max 3 attempts)
+      deferred version and interlink healthy for 30 s → retry it (max 3 attempts)
       report every report_interval_seconds and on apply/rollback/tunnel change
       execute commands
       renew certificate at 2/3 lifetime
@@ -103,7 +108,7 @@ One Python process (`kornode-agent run`), asyncio, modules in
 | --- | --- |
 | `store.py` | files above: cache, `state.json`, `trust.json`, atomic writes |
 | `inputs.py` | `AgentNetInputs`: active bundle + runtime facts → `NetInputs`; the provider for `kornode.net.Reconciler` |
-| `tunnels.py` | fabric and upstream openconnect sessions; reuses the shared dialer extracted from the hub's `UpstreamService` (argv, carrier resolution, pin probe) into a module free of hub imports |
+| `tunnels.py` | interlink and upstream openconnect sessions; reuses the shared dialer extracted from the hub's `UpstreamService` (argv, carrier resolution, pin probe) into a module free of hub imports |
 | `apply.py` | apply-with-confirm state machine (below) |
 | `health.py` | health checks and the baseline |
 | `control.py` | httpx client: poll, report, commands, renew (mTLS, pinned CA) |
@@ -126,7 +131,7 @@ the active bundle converged between applies, exactly as on the hub.
    to match; `run_once()`.
 4. **Health window** (`settings.confirm_window_seconds`, default 60 s). Every
    3 s, until each required check has passed once:
-   - `fabric` — always required: fabric tunnel up and an mTLS
+   - `interlink` — always required: interlink tunnel up and an mTLS
      `GET /agent/v1/ping` to the bundle's `control_url` succeeds;
    - `upstream:<name>` — tunnel up (and `check_host` reachable through its
      mark, if set) for every upstream exit referenced by an egress rule,
@@ -140,11 +145,11 @@ the active bundle converged between applies, exactly as on the hub.
    `confirmed`.
 6. **Rollback** (deadline passed): provider switches back to `previous`,
    `run_once()`, `pending` cleared, report `rolled_back` with the failed
-   checks. Then a 30 s check of `fabric` under `previous` decides the blame:
-   - fabric healthy → the bundle broke it: `failed[v]`, never retried;
+   checks. Then a 30 s check of `interlink` under `previous` decides the blame:
+   - interlink healthy → the bundle broke it: `failed[v]`, never retried;
      a newer version from the hub is needed;
-   - fabric still down → the hub or the path is down, not the bundle:
-     `deferred = {v, attempts}`; retried automatically once fabric has been
+   - interlink still down → the hub or the path is down, not the bundle:
+     `deferred = {v, attempts}`; retried automatically once interlink has been
      healthy for 30 s, at most 3 attempts, then `failed`.
 
 Fail closed throughout: every step is a complete desired state compiled by
@@ -161,13 +166,13 @@ the hub's next bundle is above `high_water` as usual.
   jitter); no bundle expiry.
 - Boot without hub: apply the cached current bundle immediately (no confirm
   window: it was confirmed before).
-- Certificate expiry with hub unreachable: fabric and control stop working at
+- Certificate expiry with hub unreachable: interlink and control stop working at
   `not_after`; external upstreams and local egress continue. Agent logs a
   daily warning from 14 days before expiry.
 
 ## Tunnels
 
-- `fabric` — openconnect to the hub with the agent certificate, interface
+- `interlink` — openconnect to the hub with the agent certificate, interface
   `oc-hub0`, kornode vpnc-script (interface-only, as today), `--pfs`, server
   certificate pinned, camouflage secret if configured, `--no-dtls` when
   `transport: tcp`.
@@ -177,11 +182,20 @@ the hub's next bundle is above `high_water` as usual.
 - Each tunnel reports state transitions to the reconciler (facts) and to the
   report.
 
+- Upstream liveness is not just an UP interface and live PID: openconnect may
+  retain both while retrying a dead server. For a configured `check_host`, the
+  agent uses its bounded existing probe at five-second intervals. Three
+  consecutive failures stop that upstream and converge before redialing, so
+  the stale unicast route cannot hide the unreachable guard (D-87). Success
+  clears the streak. This does not change interlink or unmonitored upstreams;
+  probe duration and stop grace mean detection is not a fixed 15-second SLA.
+
 ## CLI `kornode-agent`
 
 | Command | Purpose |
 | --- | --- |
 | `enroll <token>` | One-time enrollment (05). Refuses if already enrolled unless `--force`. |
+| `set-hub-name <name>` | Set the hub vhost name (SNI) in `agent.yaml` after a hub-side rename; identity, key and pin unchanged. Refused while the agent runs. |
 | `run` | Main process (used by supervisor). |
 | `status [--json]` | Applied/pending version, hub reachability, tunnels, sources, last errors. |
 | `explain <src> <dst> [--proto tcp --port 443]` | Local explain (04). |
@@ -190,7 +204,7 @@ the hub's next bundle is above `high_water` as usual.
 | `bundle history` | Cached versions with results. |
 | `bundle rollback <version> [--dry-run]` | Local emergency rollback to a cached confirmed version (reported to hub); preview verifies the cache without applying. |
 | `diag [--out file.tar.gz]` | Same archive as the `collect_diag` command. |
-| `reconnect [<tunnel>] [--dry-run]` | Restart one named exit (`fabric`, `upstream:<name>`), or all; preview makes no network changes. |
+| `reconnect [<tunnel>] [--dry-run]` | Restart one named exit (`interlink`, `upstream:<name>`), or all; preview makes no network changes. |
 | `version` | Versions of agent and components. |
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 validation conflict, 4 hub unreachable.
@@ -219,7 +233,7 @@ is unchanged).
 - `explain`, `doctor`, `diag`, `reconnect`, `bundle rollback` require the running
   process, but not a reachable hub. A missing process is exit 1, not exit 4; none
   starts a second reconciler. Rollback still requires the existing confirm window,
-  including fabric health, so an unreachable hub may prevent confirmation.
+  including interlink health, so an unreachable hub may prevent confirmation.
 - RPC: one JSON request line, one response line, fixed operations only (`status`,
   `explain`, `doctor`, `diag`, `reconnect`, `rollback`), strict argument validation.
   Requests ≤ 8 KiB, responses ≤ 8 MiB; incomplete frames expire after 5 s. The
@@ -280,7 +294,7 @@ Implemented in P4-04 (D-67), password authentication only.
   `access_failed`, never a rollback.
 - **Local auth works without the hub**: the hashes are in the cached bundle and ocserv
   needs nothing else (E2E NL-03 logs in with the hub stopped).
-- Clients get **no implicit access to the fabric** (the bundle's implicit `to-fabric` rule is for `host` and sources on an `access` node); grant it with `from: [clients] to: fabric via: fabric`, and an exit with `from: [clients] to: any via: local` (masquerade) or `upstream:<name>`. Toward the node itself clients may only use DNS on the service address and ping; the connected LAN is reachable through the forwarding path.
+- Clients get **no implicit access to the interlink** (the bundle's implicit `to-interlink` rule is for `host` and sources on an `access` node); grant it with `from: [clients] to: interlink via: interlink`, and an exit with `from: [clients] to: any via: local` (masquerade) or `upstream:<name>`. Toward the node itself clients may only use DNS on the service address and ping; the connected LAN is reachable through the forwarding path.
 - The listener certificate is revoked in the hub CRL when issued (it is a hub-CA certificate without OU and must never authenticate to the hub); the hub doctor check `access-certificates` warns 30 days before it expires.
 - `kornode.net` adds the strict reverse-path rule for `vpns*` (`NodeFacts.access_ifaces`,
   as the hub's enroll guard, D-47); the doctor ignores the per-session host routes in the
