@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-10-25
+
 ### Fixed
 
 - The built-in resolver's listen address on `lo` is now added by the reconciler (`NodeFacts.local_addresses`) instead of a direct `ip addr replace` from the DNS service, so only `kornode.net` changes kernel state (D-99). `korctl internal-dns ensure-listen` and the panel's DNS apply await one reconciler pass.
