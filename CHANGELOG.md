@@ -1,6 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0] — 2026-10-25
+
+### Breaking — read before upgrading
+
+- **fabric → interlink (D-85).** The hub vhost for agents becomes `interlink.<domain>`; `korctl fabric` and `/api/fabric` are gone (use `korctl interlink`, `/api/interlink`). Old YAML/env spellings, policy aliases, `agent.yaml` and signed v1 bundle caches are read for one minor release. Upgrade agents first, then the hub, then run `kornode-agent set-hub-name interlink.<domain>` on each agent: [docs/runbooks/upgrade-2.0.md](docs/runbooks/upgrade-2.0.md).
+- Default DNS zone `kornode.lan` (an explicit `kornode.internal` stays). Panel: Agents and Interlink become **Nodes**; Network splits into hub policy & sources / kernel diagnostics.
+- `compose.web.yaml` / `compose.proxy.yaml` require `KORNODE_ADMIN_PASSWORD`; new admin passwords need ≥ 12 characters.
+- Agent image carries agent 2.2.0; bundles require at least agent 2.1.0.
 
 ### Fixed (control plane review 2026-10-24)
 
@@ -53,7 +60,7 @@
 
 ### Changed (interlink naming and Nodes, D-85 / D-86)
 
-- Renamed the public fabric configuration, CLI/API, templates, bundles and panel to **interlink**; default DNS zone is **`kornode.lan`**. Agent version and v2 bundle minimum are 2.1.0. Explicit existing domains remain unchanged. Old YAML/env/.env names, policy aliases, agent config and signed v1 caches are readable for one minor release; conflicting aliases are rejected. Legacy signatures and sealed-secret AAD are verified before normalization. Certificate migration preserves the old files and SPKI pin. **The SNI rename requires explicit re-enrollment across D-85**, not a transparent image upgrade.
+- Renamed the public fabric configuration, CLI/API, templates, bundles and panel to **interlink**; default DNS zone is **`kornode.lan`**. Agent version and v2 bundle minimum are 2.1.0. Explicit existing domains remain unchanged. Old YAML/env/.env names, policy aliases, agent config and signed v1 caches are readable for one minor release; conflicting aliases are rejected. Legacy signatures and sealed-secret AAD are verified before normalization. Certificate migration preserves the old files and SPKI pin. The SNI rename is a flag day, not a transparent image upgrade: agents switch with `kornode-agent set-hub-name` (D-93).
 - Combined Agents and Interlink into **Nodes → Overview / Settings / DNS**. Removed duplicate Config controls; retained all addressing controls and CLI/API/Web capabilities. Hub source editing links to the existing Network editor. Updated browser tests, including obsolete v1 panel expectations.
 - Config validation errors no longer echo malformed secret input (`hide_input_in_errors`). Added compatibility and schema-parity regression tests.
 
@@ -61,16 +68,13 @@
 
 - An agent's openconnect process could keep an UP tunnel while retrying a dead upstream, blackholing traffic instead of exposing its unreachable route. Existing configured `check_host` probes now reset that upstream after three consecutive failures, reconciling before redial. No new config fields; interlink and unmonitored upstreams are unchanged. Two real AmneziaWG abrupt-loss runs passed fast ICMP/no-leak/recovery checks.
 
-### Integration with audited 1.2.0 (development branch only)
+### Changed (panel)
 
-- Preserved the prior work in `9b9ee4d` and integrated `origin/main` at `33df415` in `redesign/interlink-nodes-integration`. The merge retains raw config transactions/ETags/secret references, auth hardening, stable routing marks/conntrack labels/fail-closed barriers, and structured audit controls alongside interlink and Nodes.
-- Fixed the test access-client hook to restore addresses/routes on `reconnect` using idempotent replacements; deterministic local regressions preserve the client SLA, VPN path and expected exit checks. This does not establish the cause or acceptance of the earlier failed VM run.
-- Combined-code validation: **2014 backend tests, 84 frontend tests, 49 mock-local Playwright tests** passed; lint, both mypy targets, build, render and parity passed. No VPS/SSH, remote runtime tests, images or deployment. UI acceptance and full network/upgrade acceptance remain pending. See `docs/redesign/INTEGRATION.md`.
+- Nodes: a node list and a per-node workspace with tabs (settings & enrollment, networks & sources, egress policy, upstreams, VPN access & users, activity & diagnostics); drafts survive tab switches; signing-key rotation moved under Control plane maintenance. Network: two tasks, hub policy & sources and kernel diagnostics (loaded on demand). Field help for interlink addressing and hub sources.
 
-### Historical pre-integration tests and acceptance
+### Integration with 1.2.0
 
-- Added example forwarding netlab coverage, removed obsolete blocked-scenario placeholders, and added continuous access-client traffic during E2E-06 upgrades. Backend: **1334 passed / 104 opt-in skipped**, lint/typecheck/render/parity green; frontend: **48 passed**, build green, **44 Playwright passed**. Netlab: **83 unique passed** across bounded runs.
-- **Not a completed release acceptance:** continuous client recovery in E2E-06 still fails on a distinct compatible post-D85 baseline. The final VM run was interrupted at the owner's request; owned resources were cleaned up. See `tests/e2e/ACCEPTANCE-2026-10-23.md`. No commit/push/PR or GitHub workflow dispatch was performed.
+- Merges the 1.2.0 audit hardening (raw config transactions/ETags, MFA/session protection, stable routing marks and conntrack labels, fail-closed barriers, structured audit controls) with interlink and Nodes. The E2E access-client hook now restores routes on `reconnect`.
 
 ## [1.2.0] — 2026-10-23
 

@@ -24,7 +24,7 @@ Rootless Docker and non-host networking are unsupported for hub and agents.
   cached bundle**, and is flagged `upgrade_required` in the agent API/panel and by
   `korctl doctor` (`agent-versions`), computed from the `agent_version` of its last
   report. The hub does not down-compile bundles for old agents.
-- Release-specific steps (e.g. the D-85 SNI flag day, which needs re-enrollment)
+- Release-specific steps (e.g. the D-85 SNI flag day: `kornode-agent set-hub-name`, D-93)
   are in `docs/runbooks/upgrade-2.0.md` and spec 10.
 - `bundle.format` is semver-major in the schema id (`bundle.v2`); additive
   fields only within a major; agents ignore unknown fields marked `x-optional`.
