@@ -51,14 +51,17 @@ def _clients(tmp_path: Path, *, totp: bool = False) -> tuple[TestClient, TestCli
     )
 
 
-def _code(client: TestClient, secret: str) -> str:
-    return AdminTotpService(client.app.state.config)._code_at(secret, int(time.time()) // 30)
+def _code(client: TestClient, secret: str, step: int = 0) -> str:
+    return AdminTotpService(client.app.state.config)._code_at(
+        secret, int(time.time()) // 30 + step
+    )
 
 
-def _login(client: TestClient, *, totp: bool = False) -> str:
+def _login(client: TestClient, *, totp: bool = False, step: int = 0) -> str:
+    # Sign-in codes are single-use: a second browser signs in with the next step's code.
     payload = {"username": "admin", "password": "secret"}
     if totp:
-        payload["totp_code"] = _code(client, INITIAL_SECRET)
+        payload["totp_code"] = _code(client, INITIAL_SECRET, step)
     response = client.post("/api/auth/login", json=payload)
     assert response.status_code == 200, response.text
     return str(response.json()["csrf_token"])
@@ -161,7 +164,7 @@ def test_password_change_rejects_already_reauthenticated_mutations(
 ) -> None:
     stale, other, path = _clients(tmp_path, totp=totp)
     csrf = _login(stale, totp=totp)
-    other_csrf = _login(other, totp=totp)
+    other_csrf = _login(other, totp=totp, step=1)
     old_cookie = stale.cookies.get(SESSION_COOKIE)
 
     def change_password() -> None:
@@ -307,7 +310,7 @@ def test_unrelated_config_commit_does_not_invalidate_verified_authority(
 ) -> None:
     stale, other, path = _clients(tmp_path, totp=True)
     csrf = _login(stale, totp=True)
-    other_csrf = _login(other, totp=True)
+    other_csrf = _login(other, totp=True, step=1)
 
     def save_timezone() -> None:
         response = other.patch(

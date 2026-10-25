@@ -952,6 +952,12 @@ docker compose -f compose.yaml -f compose.web.yaml up --build -d
 curl -kfsS https://127.0.0.1:8443/healthz
 ```
 
+Set `KORNODE_ADMIN_PASSWORD` (in `.env` or the environment) first: both
+`compose.web.yaml` and `compose.proxy.yaml` refuse to start without it (there is no
+default). New admin passwords must be at least 12 characters and not a placeholder
+(`change-me`, `admin`, `password`, `kornode`); `korctl doctor` warns when the configured
+one is a placeholder.
+
 `compose.web.yaml` enables Web and makes Uvicorn listen on `127.0.0.1` inside the
 container over HTTPS. Since the base `compose.yaml` runs with `network_mode: host`,
 that's the real host loopback directly - no Docker port publishing is needed or used,
@@ -1045,7 +1051,7 @@ reset their own login-lockout counter at will.
 Keep `session_cookie_secure` enabled behind an HTTPS reverse proxy too. Only disable it
 for isolated local HTTP development.
 
-Compose override for this setup:
+Compose override for this setup (requires `KORNODE_ADMIN_PASSWORD`, see above):
 
 ```bash
 docker compose -f compose.yaml -f compose.proxy.yaml up -d

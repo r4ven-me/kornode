@@ -213,11 +213,41 @@ def save_auth_methods_settings(
     }
 
 
+def _explicit_secret(value: str | None) -> bool:
+    return value is not None and value != ""
+
+
+def refuse_inherited_secret_to_new_target(
+    payload: AuthMethodsSettingsRequest, current: AppConfig, settings: OtpAuthConfig, channel: str
+) -> None:
+    """Never send a stored secret to a destination the request just changed."""
+    saved = current.auth.otp
+    if channel == "email":
+        changed = settings.smtp_host != saved.smtp_host or settings.smtp_port != saved.smtp_port
+        inherited = bool(settings.smtp_password) and not _explicit_secret(payload.otp_smtp_password)
+        name = "smtp_password"
+    else:
+        changed = settings.telegram_chat_id != saved.telegram_chat_id
+        inherited = bool(settings.telegram_bot_token) and not _explicit_secret(
+            payload.otp_telegram_bot_token
+        )
+        name = "telegram_bot_token"
+    if changed and inherited:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"the delivery target differs from the saved settings: enter {name} "
+                "explicitly (the stored secret is not reused for a changed target)"
+            ),
+        )
+
+
 @router.post("/auth-settings/test-email")
 def test_otp_email(request: Request, payload: AuthMethodsSettingsRequest) -> dict[str, str]:
     settings = OtpAuthConfig.model_validate(
         otp_settings_from_payload(payload, request.app.state.config)
     )
+    refuse_inherited_secret_to_new_target(payload, request.app.state.config, settings, "email")
     try:
         OtpDeliveryService(settings).send_test_email()
     except (OSError, ValueError, smtplib.SMTPException) as exc:
@@ -230,6 +260,7 @@ def test_otp_telegram(request: Request, payload: AuthMethodsSettingsRequest) -> 
     settings = OtpAuthConfig.model_validate(
         otp_settings_from_payload(payload, request.app.state.config)
     )
+    refuse_inherited_secret_to_new_target(payload, request.app.state.config, settings, "telegram")
     try:
         OtpDeliveryService(settings).send_test_telegram()
     except (OSError, ValueError) as exc:

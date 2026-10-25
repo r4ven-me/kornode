@@ -9,6 +9,7 @@ import {
   saveInternalDnsSettings,
   saveRoutingSettings,
   saveUpstreamProfile,
+  saveWebSettings,
   setCsrfToken,
   testOtpEmail,
   testOtpTelegram,
@@ -293,5 +294,24 @@ describe("network view helpers", () => {
 
   it("sums reconciler drift counters", () => {
     expect(netDriftCount({ running: true, drift: { rules: 2, routes: 3 } })).toBe(5);
+  });
+});
+
+describe("web settings reauthentication", () => {
+  const base = {
+    enabled: true, listen: "127.0.0.1", port: 8443, tls: true, allow_insecure_http: false,
+    trusted_proxies: [], admin_user: "admin", terminal_enabled: true, terminal_idle_timeout: 900,
+    terminal_max_sessions: 2, client_sync_enabled: false, session_lifetime: 43200,
+    session_cookie_secure: true
+  };
+  it("sends the confirmation password and code only in the request body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "saved" }), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await saveWebSettings("session", { ...base, current_password: "secret", totp_code: "123456" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/web-config/settings");
+    expect(JSON.parse(init.body)).toMatchObject({ terminal_enabled: true, current_password: "secret", totp_code: "123456" });
   });
 });

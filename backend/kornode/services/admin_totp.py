@@ -51,11 +51,20 @@ class AdminTotpService:
         return str(truncated % (10**_TOTP_DIGITS)).zfill(_TOTP_DIGITS)
 
     def verify_code(self, secret: str, code: str, window: int = 1) -> bool:
+        return self.matching_step(secret, code, window) is not None
+
+    def matching_step(self, secret: str, code: str, window: int = 1) -> int | None:
+        """The time step (counter) a code matches within +-window steps, else None.
+
+        Callers that must accept a code once (sign-in, RFC 6238 section 5.2) compare it
+        with the last step they accepted.
+        """
         code = code.strip()
         if not code.isdigit() or len(code) != _TOTP_DIGITS:
-            return False
+            return None
         counter = int(time.time()) // _TOTP_STEP_SECONDS
+        matched: int | None = None
         for offset in range(-window, window + 1):
             if hmac.compare_digest(self._code_at(secret, counter + offset), code):
-                return True
-        return False
+                matched = counter + offset
+        return matched

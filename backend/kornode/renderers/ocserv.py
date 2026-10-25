@@ -11,7 +11,10 @@ _INTERLINK_GUARD = """# Interlink guard (D-43, D-71). ocserv passes the virtual 
 # The interlink vhost accepts certificates of the hub CA, so an OU-less client certificate would
 # get a session there: only the groups agents (user agent-<id>, known to the
 # registry) and enroll (user enroll-*) may log in, everything else is refused. The
-# default host serves clients: it must never place a session in an interlink group.
+# default host serves clients: it must never place a session in an interlink group, and
+# must refuse the reserved user names too: config-per-user files (agent-N carries an
+# explicit-ipv4) are global to every vhost, so a PAM/RADIUS/OIDC/certificate user named
+# agent-3 would otherwise inherit agent 3's address.
 case "$VHOST" in
   __INTERLINK_VHOST__)
     case "$GROUPNAME" in
@@ -33,6 +36,9 @@ case "$VHOST" in
   *)
     case "$GROUPNAME" in
       agents | enroll) exit 1 ;;
+    esac
+    case "$USERNAME" in
+      agent-* | enroll-*) exit 1 ;;
     esac ;;
 esac
 

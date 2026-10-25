@@ -120,7 +120,9 @@ class InterlinkGroupsService:
             stale.extend(
                 path
                 for path in sorted(user_dir.iterdir())
-                if path.is_file() and AGENT_USER_RE.match(path.name) and path not in rendered_paths
+                if path.is_file()
+                and AGENT_USER_RE.fullmatch(path.name)
+                and path not in rendered_paths
             )
         group_dir = self.group_dir()
         if group_dir.is_dir():

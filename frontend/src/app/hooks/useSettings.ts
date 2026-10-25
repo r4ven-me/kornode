@@ -156,7 +156,9 @@ export function useSettings(core: PanelCore) {
         terminal_max_sessions: webSettingsDraft.terminalMaxSessions,
         client_sync_enabled: webSettingsDraft.clientSyncEnabled,
         session_lifetime: webSettingsDraft.sessionLifetime,
-        session_cookie_secure: webSettingsDraft.sessionCookieSecure
+        session_cookie_secure: webSettingsDraft.sessionCookieSecure,
+        ...(webSettingsDraft.currentPassword ? { current_password: webSettingsDraft.currentPassword } : {}),
+        ...(webSettingsDraft.totpCode ? { totp_code: webSettingsDraft.totpCode } : {})
       })
     );
     if (result !== null) {

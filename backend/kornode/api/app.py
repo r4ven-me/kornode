@@ -60,7 +60,14 @@ def create_app(
     if config is None:
         config = load_config(resolved_config_path)
 
-    app = FastAPI(title="Korvus Node API", version=__version__)
+    # The schema and interactive docs would expose the whole admin surface unauthenticated.
+    app = FastAPI(
+        title="Korvus Node API",
+        version=__version__,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.config = config
     app.state.config_path = resolved_config_path
     # Embedded callers may supply an unsaved initialization candidate. Only

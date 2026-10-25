@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from kornode.api.auth import (
     SESSION_COOKIE,
@@ -21,8 +21,10 @@ from kornode.api.auth import (
 )
 from kornode.api.routes_config import apply_config_mutation
 from kornode.config.loader import deep_merge, validate_config_data
+from kornode.config.models import AppConfig
 from kornode.services.admin_totp import AdminTotpService
 from kornode.services.password_hash import hash_password
+from kornode.services.password_policy import validate_new_admin_password
 
 router = APIRouter()
 
@@ -39,7 +41,7 @@ def login(request: Request, response: Response, payload: LoginRequest) -> dict[s
     registry = auth_registry(request)
     generation = registry.generation
     authenticate_password(request, payload.username, payload.password)
-    authenticate_totp(request, payload.totp_code)
+    authenticate_totp(request, payload.totp_code, consume=True)
     config = request.app.state.config
     registry = auth_registry(request)
     previous_token = request.cookies.get(SESSION_COOKIE)
@@ -88,6 +90,11 @@ class ReauthenticateRequest(BaseModel):
 class PasswordChangeRequest(ReauthenticateRequest):
     new_password: str = Field(min_length=1, max_length=1024, repr=False)
 
+    @field_validator("new_password")
+    @classmethod
+    def _strong_enough(cls, value: str) -> str:
+        return validate_new_admin_password(value)
+
 
 class TotpConfirmRequest(ReauthenticateRequest):
     secret: str = Field(min_length=1, max_length=128, repr=False)
@@ -121,8 +128,12 @@ def _reauthenticate(request: Request, payload: ReauthenticateRequest) -> _Reauth
 
 
 def _apply_auth_patch(
-    request: Request, proof: _ReauthenticationProof, patch: dict[str, Any]
-) -> None:
+    request: Request,
+    proof: _ReauthenticationProof,
+    patch: dict[str, Any],
+    *,
+    write_rendered: bool = False,
+) -> tuple[AppConfig, list[str]]:
     def mutate(raw: dict[str, Any]) -> dict[str, Any]:
         # apply_config_mutation already holds the config lock. Bind the earlier
         # password/TOTP checks to this latest candidate before any persistence.
@@ -133,7 +144,7 @@ def _apply_auth_patch(
         registry.require_current_authority(proof.generation, proof.session_token)
         return deep_merge(raw, patch)
 
-    apply_config_mutation(request, mutate, write_rendered=False)
+    return apply_config_mutation(request, mutate, write_rendered=write_rendered)
 
 
 @router.post("/password")

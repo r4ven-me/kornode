@@ -230,6 +230,13 @@ def test_connect_script_interlink_guard(tmp_path: Path) -> None:
         ({"GROUPNAME": "", "USERNAME": "alice"}, 0),
         ({"VHOST": "", "GROUPNAME": "agents", "USERNAME": "agent-3"}, 1),
         ({"VHOST": "", "GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 1),
+        # reserved user names are refused on the client host whatever the group: the
+        # agent-N config-per-user files (explicit-ipv4) are global to every vhost
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "agent-3"}, 1),
+        ({"VHOST": "", "GROUPNAME": "clients", "USERNAME": "agent-3"}, 1),
+        ({"GROUPNAME": "", "USERNAME": "agent-3"}, 1),
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "enroll-x"}, 1),
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "agentsmith"}, 0),
     ]
     for env, expected in cases:
         result = subprocess.run(

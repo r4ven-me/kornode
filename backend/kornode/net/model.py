@@ -57,7 +57,7 @@ class Source(_Strict):
 
 def _domains(values: list[str]) -> list[str]:
     for value in values:
-        if not _DOMAIN_RE.match(value):
+        if not _DOMAIN_RE.fullmatch(value):
             raise ValueError(f"invalid domain {value!r}")
     return values
 
@@ -136,7 +136,7 @@ class Via:
 
     @classmethod
     def parse(cls, value: str) -> Via:
-        match = _VIA_RE.match(value)
+        match = _VIA_RE.fullmatch(value)
         if match is None:
             raise ValueError(f"invalid via {value!r}")
         if match.group(2):
@@ -183,7 +183,7 @@ class Rule(_Strict):
         if len(set(value)) != len(value):
             raise ValueError("duplicate entries in from")
         for item in value:
-            if item not in BUILTIN_CLASSES and not re.match(NAME_PATTERN, item):
+            if item not in BUILTIN_CLASSES and not re.fullmatch(NAME_PATTERN, item):
                 raise ValueError(f"invalid from entry {item!r}")
         return value
 

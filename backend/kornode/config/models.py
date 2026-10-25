@@ -82,14 +82,14 @@ def _validate_ip(value: str) -> str:
 
 def _validate_domain(value: str) -> str:
     candidate = value.strip().rstrip(".")
-    if not candidate or not DOMAIN_RE.match(candidate):
+    if not candidate or not DOMAIN_RE.fullmatch(candidate):
         raise ValueError(f"invalid domain name: {value}")
     return candidate
 
 
 def _validate_blocklist_domain(value: str) -> str:
     candidate = value.strip().lower().rstrip(".")
-    if not candidate or not BLOCKLIST_DOMAIN_RE.match(candidate):
+    if not candidate or not BLOCKLIST_DOMAIN_RE.fullmatch(candidate):
         raise ValueError(f"invalid blocklist domain: {value}")
     return candidate
 
@@ -131,7 +131,7 @@ def _validate_http_url_list(value: list[str], *, field_name: str) -> list[str]:
 
 def _validate_interface_name(value: str) -> str:
     # IFNAMSIZ is 16 including the NUL terminator, so 15 usable characters.
-    if not re.match(r"^[A-Za-z0-9_.-]{1,15}$", value):
+    if not re.fullmatch(r"^[A-Za-z0-9_.-]{1,15}$", value):
         raise ValueError(f"invalid network interface name (1-15 chars, alphanumeric/._-): {value}")
     return value
 
@@ -309,14 +309,14 @@ class ServerConfig(StrictModel):
     @field_validator("cert_user_oid")
     @classmethod
     def validate_cert_user_oid(cls, value: str) -> str:
-        if not re.match(r"^\d+(\.\d+)+$", value):
+        if not re.fullmatch(r"^\d+(\.\d+)+$", value):
             raise ValueError("server.cert_user_oid must be a dotted OID, e.g. 2.5.4.3")
         return value
 
     @field_validator("device")
     @classmethod
     def validate_device(cls, value: str) -> str:
-        if not re.match(r"^[A-Za-z][A-Za-z0-9_.-]{0,15}$", value):
+        if not re.fullmatch(r"^[A-Za-z][A-Za-z0-9_.-]{0,15}$", value):
             raise ValueError("server.device must be a short Linux interface prefix")
         return value
 
@@ -490,7 +490,7 @@ class UpstreamProfileConfig(StrictModel):
         # -- a leading digit doesn't affect that at all, since "." and "/"
         # are excluded from every position either way. No real reason to
         # reject a name like "4laddin".
-        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$", value):
+        if not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$", value):
             raise ValueError("upstream.profiles[].name must be a short identifier")
         if profile_slug(value) == "active":
             raise ValueError("upstream profile name is reserved for the active alias")
@@ -764,7 +764,7 @@ class OidcProviderConfig(StrictModel):
     def validate_name(cls, value: str) -> str:
         # See UpstreamProfileConfig.validate_name's comment on allowing a
         # leading digit -- same identifier-safety reasoning applies here.
-        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$", value):
+        if not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$", value):
             raise ValueError("identity.oidc.providers.name must be a short identifier")
         return value
 
@@ -792,7 +792,7 @@ class GroupPolicyConfig(StrictModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
-        if not re.match(r"^[A-Za-z0-9_.@-]{1,64}$", value):
+        if not re.fullmatch(r"^[A-Za-z0-9_.@-]{1,64}$", value):
             raise ValueError("identity.group_policies.name must be ocserv group-safe")
         if value.lower() in RESERVED_GROUPS:
             raise ValueError(f"group '{value}' is reserved")

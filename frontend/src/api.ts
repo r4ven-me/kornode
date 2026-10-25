@@ -685,6 +685,8 @@ export function saveWebSettings(
     client_sync_enabled: boolean;
     session_lifetime: number;
     session_cookie_secure: boolean;
+    current_password?: string;
+    totp_code?: string;
   }
 ): Promise<{ status: string }> {
   return requestJson<{ status: string }>("/api/web-config/settings", token, {

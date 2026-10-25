@@ -350,6 +350,15 @@ export function ConfigView({
           </SettingsTabs>
         )}
 
+        {webSettingsDraft.enabled && (
+          <fieldset className="settings-grid nested-fieldset">
+            <legend>Confirm sensitive changes</legend>
+            <p className="field-help">Enabling the browser terminal, changing the admin username or trusted proxies, or turning off the secure session cookie needs your current password (and two-factor code when it is on). Other changes save without it. Nothing typed here is stored.</p>
+            <label><span>Current password to confirm sensitive changes</span><input type="password" autoComplete="current-password" value={webSettingsDraft.currentPassword} onChange={(event) => onWebSettingsDraftChange({ ...webSettingsDraft, currentPassword: event.target.value })} /></label>
+            <label><span>Two-factor code to confirm (if enabled)</span><input inputMode="numeric" autoComplete="one-time-code" value={webSettingsDraft.totpCode} onChange={(event) => onWebSettingsDraftChange({ ...webSettingsDraft, totpCode: event.target.value })} /></label>
+          </fieldset>
+        )}
+
         <div className="panel-footer config-save-footer">
           <ActionButton label="Save" icon={Save} primary busy={busy === "web-config-settings"} onClick={onSaveWebSettings} data-capability="web.settings" />
         </div>

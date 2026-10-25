@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Security hardening (review 2026-10-24)
+
+- `compose.web.yaml` / `compose.proxy.yaml` no longer default the panel password to `change-me`: `KORNODE_ADMIN_PASSWORD` is required; `.env.example` ships it empty. New admin passwords (`POST /api/auth/password`, `korctl web hash-password`) must be 12+ characters and not a placeholder; existing configs still load, and `korctl doctor` (`admin-password` check) warns about a placeholder.
+- `POST /api/web-config/settings` requires reauthentication (current password, plus TOTP when enabled) to enable the terminal, change `admin_user` or `trusted_proxies`, or turn `session_cookie_secure` off. The panel asks for it only in those cases. The panel's Web / API section asks for the current password (and two-factor code) under "Confirm sensitive changes"; nothing typed there is stored.
+- The default ocserv host now refuses users named `agent-*` / `enroll-*` in the connect script: the per-user `agent-N` files (explicit-ipv4) are global to every vhost.
+- Name validation uses `fullmatch`: a trailing newline no longer slips past usernames, group names (`agents\n` vs reserved groups), domains and policy names.
+- The OTP email/Telegram delivery test refuses (400) to reuse the stored SMTP password / bot token when the request changes the SMTP host/port or the Telegram chat; the secret must be entered explicitly.
+- Admin TOTP sign-in codes are single-use (RFC 6238 §5.2): the hub remembers the last accepted time step per process and refuses it again; a second browser signs in with the next code. Reauthentication of an existing session (password, CSRF, live session) may reuse the code, and a credential change resets the record. A restart reopens the window for at most ~90 s.
+- The hub API no longer serves `/docs`, `/redoc` and `/openapi.json`.
+
 ### Fixed (smaller data-plane gaps)
 
 - An IPv4 source (wg-easy, Amnezia) that also hands out IPv6 had its IPv6 forwarded unclassified; it is now rejected at the end of `egress_classify` (link-local and multicast untouched).

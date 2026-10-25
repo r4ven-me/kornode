@@ -40,6 +40,7 @@ from kornode.services.logs import LogRotationService, LogService
 from kornode.services.net import NetApplyError, NetService, run_reconciler
 from kornode.services.otp import OtpService
 from kornode.services.password_hash import hash_password
+from kornode.services.password_policy import validate_new_admin_password
 from kornode.services.secrets import collect_config_secrets, mask_text
 from kornode.services.server import ServerService
 from kornode.services.server_certificates import ServerCertificateService
@@ -1307,6 +1308,11 @@ def registry_maintain_command() -> None:
 @web_app.command("hash-password")
 def web_hash_password() -> None:
     password = typer.prompt("Admin password", hide_input=True, confirmation_prompt=True)
+    try:
+        validate_new_admin_password(password)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
     typer.echo(hash_password(password))
 
 

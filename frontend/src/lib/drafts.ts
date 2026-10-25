@@ -212,6 +212,9 @@ export type WebSettingsDraft = {
   clientSyncEnabled: boolean;
   sessionLifetime: number;
   sessionCookieSecure: boolean;
+  /** Reauthentication for sensitive changes; never stored or prefilled. */
+  currentPassword: string;
+  totpCode: string;
 };
 
 export function readWebSettingsDraft(config: Record<string, unknown>): WebSettingsDraft {
@@ -229,7 +232,9 @@ export function readWebSettingsDraft(config: Record<string, unknown>): WebSettin
     terminalMaxSessions: readNumber(web.terminal_max_sessions, 2),
     clientSyncEnabled: readBoolean(web.client_sync_enabled, false),
     sessionLifetime: readNumber(web.session_lifetime, 43200),
-    sessionCookieSecure: readBoolean(web.session_cookie_secure, true)
+    sessionCookieSecure: readBoolean(web.session_cookie_secure, true),
+    currentPassword: "",
+    totpCode: ""
   };
 }
 
