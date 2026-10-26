@@ -44,7 +44,8 @@
 
 - Multiple hubs / hub HA (designed not to preclude it: bundles carry a list of
   hub endpoints, but only one is used).
-- Agent-to-agent direct tunnels.
+- Agent-to-agent tunnels as the *only* path: direct peer links exist since D-101 (spec 07
+  "Peer links") as an addition to the hub path, never a replacement for the control plane.
 - Dynamic routing protocols (BGP/OSPF).
 - OTP/OIDC for users of agents with the `access` role (password and
   certificate only in v2.0).

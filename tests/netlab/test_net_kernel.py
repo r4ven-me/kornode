@@ -132,6 +132,7 @@ GOLDEN = Path(__file__).resolve().parents[1] / "golden"
         "hub_transit_set",
         "agent_gateway",
         "gateway_node",
+        "agent_peers",
     ],
 )
 def test_golden_rulesets_load_into_a_real_kernel(lab: Lab, name: str) -> None:

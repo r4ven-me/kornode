@@ -162,6 +162,8 @@ def _session_rpf(facts: NodeFacts) -> list[str]:
     source address routed back through its own device (D-47)."""
     globs = [facts.enroll.session_iface] if facts.enroll is not None else []
     globs += [item for item in facts.access_ifaces if item not in globs]
+    if facts.peer_session_iface and facts.peer_session_iface not in globs:
+        globs.append(facts.peer_session_iface)  # listener side of direct links (D-101)
     if not globs:
         return []
     lines: list[str] = []
@@ -181,6 +183,15 @@ def _session_rpf(facts: NodeFacts) -> list[str]:
         for item in globs
     ]
     return lines
+
+
+def _peer_guard(facts: NodeFacts) -> list[str]:
+    """Direct links (D-101) reach this node only: what is left after the implicit returns
+    (local, carrier) is refused, so a peer can neither use this node as an exit nor as a
+    relay to other nodes' prefixes."""
+    if not facts.peers:
+        return []
+    return [f'    iifname @peer_ifaces {REJECT} comment "peers: this node only"']
 
 
 def _access_input(facts: NodeFacts) -> list[str]:
@@ -210,6 +221,8 @@ def render_script(
 ) -> str:
     lines: list[str] = ["table inet kornode {"]
     lines += _set_decl("interlink_ifaces", "ifname")
+    if facts.peers:
+        lines += _set_decl("peer_ifaces", "ifname")
     if facts.transit_exits:
         lines += _set_decl("transit_ifaces", "ifname")
     for name, kind in (
@@ -246,6 +259,7 @@ def render_script(
         "  }",
         "  chain egress_classify {",
         *(f"    {line}" for line in IMPLICIT_RETURNS),
+        *_peer_guard(facts),
     ]
     for rule in classify:
         lines += _classify_lines(rule)
@@ -282,6 +296,20 @@ def render_script(
             f'    ct state new iifname "{_ifname(exit_.interface)}" ct mark set {_hex(exit_.mark)} '
             f"ct label set {label_bits(exit_.identity_label)}"
         )
+    from kornode.net.compile import peer_devices
+
+    interlink_exit = next((item for item in exits if item.kind == "interlink"), None)
+    if interlink_exit is not None:
+        # Peers (D-101): connections arriving over a direct link are answered through the
+        # interlink exit, whose routes (main: the peer device, metric 0) lead back.
+        for device in peer_devices(facts):
+            if device not in answered:
+                answered.add(device)
+                lines.append(
+                    f'    ct state new iifname "{_ifname(device)}" '
+                    f"ct mark set {_hex(interlink_exit.mark)} "
+                    f"ct label set {label_bits(interlink_exit.identity_label)}"
+                )
     lines += _access_input(facts)
     if facts.enroll is not None:
         lines.extend(

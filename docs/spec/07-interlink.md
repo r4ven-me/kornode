@@ -76,6 +76,33 @@ log in either). The vhost block is byte-identical to a normal hub. `egress` defa
 `clients -> any via local` has no subject) and an explicit rule with `from: [clients]` is a validation error. The client
 pool stays reserved, so addresses do not move when the flag is switched.
 
+## Peer links (D-101): direct agent<->agent links
+
+Hub-and-spoke stays the default and the control plane. An operator may add **explicit pairs**
+"A dials B" on the hub; B accepts on a second vhost of its own ocserv. Data plane only: the
+control API stays on the hub tunnel, and peer tunnels run from the cached bundle, so A<->B keeps
+flowing with the hub down.
+
+Kernel model (`kornode.net`, facts `NodeFacts.peers: PeerFact`):
+
+- **Routes.** For every prefix a peer exports (`node_prefixes[peer]`) the node installs a main-table
+  route `dev <peer device>` with proto 77 and **metric 0**; rule 90 resolves it before any exit table.
+  A dead link removes the route with its device. The hub route for the same prefix stays in the
+  `interlink` exit table (and, on a gateway agent, in main with metric 200) as the **fallback**;
+  `fallback_hub: false` removes it, so a dead direct link ends at the exit's permanent
+  `unreachable default` (fail closed).
+- **No NAT.** Peer devices join `interlink_ifaces` (both nft tables): the masquerade skips them,
+  connections arriving over a peer are answered through the `interlink` exit, and the dialed side
+  applies the strict reverse-path check to its peer session devices (`peer_session_iface`).
+- **Peer guard.** After the implicit returns (local, carrier) anything arriving from `@peer_ifaces`
+  is rejected: a peer reaches this node only, it can neither use it as an exit nor as a relay to
+  other nodes' prefixes.
+- **Carrier.** The peer's endpoint addresses are carrier exemptions like any tunnel endpoint.
+- Peer health never blocks apply-confirm (a warning, like a pre-existing upstream outage).
+
+Listener and dialer wiring (vhost, allow-list, CRL, addressing from `interlink.peer_pool`, bundle
+`peering`) are specified with the bundle in spec 05/06; the ocserv behaviour is pinned by spike S-08.
+
 ## Agent side
 
 - Exit `interlink` = `oc-hub0`; the bundle carries the full list of interlink
