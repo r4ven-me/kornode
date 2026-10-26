@@ -17,7 +17,7 @@ log-level = {{ config.server.debug_level }}
 server-cert = {{ server_cert }}
 server-key = {{ server_key }}
 ca-cert = {{ ca_cert }}
-{% if config.auth.certificate.enabled %}
+{% if cert_auth %}
 cert-user-oid = {{ config.server.cert_user_oid }}
 {% endif %}
 crl = {{ crl }}
@@ -35,9 +35,11 @@ default-group-config = {{ config.identity.default_group_config }}
 {% for group in select_groups %}
 select-group = {{ group }}
 {% endfor %}
+{% if config.server.clients %}
 select-group-by-url = {{ "true" if config.identity.select_group_by_url else "false" }}
 {% if config.identity.default_select_group %}
 default-select-group = {{ config.identity.default_select_group }}
+{% endif %}
 {% endif %}
 
 # UI/API realm label: {{ config.server.realm }}

@@ -401,9 +401,7 @@ class Registry:
             """
         ).fetchall()
         return {
-            int(row["node_id"]): row["version"]
-            for row in rows
-            if isinstance(row["version"], str)
+            int(row["node_id"]): row["version"] for row in rows if isinstance(row["version"], str)
         }
 
     def touch_node(self, node_id: int, *, seen_at: str | None = None) -> None:

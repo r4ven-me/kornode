@@ -35,6 +35,9 @@ class CamouflageSettings(BaseModel):
 
 class ServerSettingsRequest(BaseModel):
     enabled: bool = True
+    # None keeps the saved value: a client that predates the field must not turn a
+    # control-only hub back into a VPN server by omitting it.
+    clients: bool | None = None
     listen: str = "0.0.0.0"
     port: int = Field(default=443, ge=1, le=65535)
     udp_enabled: bool = True
@@ -162,7 +165,7 @@ def save_server_settings(
     request: Request,
     payload: ServerSettingsRequest,
 ) -> dict[str, object]:
-    patch = payload.model_dump(exclude={"reload"})
+    patch = payload.model_dump(exclude={"reload"}, exclude_none=True)
     was_enabled = request.app.state.config.server.enabled
     previous = running_ocserv_conf(request)
     loaded_config, written = apply_config_patch(request, {"server": patch})

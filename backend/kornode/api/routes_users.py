@@ -11,7 +11,7 @@ from kornode.config.models import AppConfig
 from kornode.services.certificates import CertificateService
 from kornode.services.command import CommandError, CommandResult
 from kornode.services.otp import OtpService
-from kornode.services.users import UserConfig, UserService
+from kornode.services.users import ClientsDisabledError, UserConfig, UserService
 
 router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -88,6 +88,8 @@ def create_user(
             payload.password,
             dry_run=payload.dry_run,
         )
+    except ClientsDisabledError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CommandError as exc:
         raise_command_http_error(exc)
     return user_command_result(

@@ -315,3 +315,16 @@ describe("web settings reauthentication", () => {
     expect(JSON.parse(init.body)).toMatchObject({ terminal_enabled: true, current_password: "secret", totp_code: "123456" });
   });
 });
+
+describe("control-only hub setting", () => {
+  it("sends the server clients flag with the other server settings", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "saved", server: {}, reload: null }), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { saveServerSettings } = await import("./api");
+    const payload = { enabled: true, clients: false } as unknown as Parameters<typeof saveServerSettings>[1];
+    await saveServerSettings("session", payload);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ enabled: true, clients: false });
+  });
+});

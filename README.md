@@ -798,6 +798,26 @@ In the panel: Network → Hub policy & sources (hub) and Nodes → a node → Eg
 [docs/sources.md](docs/sources.md): run the access server in `network_mode: host` and disable its own NAT hooks,
 kornode owns routing and NAT for the source subnet (`korctl doctor` reports foreign NAT rules as an error).
 
+### Control-only hub
+
+By default the hub is also a VPN server for people. For a hub that only manages agents, set
+`server.clients: false` (panel: Config → VPN server → "Accept VPN clients", or `KORNODE_SERVER__CLIENTS=false`):
+
+```yaml
+server:
+  enabled: true      # ocserv must run: agents connect to its interlink virtual host
+  clients: false     # the default host refuses every VPN login
+control:
+  enabled: true
+```
+
+ocserv, the interlink vhost, enrollment, the control API, interlink DNS and the egress transit for agents keep
+working exactly as before; only logins on the default host are refused (leftover accounts included). Users, Groups
+and Sessions disappear from the panel, `korctl user create` and `POST /api/users` answer `409`, and an explicit
+`egress` rule with `from: [clients]` is rejected. Give people VPN access on an agent with the `access` role instead.
+Switching the flag restarts ocserv and drops active sessions. Traffic between agents still flows through the hub;
+direct agent-to-agent tunnels are not part of 2.x.
+
 ### Firewall and NAT
 
 kornode owns only its objects: nft tables `inet kornode` and `ip kornode_nat`, `ip rule` priorities 90-199, route

@@ -36,15 +36,14 @@ BLOCKLIST_DOMAIN_RE = re.compile(
 
 _LOGGER = logging.getLogger(__name__)
 
+
 def _default_hub_rule() -> Rule:
     return Rule.model_validate({"id": "default", "from": ["clients"], "to": "any", "via": "local"})
 
 
 class StrictModel(BaseModel):
     # CLI/API errors can surface these exceptions; never include raw config values.
-    model_config = ConfigDict(
-        extra="forbid", validate_assignment=True, hide_input_in_errors=True
-    )
+    model_config = ConfigDict(extra="forbid", validate_assignment=True, hide_input_in_errors=True)
 
 
 IntervalUnit = Literal["hours", "days", "weeks", "months"]
@@ -259,6 +258,10 @@ class CamouflageConfig(StrictModel):
 
 class ServerConfig(StrictModel):
     enabled: bool = True
+    # False: a control-only hub (D-100). ocserv keeps serving the agents' virtual host and
+    # enrollment, but the default host refuses every login, so the hub is a configuration
+    # centre and relay for agents, not a VPN server for people.
+    clients: bool = True
     listen: str = "0.0.0.0"
     port: int = Field(default=443, ge=1, le=65535)
     udp_enabled: bool = True
@@ -431,11 +434,9 @@ class AuthConfig(StrictModel):
     otp: OtpAuthConfig = Field(default_factory=OtpAuthConfig)
     oidc: OidcAuthConfig = Field(default_factory=OidcAuthConfig)
 
-    @model_validator(mode="after")
-    def require_auth_method(self) -> AuthConfig:
-        if not (self.password.enabled or self.certificate.enabled or self.oidc.enabled):
-            raise ValueError("at least one of password, certificate or oidc auth must be enabled")
-        return self
+    @property
+    def has_method(self) -> bool:
+        return self.password.enabled or self.certificate.enabled or self.oidc.enabled
 
 
 class UpstreamProfileConfig(StrictModel):
@@ -1110,6 +1111,22 @@ class AppConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_hub_egress(self) -> AppConfig:
+        if self.server.clients:
+            if not self.auth.has_method:
+                raise ValueError(
+                    "at least one of password, certificate or oidc auth must be enabled"
+                )
+        elif "egress" not in self.model_fields_set:
+            # A control-only hub has no `clients` class: the default `clients -> any via
+            # local` would have no subject.
+            object.__setattr__(self, "egress", ())
+        else:
+            for index, rule in enumerate(self.egress):
+                if "clients" in rule.from_:
+                    raise ValueError(
+                        f"egress[{index}]: this hub accepts no VPN clients "
+                        "(server.clients is false): remove `clients` from `from`"
+                    )
         # Builds the policy: duplicate names and unknown source/set references raise here.
         policy = self.egress_policy()
         derived = derive_addresses(

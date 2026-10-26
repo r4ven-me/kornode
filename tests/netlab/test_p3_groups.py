@@ -103,6 +103,16 @@ def node_tmp() -> Iterator[Path]:
 
 @pytest.fixture
 def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
+    yield from _build_rendered_hub(lab, node_tmp, clients=True)
+
+
+@pytest.fixture
+def control_only_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
+    """The same hub with `server.clients: false` (D-100): ocserv serves agents only."""
+    yield from _build_rendered_hub(lab, node_tmp, clients=False)
+
+
+def _build_rendered_hub(lab: Lab, node_tmp: Path, *, clients: bool) -> Iterator[RenderedHub]:
     hub = lab.add_namespace("hub")
     inet = lab.add_namespace("inet")
     hub.run(["sysctl", "-qw", "net.ipv4.ip_forward=1"])
@@ -129,6 +139,7 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
             "control": {"enabled": True, "port": CONTROL_PORT},
             "server": {
                 "enabled": True,
+                "clients": clients,
                 "port": 443,
                 "udp_enabled": False,
                 "device": "vpns",
@@ -148,7 +159,16 @@ def rendered_hub(lab: Lab, node_tmp: Path) -> Iterator[RenderedHub]:
         },
     )
     initialize_runtime(hub, root.config_path)
-    korctl(hub, root.config_path, "user", "create", CLIENT_USER, "--password", CLIENT_PASSWORD)
+    if clients:
+        korctl(hub, root.config_path, "user", "create", CLIENT_USER, "--password", CLIENT_PASSWORD)
+    else:
+        # korctl refuses to create VPN users here; a leftover account (the hub was a VPN
+        # server before) must still be unable to log in: write it straight into ocpasswd.
+        root.secrets_dir.mkdir(parents=True, exist_ok=True)
+        hub.run(
+            ["ocpasswd", "-c", str(root.secrets_dir / "ocpasswd"), "-g", "clients", CLIENT_USER],
+            input_text=f"{CLIENT_PASSWORD}\n{CLIENT_PASSWORD}\n",
+        )
     hub.run(
         [
             sys.executable,
@@ -303,3 +323,23 @@ def test_enroll_session_reaches_only_the_control_api(rendered_hub: RenderedHub) 
         "hub lan": False,
         "internet": False,
     }
+
+
+def test_control_only_hub_refuses_every_client_but_serves_agents_and_enrollment(
+    control_only_hub: RenderedHub,
+) -> None:
+    """D-100 on a real ocserv: the default host serves nobody, the interlink vhost works."""
+    hub = control_only_hub
+    # Password (a leftover account) and certificate logins on the default host: refused.
+    assert not hub.client.connect(hub.pin, user=CLIENT_USER, password=CLIENT_PASSWORD)
+    assert hub.client.address() is None
+    assert not hub.rogue.connect(hub.pin, cert=hub.client_cert)
+    assert hub.rogue.address() is None
+    # Agents and enrollment are untouched, on the vhost.
+    assert hub.connect_interlink(hub.agent, cert=hub.agent_cert)
+    assert hub.agent.address() == f"10.99.0.{AGENT_ID}"
+    assert tcp_check(hub.agent.ns, HUB_INTERLINK_ADDR, CONTROL_PORT)
+    assert hub.connect_interlink(hub.enroll, user=ENROLL_USER, password=ENROLL_PASSWORD)
+    addr = hub.enroll.address()
+    assert addr is not None and ip_address(addr) in ip_network(ENROLL_POOL), addr
+    assert tcp_check(hub.enroll.ns, HUB_INTERLINK_ADDR, CONTROL_PORT)

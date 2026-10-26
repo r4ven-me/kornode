@@ -97,16 +97,26 @@ export function App() {
   }, [tab]);
 
   const terminalEnabled = readBoolean(readRecord(state.config?.web).terminal_enabled, false);
+  // A control-only hub (server.clients: false) has no VPN users, groups or sessions (D-100).
+  const acceptsClients = readBoolean(readRecord(state.config?.server).clients, true);
   const availableTabs = useMemo(
-    () => tabs.filter((item) => item.id !== "terminal" || terminalEnabled),
-    [terminalEnabled]
+    () =>
+      tabs.filter(
+        (item) =>
+          (item.id !== "terminal" || terminalEnabled) &&
+          (acceptsClients || !["users", "groups", "sessions"].includes(item.id))
+      ),
+    [terminalEnabled, acceptsClients]
   );
 
   useEffect(() => {
-    if (tab === "terminal" && !terminalEnabled) {
+    if (
+      (tab === "terminal" && !terminalEnabled) ||
+      (!acceptsClients && ["users", "groups", "sessions"].includes(tab))
+    ) {
       setTab("dashboard");
     }
-  }, [tab, terminalEnabled]);
+  }, [tab, terminalEnabled, acceptsClients]);
 
   if (!authToken || !authInfo) {
     return (

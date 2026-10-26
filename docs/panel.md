@@ -165,6 +165,13 @@ The agent is a separate image, `kornode-agent` (`Dockerfile.agent`), published a
 To send hub clients through the agent, give it the `gateway` role and add a rule with
 `via node:<its node ID>` in Network → Hub policy & sources → Egress rules.
 
+## Control-only hub
+
+Config → VPN server → **Accept VPN clients** off turns the hub into a control centre (D-100): ocserv keeps serving
+agents and enrollment, every VPN client login is refused, and Users, Groups and Sessions are hidden (the dashboard
+shows "VPN clients: Control-only"). Create VPN users on an agent with the `access` role (Nodes → the node → VPN access
+& users). Saving restarts ocserv, which drops active sessions.
+
 ## Dry-run
 
 The **Dry-run** switch in the top bar makes server commands, certificate actions, agent

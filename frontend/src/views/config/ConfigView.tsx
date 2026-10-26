@@ -91,6 +91,15 @@ export function ConfigView({
           </label>
         </div>
 
+        {serverSettingsDraft.enabled && (
+          <label className="switch" title="Off: this hub only serves agents and the control plane">
+            <input aria-label="Accept VPN clients" checked={serverSettingsDraft.clients} onChange={(event) => onServerSettingsDraftChange({ ...serverSettingsDraft, clients: event.target.checked })} type="checkbox" />
+            <span>Accept VPN clients</span>
+          </label>
+        )}
+        {serverSettingsDraft.enabled && !serverSettingsDraft.clients && (
+          <p className="field-help">Control-only hub: ocserv keeps serving agents (their own virtual host) and enrollment, but every VPN client login on this host is refused. Users, Groups and Sessions are hidden; create VPN users on an agent with the access role. Takes effect after saving (ocserv restarts and drops active sessions).</p>
+        )}
         {!serverSettingsDraft.enabled && <p className="config-disabled-note">Enable the VPN server to edit its dependent settings.</p>}
         {serverSettingsDraft.enabled && (
           <SettingsTabs ariaLabel="VPN server settings">

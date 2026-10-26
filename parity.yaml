@@ -97,7 +97,7 @@ capabilities:
     cli: null
     api: "POST /api/server/settings"
     ui: server.settings
-    exempt: "v1 gap: server settings form patches YAML through the API; no dedicated CLI settings command yet."
+    exempt: "v1 gap: server settings form (incl. server.clients, D-100) patches YAML through the API; no dedicated CLI settings command yet."
   - id: server.auth_settings
     service: null
     cli: null

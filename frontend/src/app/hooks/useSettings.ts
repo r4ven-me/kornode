@@ -60,6 +60,7 @@ export function useSettings(core: PanelCore) {
     const result = await runAction("server-config-settings", "Server settings saved", (token) =>
       saveServerSettings(token, {
         enabled: serverSettingsDraft.enabled,
+        clients: serverSettingsDraft.clients,
         listen: serverSettingsDraft.listen,
         port: serverSettingsDraft.port,
         udp_enabled: serverSettingsDraft.udpEnabled,

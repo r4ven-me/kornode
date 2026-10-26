@@ -45,6 +45,7 @@ class DoctorService:
             ("carrier-exclusions", self._check_carrier_exclusions),
             ("access-certificates", self._check_access_certificates),
             ("agent-versions", self._check_agent_versions),
+            ("control-only", self._check_control_only),
             ("sources", self._check_sources),
             ("admin-password", self._check_admin_password),
         )
@@ -187,6 +188,24 @@ class DoctorService:
                 False,
             )
         return CommandResult(argv, 0, "web admin password is not a known placeholder", "", False)
+
+    def _check_control_only(self) -> CommandResult:
+        """Information only (D-100): a hub with `server.clients: false` serves agents alone."""
+        argv = ("doctor", "control-only")
+        if self.config.server.clients:
+            return CommandResult(argv, 0, "hub accepts VPN clients", "", False)
+        if not self.config.control.enabled:
+            return CommandResult(
+                argv,
+                1,
+                "",
+                "control-only hub (server.clients is false) but control.enabled is false: "
+                "nothing can connect to this hub",
+                False,
+            )
+        return CommandResult(
+            argv, 0, "control-only hub: the default host refuses every VPN login", "", False
+        )
 
     def _check_agent_versions(self) -> CommandResult:
         """Spec 12 "upgrade required": an agent whose newest report names a version

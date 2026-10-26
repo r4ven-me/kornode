@@ -258,3 +258,33 @@ def test_download_key_404s_when_missing(tmp_path: Path) -> None:
     response = client.get("/api/users/alice/key", auth=("admin", "secret"))
 
     assert response.status_code == 404
+
+
+def test_control_only_hub_refuses_to_create_vpn_users(tmp_path: Path) -> None:
+    """D-100: `server.clients: false` -- people get accounts on an agent with the access role."""
+    from kornode.services.users import ClientsDisabledError
+
+    config = AppConfig.model_validate(
+        {
+            "system": {
+                "data_dir": tmp_path / "data",
+                "generated_dir": tmp_path / "generated",
+                "log_dir": tmp_path / "logs",
+                "secrets_dir": tmp_path / "secrets",
+            },
+            "web": {"admin_password": "secret"},
+            "server": {"clients": False},
+        }
+    )
+    runner = RecordingRunner()
+    with pytest.raises(ClientsDisabledError, match="accepts no VPN clients"):
+        UserService(config, runner=runner).create_user("alice", "password")
+    assert runner.calls == []
+
+    response = TestClient(create_app(config)).post(
+        "/api/users",
+        auth=("admin", "secret"),
+        json={"username": "alice", "password": "password"},
+    )
+    assert response.status_code == 409
+    assert "accepts no VPN clients" in response.json()["detail"]
