@@ -379,3 +379,34 @@ def test_the_removed_interlink_enabled_flag_is_rejected(tmp_path: Path) -> None:
         load_config(
             tmp_path / "missing.yaml", cli_overrides={"interlink": {"enabled": True}}, environ={}
         )
+
+
+def test_control_only_hub_needs_no_client_auth_and_no_clients_rule() -> None:
+    """`server.clients: false`: the default host serves nobody (ocserv stays up for agents)."""
+    no_auth = {"password": {"enabled": False}, "certificate": {"enabled": False}}
+    with pytest.raises(ValueError, match="at least one of password, certificate or oidc"):
+        AppConfig.model_validate({"auth": no_auth})
+    config = AppConfig.model_validate({"server": {"clients": False}, "auth": no_auth})
+    assert config.server.clients is False
+    # No explicit egress: the default `clients -> any via local` has no subject, so it is dropped.
+    assert config.egress == () and config.egress_policy().egress == ()
+
+    with pytest.raises(ValueError, match="accepts no VPN clients"):
+        AppConfig.model_validate(
+            {
+                "server": {"clients": False},
+                "auth": no_auth,
+                "egress": [{"from": ["clients"], "to": "any", "via": "local"}],
+            }
+        )
+    # Hub traffic keeps working without clients.
+    AppConfig.model_validate(
+        {
+            "server": {"clients": False},
+            "auth": no_auth,
+            "egress": [{"from": ["host"], "to": "any", "via": "local"}],
+        }
+    )
+    # The default stays: clients accepted, one auth method required, default egress present.
+    default = AppConfig.model_validate({})
+    assert default.server.clients is True and len(default.egress) == 1

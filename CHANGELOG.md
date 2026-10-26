@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-26
+
+### Added
+
+- **Control-only hub (D-100).** `server.clients: false` (panel: Config → VPN server → Accept VPN clients) keeps ocserv serving agents and enrollment while the default host refuses every VPN login; Users, Groups and Sessions are hidden, user creation answers 409, `korctl doctor` reports the mode. Default `true`: existing hubs are unchanged. Verified with a real ocserv in netlab (`tests/netlab/test_p3_groups.py`).
+
 ## [2.0.1] — 2026-10-25
 
 ### Fixed

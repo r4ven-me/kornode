@@ -226,6 +226,10 @@ class UserConfig(BaseModel):
         )
 
 
+class ClientsDisabledError(ValueError):
+    """The hub is control-only (`server.clients: false`): it serves no VPN users (D-100)."""
+
+
 class UserService:
     def __init__(
         self,
@@ -561,6 +565,11 @@ class UserService:
         *,
         dry_run: bool = False,
     ) -> CommandResult:
+        if not self.config.server.clients:
+            raise ClientsDisabledError(
+                "this hub accepts no VPN clients (server.clients is false); "
+                "create VPN users on an agent with the access role"
+            )
         self.validate_username(username)
         self.files.ensure_dir(self.config.system.secrets_dir, mode=0o700)
         result = self.runner.run(

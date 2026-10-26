@@ -37,6 +37,7 @@ export function readOidcDraft(identity: IdentityStatus): OidcDraft {
 
 export type ServerSettingsDraft = {
   enabled: boolean;
+  clients: boolean;
   listen: string;
   port: number;
   udpEnabled: boolean;
@@ -87,6 +88,7 @@ export function readServerSettingsDraft(config: Record<string, unknown>): Server
   const camouflage = readRecord(server.camouflage);
   return {
     enabled: readBoolean(server.enabled, true),
+    clients: readBoolean(server.clients, true),
     listen: readString(server.listen, "0.0.0.0"),
     port: readNumber(server.port, 443),
     udpEnabled: readBoolean(server.udp_enabled, true),

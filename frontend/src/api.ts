@@ -1242,6 +1242,8 @@ export function disconnectUpstreamProfile(
 
 export type ServerSettings = {
   enabled: boolean;
+  /** false: control-only hub, the default host refuses every VPN login (D-100). */
+  clients: boolean;
   listen: string;
   port: number;
   udp_enabled: boolean;

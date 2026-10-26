@@ -164,3 +164,43 @@ def test_auth_methods_settings_does_not_clobber_oidc_settings(tmp_path: Path) ->
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["auth"]["oidc"]["pam"]["service"] == "custom-ocserv"
+
+
+def test_server_settings_clients_flag_is_saved_and_never_reset_by_omission(
+    tmp_path: Path,
+) -> None:
+    """D-100: `clients: false` makes a control-only hub; a client that predates the field
+    (it omits `clients`) must not turn the hub back into a VPN server."""
+    config_path = tmp_path / "config.yaml"
+    client = _client(config_path, tmp_path)
+    auth = ("admin", "secret")
+
+    saved = client.post("/api/server/settings", auth=auth, json={"clients": False})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["server"]["clients"] is False
+    assert yaml.safe_load(config_path.read_text())["server"]["clients"] is False
+
+    omitted = client.post("/api/server/settings", auth=auth, json={"max_clients": 64})
+    assert omitted.status_code == 200
+    assert yaml.safe_load(config_path.read_text())["server"]["clients"] is False
+
+    restored = client.post("/api/server/settings", auth=auth, json={"clients": True})
+    assert restored.status_code == 200
+    assert yaml.safe_load(config_path.read_text())["server"]["clients"] is True
+
+
+def test_control_only_hub_cannot_keep_a_clients_rule(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _client(config_path, tmp_path)  # writes the base config
+    config_path.write_text(
+        config_path.read_text() + "egress:\n  - {from: [clients], to: any, via: local}\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(config_path=config_path))
+
+    response = client.post(
+        "/api/server/settings", auth=("admin", "secret"), json={"clients": False}
+    )
+
+    assert response.status_code in (400, 422), response.text
+    assert "server" not in yaml.safe_load(config_path.read_text())  # nothing was saved

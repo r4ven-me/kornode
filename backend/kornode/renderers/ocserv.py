@@ -34,7 +34,7 @@ case "$VHOST" in
       *) exit 1 ;;
     esac ;;
   *)
-    case "$GROUPNAME" in
+__DEFAULT_HOST__    case "$GROUPNAME" in
       agents | enroll) exit 1 ;;
     esac
     case "$USERNAME" in
@@ -56,6 +56,11 @@ class OcservConfigRenderer(TemplateRenderer):
             auth_lines.append("certificate")
         if config.auth.otp.enabled and config.auth.otp.ocserv_oath_auth:
             auth_lines.append(f"oath[usersfile={config.secret_path('users.oath')}]")
+        if not config.server.clients:
+            # Control-only hub (D-100): the default host serves nobody. ocserv needs one
+            # method; the plain module over the (normally empty) ocpasswd file is deny-all
+            # unless a leftover user exists, and the connect script refuses that one too.
+            auth_lines = [f"plain[passwd={config.secret_path('ocpasswd')}]"]
 
         if config.certificates.mode == "external":
             server_cert = config.certificates.server_cert
@@ -77,7 +82,8 @@ class OcservConfigRenderer(TemplateRenderer):
             "dns_tunnel_active": config.dns_tunnel_active(),
             "split_dns_domains": split_dns_domains,
             "auth_lines": auth_lines,
-            "select_groups": _select_group_lines(config),
+            "select_groups": _select_group_lines(config) if config.server.clients else [],
+            "cert_auth": config.server.clients and config.auth.certificate.enabled,
             "server_cert": server_cert,
             "server_key": server_key,
             "ca_cert": ca_cert,
@@ -100,8 +106,13 @@ class OcservConfigRenderer(TemplateRenderer):
         user_dir = config.identity.config_per_user_dir or (
             config.system.generated_dir / "config-per-user"
         )
-        guard = _INTERLINK_GUARD.replace("__USER_DIR__", shlex.quote(str(user_dir))).replace(
-            "__INTERLINK_VHOST__", shlex.quote(config.interlink.server_name)
+        refuse_default_host = (
+            "" if config.server.clients else "    # Control-only hub: no VPN clients.\n    exit 1\n"
+        )
+        guard = (
+            _INTERLINK_GUARD.replace("__USER_DIR__", shlex.quote(str(user_dir)))
+            .replace("__INTERLINK_VHOST__", shlex.quote(config.interlink.server_name))
+            .replace("__DEFAULT_HOST__", refuse_default_host)
         )
         return content.replace(marker, "\n" + guard + "korctl_bin=", 1)
 

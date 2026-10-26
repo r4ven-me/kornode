@@ -67,6 +67,15 @@ default compiled rules: `interlink → interlink via interlink` (agent ↔ agent
 `interlink → any via local` only for agents that list `node:1` in their policy
 (the hub accepts transit traffic only from nodes whose bundle declares it).
 
+### Control-only hub (D-100)
+
+`server.clients: false` keeps the hub's ocserv for the agents' virtual host and enrollment but makes the default host
+refuse every login: its only `auth` line is the plain module over the (normally empty) `ocpasswd`, group selection and
+certificate-user options are not emitted, and the connect script's default-host branch exits 1 (a leftover account cannot
+log in either). The vhost block is byte-identical to a normal hub. `egress` defaults to empty (the implicit
+`clients -> any via local` has no subject) and an explicit rule with `from: [clients]` is a validation error. The client
+pool stays reserved, so addresses do not move when the flag is switched.
+
 ## Agent side
 
 - Exit `interlink` = `oc-hub0`; the bundle carries the full list of interlink

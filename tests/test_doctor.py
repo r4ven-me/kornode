@@ -258,6 +258,7 @@ def test_run_returns_every_check(tmp_path: Path) -> None:
 
     assert set(results) == {
         "admin-password",
+        "control-only",
         "kernel-plan",
         "sysctl",
         "overlapping-subnets",
@@ -403,3 +404,18 @@ def test_sources_check_flags_foreign_nat_on_the_source_subnet(tmp_path: Path) ->
     result = service.run()["sources"]
 
     assert not result.ok and "foreign NAT" in result.stderr
+
+
+def test_control_only_check_reports_the_mode_and_a_dead_end(tmp_path: Path) -> None:
+    runner = FakeRunner({("ip",): _ok("[]"), ("nft",): _ok(), ("uname",): _ok()})
+
+    def check(**extra: object) -> object:
+        service = DoctorService(_config(tmp_path, **extra), runner=runner, net=FakeNet())
+        return service._check_control_only()
+
+    normal = check()
+    assert normal.ok and "accepts VPN clients" in normal.stdout  # type: ignore[attr-defined]
+    only = check(server={"clients": False}, control={"enabled": True})
+    assert only.ok and "refuses every VPN login" in only.stdout  # type: ignore[attr-defined]
+    dead = check(server={"clients": False}, control={"enabled": False})
+    assert not dead.ok and "nothing can connect" in dead.stderr  # type: ignore[attr-defined]

@@ -40,6 +40,8 @@ export function DashboardView({
   const serverRunning = runtimeState === "running";
   const serverStopped = runtimeState === "stopped";
   const processCount = dashboardProcessCount(state);
+  // server.clients: false is a control-only hub (D-100).
+  const controlOnly = (state.config?.server as { clients?: boolean } | undefined)?.clients === false;
   const nftFilter = state.diagnostics?.["nft filter table"];
   const nftNat = state.diagnostics?.["nft nat table"];
   const nftReady =
@@ -61,6 +63,7 @@ export function DashboardView({
         <Metric label="Firewall/NAT" value={nftReady ? "Ready" : "Check rules"} />
         <Metric label="Logs" value={state.logFiles.length.toString()} />
         <Metric label="Config" value={state.configSource?.exists ? "Persistent" : "Default"} />
+        {controlOnly && <Metric label="VPN clients" value="Control-only" />}
       </section>
       <ConfigurationPrecedencePanel />
       <div data-capability="diagnostics.interface_stats">

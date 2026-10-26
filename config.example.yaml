@@ -40,6 +40,10 @@ system:
 
 server:
   enabled: true
+  # false: a control-only hub. ocserv keeps serving the agents' virtual host and enrollment,
+  # but every VPN client login on the default host is refused; Users/Groups/Sessions disappear.
+  # An explicit `egress` must then not use `clients`. See README "Control-only hub".
+  clients: true
   listen: 0.0.0.0
   port: 443
   udp_enabled: true

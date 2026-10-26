@@ -63,9 +63,7 @@ class ReportBody(BaseModel):
 
     @field_validator("gateway_sets", "exit_sets")
     @classmethod
-    def _valid_gateway_sets(
-        cls, value: dict[str, list[str]] | None
-    ) -> dict[str, list[str]] | None:
+    def _valid_gateway_sets(cls, value: dict[str, list[str]] | None) -> dict[str, list[str]] | None:
         parse_gateway_sets(value, strict=True)
         return value
 

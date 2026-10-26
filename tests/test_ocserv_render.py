@@ -482,3 +482,71 @@ def test_ocserv_render_dedupes_split_dns_shared_between_search_and_forward(
     rendered = OcservConfigRenderer().render(config)
 
     assert rendered.count("split-dns = r4ven.lan") == 1
+
+
+def test_control_only_hub_refuses_every_client_login_but_keeps_the_agents_vhost(
+    tmp_path: Path,
+) -> None:
+    """`server.clients: false`: ocserv stays up for agents; the default host serves nobody."""
+    normal = _interlink_config(
+        tmp_path,
+        auth={"password": {"enabled": True}, "certificate": {"enabled": True}},
+    )
+    control = _interlink_config(
+        tmp_path,
+        server={"clients": False},
+        auth={"password": {"enabled": True}, "certificate": {"enabled": True}},
+    )
+    marker = "[vhost:interlink.kornode.lan]"
+
+    head, _, vhost = OcservConfigRenderer().render(control).partition(marker)
+    _, _, normal_vhost = OcservConfigRenderer().render(normal).partition(marker)
+
+    # Only a deny-all method (the plain module over the, normally empty, ocpasswd file).
+    auth_lines = re.findall(r'^auth = "(.*)"$', head, re.MULTILINE)
+    assert auth_lines == [f"plain[passwd={control.secret_path('ocpasswd')}]"]
+    assert "cert-user-oid" not in head and "select-group" not in head.replace(
+        "select-group-by-url", ""
+    )
+    # The agents' host is byte-for-byte what a normal hub renders.
+    assert vhost == normal_vhost
+    assert f"server-cert = {control.cert_path('interlink.crt')}" in vhost
+
+
+def test_control_only_connect_script_refuses_the_default_host_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    config = _interlink_config(tmp_path, server={"clients": False})
+    script = tmp_path / "connect.sh"
+    script.write_text(OcservConfigRenderer().render_connect_script(config), encoding="utf-8")
+    empty_path = tmp_path / "bin"
+    empty_path.mkdir()
+    user_dir = tmp_path / "generated" / "config-per-user"
+    user_dir.mkdir(parents=True)
+    (user_dir / "agent-3").write_text("explicit-ipv4 = 10.99.0.3\n", encoding="utf-8")
+    interlink = config.interlink.server_name
+    cases = [
+        ({"VHOST": "", "GROUPNAME": "clients", "USERNAME": "alice"}, 1),
+        ({"VHOST": "", "GROUPNAME": "", "USERNAME": "alice"}, 1),
+        ({"GROUPNAME": "", "USERNAME": "alice"}, 1),  # no VHOST at all: the default host
+        ({"VHOST": interlink, "GROUPNAME": "agents", "USERNAME": "agent-3"}, 0),
+        ({"VHOST": interlink, "GROUPNAME": "enroll", "USERNAME": "enroll-3-x"}, 0),
+        ({"VHOST": interlink, "GROUPNAME": "clients", "USERNAME": "alice"}, 1),
+    ]
+    for env, expected in cases:
+        result = subprocess.run(
+            ["/bin/sh", str(script)],
+            check=False,
+            capture_output=True,
+            env={**env, "PATH": os.fspath(empty_path)},
+            text=True,
+        )
+        assert result.returncode == expected, (env, result)
+
+
+def test_hub_that_accepts_clients_renders_as_before(tmp_path: Path) -> None:
+    """The flag defaults to true and changes nothing for existing hubs."""
+    default = _interlink_config(tmp_path)
+    assert default.server.clients is True
+    script = OcservConfigRenderer().render_connect_script(default)
+    assert "__DEFAULT_HOST__" not in script and "    exit 1\n    case" not in script
