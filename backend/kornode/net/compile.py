@@ -36,6 +36,9 @@ SUPPRESS_PRIORITY = 90
 CARRIER_PRIORITY = 95
 EXIT_PRIORITY_BASE = 100
 KILL_SWITCH_METRIC = 4096
+# A hub route for a prefix a peer also serves (D-101): worse than the direct route (metric 0),
+# so the direct link wins while it is up and the hub path takes over when it is not.
+HUB_FALLBACK_METRIC = 200
 FILTER_TABLE = ("inet", "kornode")
 NAT_TABLE = ("ip", "kornode_nat")
 FAMILIES: tuple[Family, Family] = (4, 6)
@@ -67,6 +70,27 @@ class EnrollGuard:
     port: int
     # Glob of ocserv session devices ("vpns*"): strict reverse-path check (D-47).
     session_iface: str = "vpns*"
+
+
+@dataclass(frozen=True, slots=True)
+class PeerFact:
+    """A direct link to another agent (D-101).
+
+    `interface` is the dialer's tunnel device (`oc-p<id>`) or, on the listener, the ocserv
+    session device of that peer while it is connected (None otherwise). The peer's exported
+    prefixes come from `NodeFacts.node_prefixes[node_id]`. `fallback_hub` keeps the hub route
+    for those prefixes; off means direct only (fail closed while the link is down).
+    `carrier` are the peer's endpoint addresses (never routed into a tunnel)."""
+
+    node_id: int
+    interface: str | None
+    up: bool
+    carrier: tuple[str, ...] = ()
+    fallback_hub: bool = True
+
+    @property
+    def device(self) -> str | None:
+        return self.interface if self.up and self.interface else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +139,10 @@ class NodeFacts:
     # Globs of the agent's own ocserv session devices ("vpns*", role access):
     # the same strict reverse-path check as the hub's enroll guard (D-47, D-67).
     access_ifaces: tuple[str, ...] = ()
+    # Direct links to other agents (D-101), and the glob of this node's own ocserv
+    # session devices that carry peers (strict reverse path, like access_ifaces).
+    peers: tuple[PeerFact, ...] = ()
+    peer_session_iface: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -589,6 +617,22 @@ def _from_match(source: str, policy: EgressPolicy, facts: NodeFacts) -> tuple[st
     return (f'iifname "{item.interface}"', f"{family} saddr {item.cidr}")
 
 
+def peer_devices(facts: NodeFacts) -> tuple[str, ...]:
+    """Peer tunnel/session devices that exist right now."""
+    return tuple(sorted({peer.device for peer in facts.peers if peer.device}))
+
+
+def interlink_devices(facts: NodeFacts) -> frozenset[str]:
+    """Devices whose traffic is interlink traffic: the hub tunnel/sessions and peers."""
+    return frozenset(facts.interlink_ifaces) | frozenset(peer_devices(facts))
+
+
+def _carrier_addresses(facts: NodeFacts) -> list[str]:
+    found = [address for tunnel in facts.tunnels.values() for address in tunnel.carrier]
+    found += [address for peer in facts.peers for address in peer.carrier]
+    return found
+
+
 def _sysctls(exits: tuple[Exit, ...], policy: EgressPolicy, facts: NodeFacts) -> frozenset[Sysctl]:
     items = {
         Sysctl("net.ipv4.ip_forward", "1"),
@@ -609,6 +653,7 @@ def _sysctls(exits: tuple[Exit, ...], policy: EgressPolicy, facts: NodeFacts) ->
         for source in policy.sources
         if facts.sources.get(source.name, SourceFact(False)).present
     }
+    ifaces |= set(peer_devices(facts))
     for iface in ifaces:
         items.add(Sysctl(f"net.ipv4.conf.{iface}.rp_filter", "2"))
     return frozenset(items)
@@ -619,12 +664,11 @@ def _rules(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[IpRule]:
         IpRule(priority=SUPPRESS_PRIORITY, table="main", suppress_prefixlength=0, family=family)
         for family in FAMILIES
     }
-    for tunnel in facts.tunnels.values():
-        for address in tunnel.carrier:
-            carrier_family: Family = 4 if ipaddress.ip_address(address).version == 4 else 6
-            rules.add(
-                IpRule(priority=CARRIER_PRIORITY, table="main", to=address, family=carrier_family)
-            )
+    for address in _carrier_addresses(facts):
+        carrier_family: Family = 4 if ipaddress.ip_address(address).version == 4 else 6
+        rules.add(
+            IpRule(priority=CARRIER_PRIORITY, table="main", to=address, family=carrier_family)
+        )
     for exit_ in exits:
         if exit_.has_table:
             for family in FAMILIES:
@@ -642,7 +686,32 @@ def _rules(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[IpRule]:
 
 def _routes(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[Route]:
     routes: set[Route] = set()
+    peers = {peer.node_id: peer for peer in facts.peers}
+    owner = {prefix: node for node, prefixes in facts.node_prefixes.items() for prefix in prefixes}
+
+    def via_hub_allowed(prefix: Network) -> bool:
+        peer = peers.get(owner.get(prefix, -1))
+        return peer is None or peer.fallback_hub
+
+    # Direct links (D-101): the peer's prefixes in main, preferred (metric 0); rule 90
+    # resolves them before the exit tables. Gone with the device, so a dead link falls
+    # back to the hub route below (or to the exit's unreachable default when fallback is off).
+    for peer in facts.peers:
+        if peer.device is None:
+            continue
+        for prefix in sorted(facts.node_prefixes.get(peer.node_id, ()), key=str):
+            routes.add(
+                Route(
+                    table=MAIN_TABLE,
+                    dst=str(prefix),
+                    dev=peer.device,
+                    proto=KORNODE_RTPROTO,
+                    family=4 if prefix.version == 4 else 6,
+                )
+            )
     for prefix, dev in facts.session_routes:
+        if not via_hub_allowed(prefix):
+            continue
         routes.add(
             Route(
                 table=MAIN_TABLE,
@@ -650,6 +719,7 @@ def _routes(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[Route]:
                 dev=dev,
                 proto=KORNODE_RTPROTO,
                 family=4 if prefix.version == 4 else 6,
+                metric=0 if owner.get(prefix, -1) not in peers else HUB_FALLBACK_METRIC,
             )
         )
     for exit_ in exits:
@@ -675,6 +745,8 @@ def _routes(exits: tuple[Exit, ...], facts: NodeFacts) -> frozenset[Route]:
                 if node == facts.node_id:
                     continue
                 for prefix in prefixes:
+                    if not via_hub_allowed(prefix):
+                        continue
                     routes.add(
                         Route(
                             table=exit_.table,
@@ -695,11 +767,12 @@ def _elements(
     items = {
         NftElements(family, table, name, frozenset(members)) for name, members in elements.items()
     }
-    items.add(NftElements(family, table, "interlink_ifaces", frozenset(facts.interlink_ifaces)))
+    interlink = interlink_devices(facts)
+    items.add(NftElements(family, table, "interlink_ifaces", interlink))
     nat_family, nat_table = NAT_TABLE
-    items.add(
-        NftElements(nat_family, nat_table, "interlink_ifaces", frozenset(facts.interlink_ifaces))
-    )
+    items.add(NftElements(nat_family, nat_table, "interlink_ifaces", interlink))
+    if facts.peers:
+        items.add(NftElements(family, table, "peer_ifaces", frozenset(peer_devices(facts))))
     if facts.transit_exits:
         items.add(
             NftElements(
@@ -719,18 +792,9 @@ def _elements(
         (local4 if ":" not in source.cidr else local6).add(source.cidr)
     items.add(NftElements(family, table, "local_v4", frozenset(local4)))
     items.add(NftElements(family, table, "local_v6", frozenset(local6)))
-    carrier4 = {
-        f"{address}/32"
-        for tunnel in facts.tunnels.values()
-        for address in tunnel.carrier
-        if ipaddress.ip_address(address).version == 4
-    }
-    carrier6 = {
-        f"{address}/128"
-        for tunnel in facts.tunnels.values()
-        for address in tunnel.carrier
-        if ipaddress.ip_address(address).version == 6
-    }
+    carriers = _carrier_addresses(facts)
+    carrier4 = {f"{a}/32" for a in carriers if ipaddress.ip_address(a).version == 4}
+    carrier6 = {f"{a}/128" for a in carriers if ipaddress.ip_address(a).version == 6}
     items.add(NftElements(family, table, "carrier_v4", frozenset(carrier4)))
     items.add(NftElements(family, table, "carrier_v6", frozenset(carrier6)))
     return frozenset(items)

@@ -1,7 +1,8 @@
 """Runs inside a netlab namespace (as root): compile a fixed node policy,
 converge the real kernel with kornode.net.kernel, print what happened as JSON.
 
-Usage: net_kernel_driver.py converge|plan [--corp CIDR,...]
+Usage: net_kernel_driver.py converge|plan [--corp CIDR,...] [--session CIDR=DEV]
+                            [--peer NODE=DEV [--peer-down] [--no-fallback]]  (direct link, D-101)
        net_kernel_driver.py run SOCKET_PATH   (reconciler until SIGTERM)
 """
 
@@ -14,14 +15,18 @@ import sys
 import threading
 from pathlib import Path
 
-from kornode.net.compile import NodeFacts, TunnelFact, compile_policy
+from kornode.net.compile import NodeFacts, PeerFact, TunnelFact, compile_policy
 from kornode.net.diff import diff
 from kornode.net.kernel import Kernel
 from kornode.net.model import EgressPolicy
 from kornode.net.reconciler import Reconciler, serve_control, watch_netlink
 
 
-def build(corp: list[str], session: tuple[str, str] | None = None):  # type: ignore[no-untyped-def]
+def build(  # type: ignore[no-untyped-def]
+    corp: list[str],
+    session: tuple[str, str] | None = None,
+    peer: PeerFact | None = None,
+):
     policy = EgressPolicy.model_validate(
         {
             "sets": {"corp": {"routes": corp}},
@@ -46,14 +51,19 @@ def build(corp: list[str], session: tuple[str, str] | None = None):  # type: ign
         interlink_ifaces=("ktun0",),
         local_networks=(net("192.168.3.0/24"),),
         session_routes=((net(session[0]), session[1]),) if session else (),
+        peers=(peer,) if peer else (),
         uplink="kup0",
         all_rp_filter="1",
     )
     return compile_policy(policy, facts), policy, facts
 
 
-def desired(corp: list[str], session: tuple[str, str] | None = None):  # type: ignore[no-untyped-def]
-    return build(corp, session)[0].desired
+def desired(  # type: ignore[no-untyped-def]
+    corp: list[str],
+    session: tuple[str, str] | None = None,
+    peer: PeerFact | None = None,
+):
+    return build(corp, session, peer)[0].desired
 
 
 def run(socket_path: Path) -> None:
@@ -89,7 +99,17 @@ def main() -> None:
     if "--session" in sys.argv:
         cidr, dev = sys.argv[sys.argv.index("--session") + 1].split("=")
         session = (cidr, dev)
-    want = desired(corp, session)
+    peer = None
+    if "--peer" in sys.argv:
+        node, dev = sys.argv[sys.argv.index("--peer") + 1].split("=")
+        peer = PeerFact(
+            node_id=int(node),
+            interface=dev,
+            up="--peer-down" not in sys.argv,
+            carrier=("203.0.113.77",),
+            fallback_hub="--no-fallback" not in sys.argv,
+        )
+    want = desired(corp, session, peer)
     kernel = Kernel()
     keys = [sysctl.key for sysctl in want.sysctls]
     chains = sorted({rule.chain_key for rule in want.foreign_rules})
